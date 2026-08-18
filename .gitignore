@@ -10,3 +10,4 @@ coverage/
 .astro/
 apps/web/dist/
 dist/
+.tmp/

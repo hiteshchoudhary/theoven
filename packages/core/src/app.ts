@@ -5,9 +5,15 @@ import type { CookieJarInit } from './cookies'
 import { OvenError, toOvenError } from './errors'
 import { ConsoleLogger, type Logger, type LogLevel } from './logger'
 import { appliesTo, compose, type Middleware } from './middleware'
-import { type OvenPlugin, orderPlugins, type PluginSetupContext } from './plugin'
+import {
+  type OpenApiFragment,
+  type OvenPlugin,
+  orderPlugins,
+  type PluginHost,
+  type PluginSetupContext,
+} from './plugin'
 import type { QueryOptions } from './query'
-import { Router } from './router/router'
+import { normalisePath, Router } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
 import type { TokenOptions } from './token'
 import {
@@ -101,7 +107,7 @@ interface RouteEntry {
  * run the identical pipeline, which is why the test suite never needs a real port — and why a
  * passing test means the served behaviour is genuinely covered.
  */
-export class App<Ext = unknown> {
+export class App<Ext = unknown> implements PluginHost {
   private readonly router = new Router<RouteEntry>()
   /**
    * Resolved configuration.
@@ -142,6 +148,13 @@ export class App<Ext = unknown> {
   }
 
   private readonly plugins: OvenPlugin[] = []
+  /** Every registered route with its schemas — what OpenAPI generation reads. */
+  private readonly registered: Array<{
+    method: HttpMethod
+    pattern: string
+    schema: RouteSchema | undefined
+  }> = []
+  private readonly openApi: Required<OpenApiFragment> = { securitySchemes: {}, tags: [] }
   private readonly resolved: Record<string, unknown> = {}
   /** Context subclass carrying plugin values on its prototype; built once at boot. */
   private ContextClass: new (
@@ -300,6 +313,7 @@ export class App<Ext = unknown> {
     }
 
     this.router.insert(method, path, { handler, schema })
+    this.registered.push({ method, pattern: normalisePath(path), schema })
     return this
   }
 
@@ -392,6 +406,26 @@ export class App<Ext = unknown> {
     return this.router.routes()
   }
 
+  /** Every registered route with its schemas. Read lazily; see `PluginHost`. */
+  routeTable(): ReadonlyArray<{
+    method: HttpMethod
+    pattern: string
+    schema: RouteSchema | undefined
+  }> {
+    return this.registered
+  }
+
+  /** Merges an OpenAPI fragment contributed by a plugin. */
+  contributeOpenApi(fragment: OpenApiFragment): void {
+    Object.assign(this.openApi.securitySchemes, fragment.securitySchemes ?? {})
+    if (fragment.tags) this.openApi.tags.push(...fragment.tags)
+  }
+
+  /** Everything plugins have contributed to the OpenAPI document. */
+  openApiFragments(): Required<OpenApiFragment> {
+    return this.openApi
+  }
+
   get logger(): Logger {
     return this.baseLogger
   }
@@ -430,6 +464,7 @@ export class App<Ext = unknown> {
           this.route(method, path, handler as Handler<Ext>)
         },
         development: this.settings.development,
+        app: this,
       }
 
       this.resolved[plugin.name] = await plugin.setup(setup)

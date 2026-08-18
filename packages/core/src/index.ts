@@ -39,6 +39,24 @@ export {
   UnsupportedMediaType,
 } from './errors'
 export {
+  type DiscoveredMiddleware,
+  type DiscoveredRoute,
+  type Discovery,
+  defineRoute,
+  fileToRoute,
+  generateManifest,
+  type LoadOptions,
+  loadRoutes,
+  type MiddlewareModule,
+  middlewarePrefix,
+  type RouteDefinition,
+  RouteFileError,
+  type RouteModule,
+  readRouteModule,
+  scanRoutes,
+  segmentToPattern,
+} from './file-routes'
+export {
   ConsoleLogger,
   type LogFields,
   type Logger,
@@ -62,7 +80,24 @@ export {
   type SecurityHeadersOptions,
   securityHeaders,
 } from './middleware'
-export { type OvenPlugin, orderPlugins, type PluginSetupContext } from './plugin'
+export {
+  docsHtml,
+  generateOpenApi,
+  type OpenApiInfo,
+  type OpenApiOptions,
+  type OpenApiService,
+  openapi,
+  pathParameterNames,
+  type RouteInfo,
+  toOpenApiPath,
+} from './openapi'
+export {
+  type OpenApiFragment,
+  type OvenPlugin,
+  orderPlugins,
+  type PluginHost,
+  type PluginSetupContext,
+} from './plugin'
 export { type ParsedQuery, parseQuery, type QueryOptions, type QueryValue } from './query'
 export { toResponse } from './response'
 export { normalisePath, RouteConflictError, Router } from './router/router'

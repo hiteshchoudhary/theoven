@@ -1,11 +1,14 @@
 # Oven — Task Tracker
 
-**Current state:** Phases 1.1 through 1.6 done — router, server, context, errors, logger, response
-coercion, graceful shutdown, the always-on batteries, middleware and the plugin system.
-**553 tests green**, typecheck and lint clean. Benchmarked against
-Hono, Elysia, Fastify and Express at both dispatch and socket level. Docs site scaffolded and
-building (11 pages). GitHub repo live, `@theoven` npm org claimed.
-**Next task:** Phase 1.7 — errors (mostly landed in 1.2; remaining work is redaction and the `onError` surface), then 1.8 file-based routing.
+**Current state:** **Phase 1 complete.** Router, server, context, errors, logger, response
+coercion, graceful shutdown, the always-on batteries, middleware, plugins, validation,
+file-based routing and OpenAPI. **668 tests green**, typecheck and lint clean.
+
+Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
+Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
+landing page live at theoven.pages.dev; GitHub repo live; `@theoven` npm org claimed.
+**Next task:** Phase 4 — the CLI (`bun create oven`, `oven dev`, `oven build`), which is where
+hot reload and `oven openapi` land. Then Phase 2, the auth and database modules.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -260,22 +263,48 @@ guessing adds risk without adding capability.
 - [ ] Global `onError` override
 - [ ] Tests, including a redaction test for tokens/passwords/cookies in error output
 
-### 1.8 File-based routing
-- [ ] Directory scanner → route table (`[id]`, `[...path]`, `index`, `.get`/`.post`/…)
-- [ ] Route module contract: `default` + `params`/`query`/`body`/`response`/`auth`/`summary`/`tags`
-- [ ] `_middleware.ts` cascade
-- [ ] Dev hot reload on add/change/delete
-- [ ] Build-time route manifest for prod (no filesystem scan at boot)
-- [ ] Actionable errors for malformed route files (name the file and the mistake)
-- [ ] Tests
+### 1.8 File-based routing ✅
 
-### 1.9 OpenAPI + docs UI
-- [ ] OpenAPI 3.1 generated from the route table + schemas (`z.toJSONSchema`)
-- [ ] Spec at `/openapi.json`, Scalar UI at `/docs`
-- [ ] File-upload routes documented correctly as `multipart/form-data`
-- [ ] Security schemes contributed by the auth plugin
-- [ ] `oven openapi` CLI command for client codegen
-- [ ] Tests validating output against the OpenAPI meta-schema
+`packages/core/src/file-routes.ts` — 58 tests.
+
+- [x] Directory scanner → route table: `[id]`, `[...path]`, `index`, `.get`/`.post`/…
+- [x] Route module contract: `default` handler plus `params`/`query`/`body`/`headers`/`response`/
+      `summary`/`description`/`tags` — the same keys a programmatic route takes
+- [x] `_middleware.ts` cascade, outermost first, respecting segment boundaries
+- [x] Underscore-prefixed files and `*.test.ts` are never routes, so helpers and tests can sit
+      beside the routes they belong to
+- [x] Deterministic ordering — a route conflict must not depend on filesystem walk order
+- [x] Errors name the file and the fix: a missing method, an unknown method, a mistyped
+      catch-all (`[..path]`), an unmatched bracket, a non-function default export
+- [x] Build-time manifest with static imports (`generateManifest`), so production neither scans
+      the filesystem at boot nor hides route modules from the bundler
+- [ ] Dev hot reload — deferred to `oven dev` in Phase 4, where the process supervisor lives.
+      `loadRoutes` already accepts a `cacheBust` option for it
+
+### 1.9 OpenAPI + docs UI ✅
+
+`packages/core/src/openapi.ts` — 57 tests, including validation against a real parser.
+
+- [x] OpenAPI 3.1 generated from the route table and schemas via `z.toJSONSchema`
+- [x] Served at `/openapi.json`, Scalar UI at `/docs`, both configurable and both excluded from
+      the document they describe
+- [x] File uploads documented as `multipart/form-data`, detected by `format: 'binary'`
+- [x] `422` documented automatically for any route that validates input
+- [x] Security schemes contributed by plugins through `PluginHost.contributeOpenApi()` — the
+      mechanism the auth module will use in Phase 2
+- [x] Non-Zod schemas documented permissively with a warning naming the vendor, rather than
+      wrongly or not at all
+- [x] **Generated documents validated by `@readme/openapi-parser` in the test suite**
+- [ ] `oven openapi` CLI command — Phase 4
+
+**Two bugs the real parser caught that structural tests missed:**
+
+1. Any route with a path parameter and **no `params` schema** produced `{id}` in the URL
+   template with no matching parameter object — invalid OpenAPI, and the common case. Path
+   parameters are now derived from the pattern.
+2. A document with no paths is rejected by strict validators. The 3.1 spec permits an empty
+   `paths` object, so rather than fake compliance the generator warns — a zero-route document
+   almost always means the plugin was installed before any routes, or `exclude` over-matched.
 
 ---
 

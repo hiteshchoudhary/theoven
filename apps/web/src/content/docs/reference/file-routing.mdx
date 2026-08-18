@@ -1,0 +1,125 @@
+---
+title: File-based routing
+description: The filesystem is the route table.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```
+src/routes/index.get.ts             GET   /
+src/routes/users/index.get.ts       GET   /users
+src/routes/users/index.post.ts      POST  /users
+src/routes/users/[id].get.ts        GET   /users/:id
+src/routes/users/[id].patch.ts      PATCH /users/:id
+src/routes/files/[...path].get.ts   GET   /files/*path
+src/routes/admin/_middleware.ts     middleware for /admin and below
+```
+
+```ts title="src/index.ts"
+import { createApp, loadRoutes } from '@theoven/core'
+
+const app = createApp()
+await loadRoutes(app, `${import.meta.dir}/routes`)
+await app.listen()
+```
+
+## Conventions
+
+| Filename | Meaning |
+| --- | --- |
+| `name.get.ts` | `GET /name` |
+| `index.get.ts` | `GET` for the containing directory |
+| `[id].get.ts` | a path parameter, `:id` |
+| `[...path].get.ts` | a catch-all, `*path` |
+| `_middleware.ts` | middleware for this directory and below |
+| `_anything.ts` | private — never a route |
+| `*.test.ts` | ignored, so tests can sit beside routes |
+
+The method lives in the filename rather than in named exports, so a route's method is visible in
+a directory listing and in `git log --stat`. One file is one endpoint, and grepping for
+`users/[id].patch` finds it.
+
+## A route file
+
+```ts title="src/routes/users/[id].patch.ts"
+import { defineRoute, NotFound } from '@theoven/core'
+import { z } from 'zod'
+
+export default defineRoute(
+  {
+    summary: 'Update a user',
+    tags: ['users'],
+    params: z.object({ id: z.uuid() }),
+    body: z.object({ name: z.string().min(1) }),
+    response: { 200: UserSchema },
+  },
+  async (ctx) => {
+    // Both are typed from the schemas above.
+    const user = await db.user.update(ctx.params.id, ctx.body)
+    if (!user) throw new NotFound()
+    return user
+  },
+)
+```
+
+Those schemas drive validation, the handler's types, and the
+[generated OpenAPI document](/docs/reference/openapi/) — one declaration, three jobs.
+
+<Aside type="caution" title="Why `defineRoute` and not separate exports">
+  It would read more nicely to write `export const body = ...` beside a separate
+  `export default (ctx) => ...`. TypeScript cannot connect those: nothing relates one module
+  export to another, so `ctx` would be untyped and the inference that makes schemas worth
+  writing would stop at the file boundary.
+
+  Pairing them in one call is what keeps it. A route with no schemas needs none of this —
+  `export default () => 'pong'` is still a complete route file.
+</Aside>
+
+## Middleware
+
+A `_middleware.ts` applies to its directory and everything beneath it:
+
+```ts title="src/routes/admin/_middleware.ts"
+export default async (ctx, next) => {
+  if (!ctx.token) throw new Unauthorized()
+  return next()
+}
+```
+
+Outermost first: a root `_middleware.ts` wraps everything, and `admin/_middleware.ts` wraps
+`/admin` and below. Prefixes respect segment boundaries, so `/admin` never matches
+`/administrators`.
+
+## Errors name the file
+
+A convention only helps if breaking it says so clearly:
+
+```
+users.ts: route files must name their method, e.g. "users.get.ts".
+          Prefix the file with "_" if it is not a route.
+
+[..path].get.ts: "[..path]" looks like a mistyped catch-all.
+                 Write it as "[...path]".
+
+users.get.ts: the default export is string, not a function.
+              Export the handler itself, not the result of calling it.
+```
+
+<Aside type="note" title="Scanning is deterministic">
+  Files are sorted before registration, so two machines produce the same route table. A route
+  conflict that only reproduces on a colleague's laptop is a miserable bug to chase.
+</Aside>
+
+## Production builds
+
+`oven build` writes a manifest with static imports rather than scanning at boot:
+
+```ts title=".oven/routes.ts (generated)"
+import * as r0 from './routes/index.get.ts'
+import * as r1 from './routes/users/[id].get.ts'
+
+export function registerRoutes(app: App): void { /* ... */ }
+```
+
+Two reasons. Production should not walk the filesystem on every cold start, and a bundler can
+only tree-shake route modules it can see imported by name.

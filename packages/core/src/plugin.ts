@@ -1,4 +1,7 @@
 import type { Context } from './context'
+import type { Logger } from './logger'
+import type { HttpMethod } from './router/types'
+import type { RouteSchema } from './validation'
 
 /**
  * A plugin: the single extension point for everything Oven does not ship in core.
@@ -45,6 +48,37 @@ export interface OvenPlugin<Name extends string = string, Value = unknown> {
   onShutdown?(value: Value): unknown
 }
 
+/** OpenAPI pieces a plugin can contribute, such as the auth module's security schemes. */
+export interface OpenApiFragment {
+  securitySchemes?: Record<string, unknown>
+  tags?: Array<{ name: string; description?: string }>
+}
+
+/**
+ * The parts of the app a plugin may inspect.
+ *
+ * Deliberately narrow. A plugin handed the whole `App` could register routes after boot or
+ * mutate settings mid-flight; this exposes only what a plugin has a legitimate reason to reach.
+ */
+export interface PluginHost {
+  /**
+   * Every registered route with its schemas.
+   *
+   * Call this lazily — from inside a request handler rather than during `setup()` — because
+   * plugins registered after this one are still adding routes while setup runs.
+   */
+  routeTable(): ReadonlyArray<{
+    method: HttpMethod
+    pattern: string
+    schema: RouteSchema | undefined
+  }>
+  /** Contribute OpenAPI pieces, merged into the generated document. */
+  contributeOpenApi(fragment: OpenApiFragment): void
+  /** Everything contributed so far. */
+  openApiFragments(): Required<OpenApiFragment>
+  readonly logger: Logger
+}
+
 /** What a plugin is handed during `setup()`. */
 export interface PluginSetupContext {
   /** Values from plugins this one declared a dependency on, keyed by plugin name. */
@@ -53,6 +87,8 @@ export interface PluginSetupContext {
   route(method: string, path: string, handler: (ctx: Context) => unknown): void
   /** True outside production, so plugins can pick safe-by-default behaviour. */
   development: boolean
+  /** The app, for plugins that must inspect it — the OpenAPI generator reads the route table. */
+  app: PluginHost
 }
 
 /**
