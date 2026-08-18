@@ -4,6 +4,7 @@
   "type": "module",
   "workspaces": [
     "packages/*",
+    "apps/*",
     "examples/*"
   ],
   "scripts": {
@@ -19,7 +20,8 @@
     "docs:build": "bun run --cwd apps/web build",
     "docs:preview": "bun run --cwd apps/web preview",
     "site:build": "bash scripts/build-site.sh",
-    "site:preview": "bun x serve dist"
+    "site:preview": "bun x serve dist",
+    "check:links": "bun scripts/check-links.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",

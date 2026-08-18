@@ -26,6 +26,10 @@ export default defineConfig({
       // FastAPI's docs win by being a guided path, not an API dump. The sidebar follows that:
       // learn it, then look things up.
       sidebar: [
+        // Starlight prefixes `base` onto sidebar links, so '/' resolves to '/docs/' — the docs
+        // root. That prefixing is exactly what we want here, and exactly what made a link back
+        // to the *site* root impossible (see src/components/SiteTitle.astro).
+        { label: 'Overview', link: '/' },
         { label: 'Start here', items: [{ autogenerate: { directory: 'start' } }] },
         {
           label: 'Tutorial',

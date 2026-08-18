@@ -32,6 +32,9 @@ cp -R apps/landing/. "$OUT/"
 mkdir -p "$OUT/docs"
 cp -R apps/web/dist/. "$OUT/docs/"
 
+echo "==> Checking internal links"
+bun scripts/check-links.mjs "$OUT"
+
 echo "==> Site assembled"
 find "$OUT" -maxdepth 2 -type d | sed "s|$OUT|  .|" | sort
 echo

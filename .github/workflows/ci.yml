@@ -20,3 +20,5 @@ jobs:
         run: bun run typecheck
       - name: Test
         run: bun test
+      - name: Build site
+        run: bash scripts/build-site.sh

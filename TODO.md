@@ -303,6 +303,9 @@ Each item below must work with **zero configuration and zero registration**, and
 - [x] Pages deploy green at theoven.pages.dev
 - [ ] Update the Pages **Build output directory** from `apps/web/dist` to `dist` — the build
       now assembles landing + docs together
+- [x] Internal link checking wired into `scripts/build-site.sh` and CI. Mounting the docs under
+      `/docs` produced three separate classes of broken link that all passed review; the crawl
+      catches every one and fails the build
 - [ ] Point theoven.app at the Pages project
 - [ ] Move the deploy to GitHub Actions + Wrangler so the build config lives in the repo
       rather than depending on the `SKIP_DEPENDENCY_INSTALL` dashboard setting
