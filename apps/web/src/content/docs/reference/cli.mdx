@@ -1,0 +1,134 @@
+---
+title: CLI
+description: Scaffold, run, build and inspect Oven apps.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```bash
+oven create my-app     # scaffold a project
+oven dev               # run with a watcher
+oven build             # bundle and write a route manifest
+oven start             # run the build
+oven routes            # print the route table
+oven openapi           # emit the OpenAPI document
+oven doctor            # check the project for common problems
+```
+
+## `oven create`
+
+```bash
+oven create my-app --template api
+```
+
+Interactive on a TTY, flag-driven otherwise — a scaffolder that prompts inside CI hangs forever,
+which is a bad way to find out a pipeline is misconfigured. Pass `--yes` to skip prompts.
+
+| Template | Contents |
+| --- | --- |
+| `minimal` | one route, nothing else |
+| `api` | a small REST resource with validation and OpenAPI |
+
+It refuses to write into a non-empty directory. A directory holding only `.git` is fine, since
+`git init` comes first for a lot of people.
+
+## `oven dev`
+
+```bash
+oven dev --port 4000
+```
+
+Runs the entry under a watcher. Restarts on change rather than patching modules in place:
+in-place reloading leaves a server bound to the port and plugin state half-initialised from the
+previous version, and a clean restart takes single-digit milliseconds in Bun. The correctness is
+worth more than the milliseconds.
+
+Signals are forwarded, so Ctrl-C reaches the app and its graceful shutdown actually runs.
+
+## `oven build`
+
+```bash
+oven build --outdir dist
+```
+
+Two steps, in this order:
+
+1. **Write a route manifest** — `.oven/routes.ts`, with a static import per route file.
+2. **Bundle** with `Bun.build`, targeting Bun.
+
+The order matters: the bundler can only include route modules it can see imported by name.
+
+<Aside type="note" title="How the bundle finds its routes">
+  A bundle has no `src/routes` directory — `import.meta.dir` points at `dist/`. Rather than make
+  every app write `if (production)` around its route loading, the build generates an entry that
+  installs the manifest before your app module runs, and `loadRoutes` uses it instead of touching
+  the filesystem.
+
+  Your code is identical in development and production, which is the only way the two stay in
+  agreement.
+</Aside>
+
+## `oven routes` and `oven openapi`
+
+```bash
+oven routes
+oven openapi > openapi.json
+oven openapi --out openapi.json --title "My API" --api-version 1.0.0
+```
+
+Both import the **app module** — `src/app.ts` — not the entry. That is why the scaffold splits
+them: `app.ts` builds and exports the app, `index.ts` calls `listen()`. If inspection imported
+the entry, asking for a route table would bind a port.
+
+With no `--out`, `oven openapi` writes only JSON to stdout, so it can be piped straight into a
+client generator.
+
+## `oven doctor`
+
+```bash
+oven doctor
+```
+
+```
+✓ Bun version  1.2.23
+✓ Entry        src/index.ts
+✓ App module   src/app.ts
+✓ Routes       src/routes
+! Environment  .env.example present, .env missing
+  Copy it: cp .env.example .env
+✓ Port         3000 is free
+```
+
+Every check that is not `ok` says what to do about it. A diagnostic that only reports a problem
+has done half the job.
+
+## Typed environment variables
+
+Not a command, but the same class of problem — catching configuration mistakes at boot rather
+than in production:
+
+```ts title="src/env.ts"
+import { defineEnv } from '@theoven/core'
+import { z } from 'zod'
+
+export const env = defineEnv(
+  z.object({
+    DATABASE_URL: z.url(),
+    PORT: z.coerce.number().default(3000),
+    STRIPE_KEY: z.string().startsWith('sk_'),
+  }),
+)
+
+env.PORT  // number
+```
+
+A missing `DATABASE_URL` otherwise surfaces forty minutes into production as
+`connect ECONNREFUSED undefined:undefined`, from a stack trace pointing at a connection pool
+rather than at the config. This refuses to start instead, and lists **every** problem at once —
+fixing environment configuration one variable per restart is a genuinely awful way to spend
+twenty minutes.
+
+## Not built yet
+
+`oven db` and `oven worker` need `@theoven/db` and `@theoven/queue`. They report that rather
+than looking like a typo you made.

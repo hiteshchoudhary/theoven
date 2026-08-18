@@ -4,15 +4,18 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { type App, type AppOptions, createApp } from './app'
 import {
+  clearRouteManifest,
   defineRoute,
   fileToRoute,
   generateManifest,
+  hasRouteManifest,
   loadRoutes,
   middlewarePrefix,
   RouteFileError,
   readRouteModule,
   scanRoutes,
   segmentToPattern,
+  setRouteManifest,
 } from './file-routes'
 import { silentLogger } from './logger'
 
@@ -487,5 +490,68 @@ describe('RouteFileError', () => {
   test('is a real Error', () => {
     expect(new RouteFileError('x')).toBeInstanceOf(Error)
     expect(new RouteFileError('x').name).toBe('RouteFileError')
+  })
+})
+
+/**
+ * The seam that makes a production bundle work.
+ *
+ * A bundle has no `src/routes` directory to walk — `import.meta.dir` points at `dist/`, so
+ * `loadRoutes` would look for `dist/routes` and fail. `oven build` installs a manifest of static
+ * imports instead, and the app's own code stays identical in development and production.
+ *
+ * This was found by running a built scaffold, not by a test: the build generated a manifest that
+ * nothing imported.
+ */
+describe('route manifest', () => {
+  afterEach(() => {
+    clearRouteManifest()
+  })
+
+  test('none is installed by default', () => {
+    expect(hasRouteManifest()).toBe(false)
+  })
+
+  test('an installed manifest replaces the filesystem scan', async () => {
+    const app = make()
+    setRouteManifest((target) => {
+      target.get('/from-manifest', () => 'ok')
+    })
+
+    // A directory that does not exist: if the scan ran, this would throw.
+    await loadRoutes(app, '/nonexistent/routes')
+
+    expect(await (await send(app, '/from-manifest')).text()).toBe('ok')
+  })
+
+  test('the manifest reports what it registered', async () => {
+    const app = make()
+    setRouteManifest((target) => {
+      target.get('/a', () => 'a')
+      target.post('/b', () => 'b')
+    })
+
+    const discovery = await loadRoutes(app, '/nonexistent')
+    expect(discovery.routes.map((route) => route.pattern).sort()).toEqual(['/a', '/b'])
+  })
+
+  test('ignoreManifest forces a real scan', async () => {
+    const dir = await tree({ 'scanned.get.ts': 'export default () => "scanned"' })
+    const app = make()
+    setRouteManifest((target) => {
+      target.get('/from-manifest', () => 'manifest')
+    })
+
+    await loadRoutes(app, dir, { ignoreManifest: true })
+
+    expect(await (await send(app, '/scanned')).text()).toBe('scanned')
+    expect((await send(app, '/from-manifest')).status).toBe(404)
+  })
+
+  test('clearing it restores scanning', async () => {
+    setRouteManifest(() => {})
+    expect(hasRouteManifest()).toBe(true)
+    clearRouteManifest()
+    expect(hasRouteManifest()).toBe(false)
   })
 })

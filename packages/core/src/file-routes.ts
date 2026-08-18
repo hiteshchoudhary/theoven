@@ -327,6 +327,34 @@ export function readRouteModule(
 export interface LoadOptions {
   /** Appended to each import specifier to defeat the module cache during hot reload. */
   cacheBust?: string
+  /** Skip the prebuilt manifest even when one is registered. Used by tests. */
+  ignoreManifest?: boolean
+}
+
+/**
+ * A prebuilt route registrar, installed by the bundled entry `oven build` generates.
+ *
+ * The problem this solves: a bundle has no `src/routes` directory to walk, so `loadRoutes`
+ * would look for one relative to `dist/` and fail. Rather than make every app write
+ * `if (production)` around its route loading, the build installs the manifest here and
+ * `loadRoutes` uses it instead of touching the filesystem. The app's own code is identical in
+ * development and production, which is the only way the two stay in agreement.
+ */
+let manifest: ((app: App) => void) | undefined
+
+/** Called by the generated entry before the app module is imported. */
+export function setRouteManifest(register: (app: App) => void): void {
+  manifest = register
+}
+
+/** Whether a prebuilt manifest is installed. */
+export function hasRouteManifest(): boolean {
+  return manifest !== undefined
+}
+
+/** Clears the manifest. Tests use this; nothing else should need it. */
+export function clearRouteManifest(): void {
+  manifest = undefined
 }
 
 /**
@@ -340,6 +368,16 @@ export async function loadRoutes(
   dir: string,
   options: LoadOptions = {},
 ): Promise<Discovery> {
+  // In a production bundle there is no routes directory to walk. The generated entry has
+  // already installed a manifest of static imports, so use that and skip the filesystem.
+  if (manifest && !options.ignoreManifest) {
+    manifest(app)
+    return {
+      routes: app.routes().map((route) => ({ ...route, file: '<manifest>' })),
+      middleware: [],
+    }
+  }
+
   /**
    * A schema's type is only known inside the route file, where the user's own handler signature
    * is checked against it. By the time it reaches here it is a runtime value, so the framework

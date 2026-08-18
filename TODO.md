@@ -1,14 +1,13 @@
 # Oven — Task Tracker
 
-**Current state:** **Phase 1 complete.** Router, server, context, errors, logger, response
+**Current state:** **Phases 1 and 4 complete.** Router, server, context, errors, logger, response
 coercion, graceful shutdown, the always-on batteries, middleware, plugins, validation,
-file-based routing and OpenAPI. **668 tests green**, typecheck and lint clean.
+file-based routing, OpenAPI, and the CLI. **762 tests green**, typecheck and lint clean.
 
 Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
 Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
 landing page live at theoven.pages.dev; GitHub repo live; `@theoven` npm org claimed.
-**Next task:** Phase 4 — the CLI (`bun create oven`, `oven dev`, `oven build`), which is where
-hot reload and `oven openapi` land. Then Phase 2, the auth and database modules.
+**Next task:** Phase 2 — `@theoven/auth` (better-auth) and `@theoven/db` (drizzle).
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -370,20 +369,41 @@ guessing adds risk without adding capability.
 
 ---
 
-## Phase 4 — CLI & DX (`@theoven/cli`)
+## Phase 4 — CLI & DX (`@theoven/cli`) ✅
 
-- [ ] `bun create oven <name>` — interactive scaffold (module + db picker)
-- [ ] Templates: minimal, api, full-stack
-- [ ] `oven dev` — hot reload, pretty logs, route table on boot
-- [ ] `oven build` — bundle + route manifest + tree-shake unused plugins
-- [ ] `oven start` — production server
-- [ ] `oven routes` — print the route table
-- [ ] `oven db <cmd>` — drizzle-kit passthrough
-- [ ] `oven worker`, `oven openapi`
-- [ ] `oven doctor` — validate config + env, check service connectivity
-- [ ] Typed env loading + validation at boot, failing fast with a readable error
+`packages/cli/` — 68 tests, plus a clean scaffold-to-running-build check.
 
----
+- [x] `oven create <name>` — interactive on a TTY, flag-driven otherwise, so it cannot hang in
+      CI. Refuses a non-empty directory; tolerates one holding only `.git`
+- [x] Templates: `minimal` and `api`. Held as strings rather than files, so a published package
+      does not ship scaffolding that type checkers and linters try to compile
+- [x] `oven dev` — watcher-based restart with signal forwarding, so Ctrl-C reaches the app and
+      graceful shutdown actually runs
+- [x] `oven build` — route manifest plus `Bun.build`, in that order
+- [x] `oven start` — runs the build, or the source with a note when there is no build
+- [x] `oven routes` — prints the route table
+- [x] `oven openapi` — stdout by default so it pipes into a client generator; `--out` writes a file
+- [x] `oven doctor` — Bun version, entry, app module, routes, env files, port. Every non-ok
+      check says what to do about it
+- [x] Typed env loading via `defineEnv` in core, reporting every problem at once
+- [x] `oven db` / `oven worker` report that they need an unbuilt module, rather than looking
+      like a typo the user made
+- [ ] `bun create oven` — needs a published `create-oven` package; Phase 5, at release
+
+**Two design decisions worth recording:**
+
+1. **`app.ts` and `index.ts` are separate in the scaffold.** `app.ts` builds and exports the app;
+   `index.ts` calls `listen()`. `oven routes` and `oven openapi` import the former — if they
+   imported the entry, asking for a route table would bind a port.
+2. **`oven dev` restarts rather than hot-patching.** In-place module reloading leaves a server
+   bound to the port and plugin state half-initialised. A clean restart takes single-digit
+   milliseconds in Bun, and correctness is worth more than the milliseconds.
+
+**A bug found by running the output, not by a test:** `oven build` wrote a route manifest that
+nothing imported, so the bundle still tried to scan `dist/routes` and died with `ENOENT`. The
+build now generates an entry that installs the manifest before the app module runs, and
+`loadRoutes` uses it instead of the filesystem — which keeps the app's own code identical in
+development and production. Covered by tests now.
 
 ## Phase 5 — Docs & launch (`apps/web`)
 

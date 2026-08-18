@@ -22,6 +22,7 @@ export {
 } from './body'
 export { Context, type ContextInit } from './context'
 export { type CookieJarInit, type CookieOptions, Cookies } from './cookies'
+export { defineEnv, EnvError, type EnvOptions } from './env'
 export {
   BadRequest,
   Conflict,
@@ -55,6 +56,7 @@ export {
   readRouteModule,
   scanRoutes,
   segmentToPattern,
+  setRouteManifest,
 } from './file-routes'
 export {
   ConsoleLogger,
