@@ -296,7 +296,11 @@ Each item below must work with **zero configuration and zero registration**, and
 
 - [x] Astro + Starlight scaffolded in `apps/web`, builds to `apps/web/dist` (11 pages,
       Pagefind search, sitemap, `_headers` for caching + security)
-- [ ] Connect the repo to Cloudflare Pages and deploy to theoven.app
+- [~] Cloudflare Pages: build fixed via `scripts/cloudflare-build.sh`. Pages sniffs lockfiles
+      and looks for `bun.lockb` (Bun's pre-1.2 binary format); we ship `bun.lock` (text), so it
+      fell through to npm, which cannot parse `workspace:*`. Set `SKIP_DEPENDENCY_INSTALL=1`
+      and drive Bun ourselves
+- [ ] Confirm the Pages deploy is green, then point theoven.app at it
 - [x] Landing page: hero, config pitch, always-on batteries grid, comparison table
 - [ ] **"Batteries included" page** — the always-on table from `CLAUDE.md` §2b as a headline feature
 - [~] Tutorial, FastAPI-style and progressive. Written: first route, validation (marked
