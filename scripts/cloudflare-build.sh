@@ -17,7 +17,7 @@
 #
 # Pages settings that go with this file:
 #   Build command:           bash scripts/cloudflare-build.sh
-#   Build output directory:  apps/web/dist
+#   Build output directory:  dist
 #   Root directory:          (empty — repo root)
 #   Environment variables:   SKIP_DEPENDENCY_INSTALL=1, BUN_VERSION=1.2.23
 
@@ -37,7 +37,7 @@ echo "==> Bun $(bun --version)"
 echo "==> Installing workspace dependencies"
 bun install --frozen-lockfile
 
-echo "==> Building the docs site"
-bun run docs:build
+echo "==> Building the site (landing page + docs)"
+bash scripts/build-site.sh
 
-echo "==> Done. Output is in apps/web/dist"
+echo "==> Done. Output is in dist/"

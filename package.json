@@ -4,7 +4,6 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*",
     "examples/*"
   ],
   "scripts": {
@@ -18,7 +17,9 @@
     "changeset": "changeset",
     "release": "changeset publish",
     "docs:build": "bun run --cwd apps/web build",
-    "docs:preview": "bun run --cwd apps/web preview"
+    "docs:preview": "bun run --cwd apps/web preview",
+    "site:build": "bash scripts/build-site.sh",
+    "site:preview": "bun x serve dist"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
@@ -30,6 +31,7 @@
     "express": "^5.2.1",
     "fastify": "^5.12.1",
     "hono": "^4.13.3",
+    "sharp": "^0.35.3",
     "typescript": "^7.0.2"
   },
   "engines": {

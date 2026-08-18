@@ -1,0 +1,40 @@
+---
+/**
+ * Overrides Starlight's site title so the logo links to the site root rather than the docs root.
+ *
+ * With `base: '/docs'`, Starlight points its logo at `/docs/` — and any sidebar link written as
+ * `/` gets the base prefixed onto it too, so it silently becomes `/docs/` as well. The result
+ * is a one-way door: a reader arriving from search has no way back to the landing page. An
+ * absolute href written here is emitted verbatim, which is the only reliable way out.
+ */
+---
+
+<a href="/" class="site-title">
+  <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <rect x="2" y="5" width="28" height="22" rx="4" stroke="currentColor" stroke-width="2"></rect>
+    <rect x="6" y="12" width="20" height="11" rx="2" stroke="currentColor" stroke-width="1.5"></rect>
+    <path d="M6 9h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+    <circle cx="24" cy="9" r="1.5" fill="currentColor"></circle>
+  </svg>
+  <span>Oven</span>
+</a>
+
+<style>
+  .site-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    text-decoration: none;
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-h4);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .site-title svg {
+    width: 1.75rem;
+    height: 1.75rem;
+    flex-shrink: 0;
+    color: var(--sl-color-accent-high);
+  }
+</style>

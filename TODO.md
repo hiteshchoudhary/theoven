@@ -300,8 +300,18 @@ Each item below must work with **zero configuration and zero registration**, and
       and looks for `bun.lockb` (Bun's pre-1.2 binary format); we ship `bun.lock` (text), so it
       fell through to npm, which cannot parse `workspace:*`. Set `SKIP_DEPENDENCY_INSTALL=1`
       and drive Bun ourselves
-- [ ] Confirm the Pages deploy is green, then point theoven.app at it
-- [x] Landing page: hero, config pitch, always-on batteries grid, comparison table
+- [x] Pages deploy green at theoven.pages.dev
+- [ ] Update the Pages **Build output directory** from `apps/web/dist` to `dist` — the build
+      now assembles landing + docs together
+- [ ] Point theoven.app at the Pages project
+- [ ] Move the deploy to GitHub Actions + Wrangler so the build config lives in the repo
+      rather than depending on the `SKIP_DEPENDENCY_INSTALL` dashboard setting
+- [x] Landing page rebuilt as hand-written HTML/CSS/JS in `apps/landing` — no framework, no
+      build step. Hero, config-to-feature split, batteries grid, animated benchmark bars,
+      comparison table, philosophy, CTA. Starlight now serves docs at `/docs` only
+- [x] Brand imagery generated with Gemini (`scripts/generate-assets.mjs`) and optimised to
+      WebP (`scripts/optimize-assets.mjs`) — 1.8 MB of PNGs down to 152 KB. OG card text is
+      composited as SVG so it stays crisp
 - [ ] **"Batteries included" page** — the always-on table from `CLAUDE.md` §2b as a headline feature
 - [~] Tutorial, FastAPI-style and progressive. Written: first route, validation (marked
       Planned), errors. Remaining: db, auth, file upload, queue, mail, deploy

@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oven — The batteries-included Bun framework</title>
+<meta name="description" content="Express-simple. FastAPI-smart. Everything configurable. Auth, database, storage, mail and queues are configuration, not a week of wiring.">
+<meta name="theme-color" content="#08080a">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://theoven.app/">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://theoven.app/">
+<meta property="og:title" content="Oven — The batteries-included Bun framework">
+<meta property="og:description" content="Auth, database, storage, mail and queues are configuration, not a week of wiring.">
+<meta property="og:image" content="https://theoven.app/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Oven — The batteries-included Bun framework">
+<meta name="twitter:description" content="Auth, database, storage, mail and queues are configuration, not a week of wiring.">
+<meta name="twitter:image" content="https://theoven.app/assets/og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<!-- Grain overlay. SVG turbulence rather than an image: zero bytes, tiles perfectly, no banding. -->
+<svg class="grain" aria-hidden="true">
+  <filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/></filter>
+  <rect width="100%" height="100%" filter="url(#noise)"/>
+</svg>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/" aria-label="Oven home">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="2" y="5" width="28" height="22" rx="4" stroke="currentColor" stroke-width="2"/>
+        <rect x="6" y="12" width="20" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M6 9h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="24" cy="9" r="1.5" fill="currentColor"/>
+      </svg>
+      <span>Oven</span>
+    </a>
+
+    <nav class="nav-links" id="nav-links">
+      <a href="/docs/">Docs</a>
+      <a href="/docs/tutorial/first-route/">Tutorial</a>
+      <a href="#benchmarks">Benchmarks</a>
+      <a href="https://github.com/hiteshchoudhary/theoven">GitHub</a>
+      <a class="btn btn-sm" href="/docs/start/installation/">Get started</a>
+    </nav>
+
+    <button class="nav-toggle" id="nav-toggle" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ─────────────────────────────  HERO  ───────────────────────────── -->
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="wrap hero-inner">
+    <a class="pill" href="https://github.com/hiteshchoudhary/theoven">
+      <span class="dot"></span> Pre-alpha &middot; building in the open
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+
+    <h1>
+      Stop wiring<br>
+      your backend<br>
+      <em>by hand.</em>
+    </h1>
+
+    <p class="lede">
+      Every backend needs auth, a database, file storage, email and background jobs.
+      Every backend wires them by hand, badly, again. <strong>Oven ships them.</strong>
+    </p>
+
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="/docs/start/installation/">
+        Get started
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <button class="btn btn-ghost copy" data-copy="bun create oven my-app">
+        <code>bun create oven my-app</code>
+        <svg class="ic-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+        <svg class="ic-done" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <dl class="stats">
+      <div><dt>110k</dt><dd>req/s on Bun</dd></div>
+      <div><dt>6&times;</dt><dd>faster than Express</dd></div>
+      <div><dt>0</dt><dd>middleware to install</dd></div>
+    </dl>
+  </div>
+</section>
+
+<!-- ─────────────────────────  CONFIG → FEATURE  ───────────────────── -->
+<section class="section" id="how">
+  <div class="wrap">
+    <header class="section-head reveal">
+      <p class="eyebrow">The whole idea</p>
+      <h2>Add a config. Get a working feature.</h2>
+      <p class="sub">
+        No service locator, no factory, no 400-line bootstrap file. Declare what your app has,
+        and it appears on the request context — fully typed.
+      </p>
+    </header>
+
+    <div class="split reveal">
+      <figure class="code-card">
+        <figcaption><span class="fname">oven.config.ts</span></figcaption>
+        <pre><code><span class="c-key">import</span> { defineConfig } <span class="c-key">from</span> <span class="c-str">'@theoven/core'</span>
+
+<span class="c-key">export default</span> <span class="c-fn">defineConfig</span>({
+  routes:  { dir: <span class="c-str">'./src/routes'</span> },
+  db:      { driver: <span class="c-str">'postgres'</span>, url: process.env.<span class="c-num">DATABASE_URL</span> },
+  auth:    { providers: [<span class="c-str">'github'</span>, <span class="c-str">'google'</span>] },
+  storage: { driver: <span class="c-str">'s3'</span>, bucket: <span class="c-str">'uploads'</span> },
+  mail:    { driver: <span class="c-str">'resend'</span> },
+  queue:   { driver: <span class="c-str">'redis'</span> },
+})</code></pre>
+      </figure>
+
+      <figure class="code-card">
+        <figcaption><span class="fname">src/routes/users/[id]/avatar.post.ts</span></figcaption>
+        <pre><code><span class="c-key">import</span> { z } <span class="c-key">from</span> <span class="c-str">'zod'</span>
+
+<span class="c-key">export const</span> auth   = <span class="c-num">true</span>
+<span class="c-key">export const</span> params = z.<span class="c-fn">object</span>({ id: z.<span class="c-fn">uuid</span>() })
+<span class="c-key">export const</span> body   = z.<span class="c-fn">object</span>({ file: z.<span class="c-fn">file</span>() })
+
+<span class="c-key">export default async</span> ({
+  params, body, user, storage, db, queue,
+}) =&gt; {
+  <span class="c-com">// every one of these is typed and validated</span>
+  <span class="c-key">const</span> { url } = <span class="c-key">await</span> storage.<span class="c-fn">upload</span>(
+    <span class="c-str">`avatars/${params.id}`</span>, body.file,
+  )
+  <span class="c-key">await</span> queue.<span class="c-fn">dispatch</span>(<span class="c-str">'resize-avatar'</span>, { url })
+  <span class="c-key">return</span> db.user.<span class="c-fn">update</span>(params.id, { avatar: url })
+}</code></pre>
+      </figure>
+    </div>
+
+    <p class="caption reveal">
+      That route is validated, authenticated, typed, and documented at <code>/docs</code>.
+      There is nothing to wire and nothing to forget.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────────  BATTERIES  ──────────────────────── -->
+<section class="section alt" id="batteries">
+  <div class="wrap">
+    <header class="section-head reveal">
+      <p class="eyebrow">Always on</p>
+      <h2>What you never install again</h2>
+      <p class="sub">
+        Express made you assemble a working server from parts. That was never a real choice —
+        it was homework. If more than 80% of apps need it, Oven ships it in core.
+      </p>
+    </header>
+
+    <div class="grid reveal">
+      <article class="card">
+        <h3>Body parsing</h3>
+        <p>Content-type aware, size-limited, and lazy — a route that never reads <code>ctx.body</code> never parses it.</p>
+        <p class="replaces">replaces <code>body-parser</code></p>
+      </article>
+      <article class="card">
+        <h3>File uploads</h3>
+        <p>Uploads arrive as web <code>File</code> objects, streamed rather than buffered, with size and MIME limits.</p>
+        <p class="replaces">replaces <code>multer</code></p>
+      </article>
+      <article class="card">
+        <h3>Cookies</h3>
+        <p><code>ctx.cookies</code> with secure defaults and signing built in. No secret to remember to set.</p>
+        <p class="replaces">replaces <code>cookie-parser</code></p>
+      </article>
+      <article class="card">
+        <h3>Token capture</h3>
+        <p><code>ctx.token</code> from the <code>Authorization</code> header, a cookie, or the query string — even with no auth plugin.</p>
+        <p class="replaces">replaces the snippet everyone rewrites</p>
+      </article>
+      <article class="card">
+        <h3>Async errors</h3>
+        <p>A throw becomes an RFC 9457 response, whether it happened synchronously or three awaits deep.</p>
+        <p class="replaces">replaces <code>express-async-errors</code></p>
+      </article>
+      <article class="card">
+        <h3>Graceful shutdown</h3>
+        <p>SIGTERM drains in-flight requests. Mid-drain arrivals get <code>503</code> with <code>Retry-After</code>, not a dead socket.</p>
+        <p class="replaces">replaces a bug you find in production</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ────────────────────────────  BENCHMARKS  ──────────────────────── -->
+<section class="section" id="benchmarks">
+  <div class="wrap">
+    <header class="section-head reveal">
+      <p class="eyebrow">Measured, not claimed</p>
+      <h2>Fast, and honest about it</h2>
+      <p class="sub">
+        Real sockets, 50 connections, identical routes, each framework on the runtime it is
+        actually deployed on. Every number here comes from a script in the repo.
+      </p>
+    </header>
+
+    <div class="bars reveal" id="bars">
+      <div class="bar-row" style="--pct:97.5"><span class="bar-name">Elysia <em>bun</em></span><div class="bar"><span></span></div><span class="bar-val">113,325</span></div>
+      <div class="bar-row is-us" style="--pct:95"><span class="bar-name">Oven <em>bun</em></span><div class="bar"><span></span></div><span class="bar-val">110,483</span></div>
+      <div class="bar-row" style="--pct:87"><span class="bar-name">Hono <em>bun</em></span><div class="bar"><span></span></div><span class="bar-val">101,011</span></div>
+      <div class="bar-row" style="--pct:70"><span class="bar-name">Fastify <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">81,581</span></div>
+      <div class="bar-row" style="--pct:16"><span class="bar-name">Express <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">18,331</span></div>
+    </div>
+    <p class="bars-note reveal">requests/second — parameterised JSON route, higher is better</p>
+
+    <aside class="note reveal">
+      <strong>Where we lose.</strong> On raw dispatch with no socket involved, Elysia is about
+      2&times; faster than Oven — it compiles each route into a specialised function at boot.
+      That advantage is worth 2.5% once a real connection exists, which is why both tables are
+      published. <a href="/docs/guides/benchmarks/">Read the full methodology &rarr;</a>
+    </aside>
+  </div>
+</section>
+
+<!-- ────────────────────────────  COMPARISON  ──────────────────────── -->
+<section class="section alt" id="compare">
+  <div class="wrap">
+    <header class="section-head reveal">
+      <p class="eyebrow">Where it sits</p>
+      <h2>How Oven compares</h2>
+    </header>
+
+    <div class="table-scroll reveal">
+      <table class="compare">
+        <thead>
+          <tr><th scope="col">&nbsp;</th><th scope="col">Express</th><th scope="col">Fastify</th><th scope="col">NestJS</th><th scope="col">FastAPI</th><th scope="col" class="us">Oven</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Runtime</th><td>Node</td><td>Node</td><td>Node</td><td>Python</td><td class="us">Bun</td></tr>
+          <tr><th scope="row">Auth / DB / queue / mail / S3</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="part">partial</td><td class="part">partial</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">Automatic OpenAPI</th><td class="no">&mdash;</td><td class="part">plugin</td><td class="part">plugin</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">Types inferred from schemas</th><td class="no">&mdash;</td><td class="part">partial</td><td class="part">partial</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">File-based routing</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">Body / cookies / uploads always on</th><td class="no">&mdash;</td><td class="part">partial</td><td class="yes">&check;</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="caption reveal">
+      We are not competing on router microseconds — Bun makes everything fast. We compete on the
+      time between <code>bun create</code> and an app shaped like production.
+    </p>
+  </div>
+</section>
+
+<!-- ────────────────────────────  PHILOSOPHY  ──────────────────────── -->
+<section class="section" id="philosophy">
+  <div class="wrap philo">
+    <div class="philo-art reveal" aria-hidden="true">
+      <img src="/assets/arch.webp" alt="" width="1000" height="1000" loading="lazy" decoding="async">
+    </div>
+    <div class="philo-text reveal">
+      <p class="eyebrow">A deliberate break</p>
+      <h2>Built for 2026,<br>not 2014.</h2>
+      <p>
+        Oven has no Express compatibility layer and will never have one. No
+        <code>(req, res, next)</code>, no Connect middleware, no CommonJS build, no callbacks.
+        Web standards, ESM and async only.
+      </p>
+      <p>
+        Every framework that shipped an Express shim ended up shaped by Express, inheriting its
+        mistakes along with its users. We would rather be honest: if you want Express, Express
+        exists, and it is very good at being Express.
+      </p>
+      <a class="link-arrow" href="/docs/start/philosophy/">Read the philosophy <span aria-hidden="true">&rarr;</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────────────  CTA  ──────────────────────────── -->
+<section class="cta">
+  <div class="wrap reveal">
+    <h2>Bake something.</h2>
+    <p>Oven is pre-alpha and building in the open. The core is done and tested; the modules are next.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="/docs/start/installation/">Read the docs</a>
+      <a class="btn btn-ghost" href="https://github.com/hiteshchoudhary/theoven">Star on GitHub</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <div>
+      <a class="brand" href="/">
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect x="2" y="5" width="28" height="22" rx="4" stroke="currentColor" stroke-width="2"/>
+          <rect x="6" y="12" width="20" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M6 9h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="24" cy="9" r="1.5" fill="currentColor"/>
+        </svg>
+        <span>Oven</span>
+      </a>
+      <p class="foot-note">The batteries-included Bun framework.<br>MIT licensed.</p>
+    </div>
+    <nav aria-label="Footer">
+      <h4>Docs</h4>
+      <a href="/docs/start/installation/">Installation</a>
+      <a href="/docs/tutorial/first-route/">Tutorial</a>
+      <a href="/docs/reference/app/">Reference</a>
+    </nav>
+    <nav aria-label="More">
+      <h4>More</h4>
+      <a href="/docs/guides/coming-from-express/">Coming from Express</a>
+      <a href="/docs/guides/benchmarks/">Benchmarks</a>
+      <a href="/docs/start/philosophy/">Philosophy</a>
+    </nav>
+    <nav aria-label="Project">
+      <h4>Project</h4>
+      <a href="https://github.com/hiteshchoudhary/theoven">GitHub</a>
+      <a href="https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md">Roadmap</a>
+      <a href="https://github.com/hiteshchoudhary/theoven/blob/main/CLAUDE.md">Architecture</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/main.js" defer></script>
+</body>
+</html>

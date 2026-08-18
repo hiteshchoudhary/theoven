@@ -1,0 +1,23 @@
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+# Astro fingerprints these filenames, so they can be cached forever.
+# Note the /docs prefix: Starlight is mounted under it, so the old bare /_astro/* rule
+# stopped matching anything when the landing page took over the site root.
+/docs/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/docs/pagefind/*
+  Cache-Control: public, max-age=86400
+
+# Generated imagery is content-stable; a long cache is safe and these are the heaviest files.
+/assets/*
+  Cache-Control: public, max-age=604800
+
+/styles.css
+  Cache-Control: public, max-age=3600
+/main.js
+  Cache-Control: public, max-age=3600
