@@ -1,0 +1,104 @@
+---
+title: Plugins
+description: The single extension point — add a capability, get it typed on the context.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+A plugin's `setup()` runs once at boot and returns the thing it provides. That value becomes
+`ctx.<name>`, and its **type** flows through `.use()` into every handler.
+
+```ts
+const app = createApp()
+  .use(storage({ driver: 's3', bucket: 'uploads' }))
+  .use(queue({ driver: 'redis' }))
+
+app.post('/upload', async (ctx) => {
+  const { url } = await ctx.storage.upload('key', file)  // typed
+  await ctx.queue.dispatch('resize', { url })            // typed
+  return { url }
+})
+```
+
+Leave the queue plugin out and `ctx.queue` is a **compile error**, not a crash at 3am. That is
+the whole point, and the test suite asserts it: registering the plugin makes the
+`@ts-expect-error` on that line unnecessary, which fails the build.
+
+## Writing one
+
+```ts
+import type { OvenPlugin } from '@theoven/core'
+
+export function cache(options: { ttl: number }): OvenPlugin<'cache', CacheClient> {
+  return {
+    name: 'cache',
+    setup: async () => connect(options),
+    onShutdown: (client) => client.disconnect(),
+  }
+}
+```
+
+| Field | Purpose |
+| --- | --- |
+| `name` | the property added to the context |
+| `setup(context)` | builds the value; runs once, at boot |
+| `dependsOn` | plugin names that must be set up first |
+| `onRequest(ctx)` | per-request work, such as loading a session |
+| `onShutdown(value)` | release pools, workers, connections |
+
+### Shared versus per-request
+
+`setup()`'s return value lives on the context **prototype**, so it is shared across requests and
+costs nothing per request. Anything genuinely per-request — a session, a transaction — belongs
+in `onRequest`, which runs with the context in hand.
+
+### Dependencies
+
+```ts
+{
+  name: 'auth',
+  dependsOn: ['db'],
+  setup: (context) => makeAuth(context.resolved.db),
+}
+```
+
+Declaring the dependency rather than relying on registration order means the auth plugin finds
+the database however the user chose to write their config. A cycle throws at boot, naming both
+plugins — it cannot be resolved at runtime, so failing early beats deadlocking.
+
+### Contributing routes
+
+```ts
+setup: (context) => {
+  context.route('GET', '/_docs', () => renderDocs())
+  return { mounted: true }
+}
+```
+
+This is how `/auth/*` and the docs UI will mount themselves.
+
+## Configuration files
+
+`defineConfig` puts the same thing in one declarative file:
+
+```ts title="oven.config.ts"
+export default defineConfig({
+  trustProxy: 1,
+  cookies: { secret: process.env.COOKIE_SECRET },
+  plugins: [storage({ driver: 's3' }), queue({ driver: 'redis' })],
+})
+```
+
+<Aside type="note" title="Which surface should you use?">
+  `appFromConfig()` returns a plain `App`, because a runtime array of plugins cannot express
+  each contribution in the type system. Chain `.use()` directly when you want `ctx.storage`
+  typed at the call site — that is exactly why both surfaces exist rather than one.
+</Aside>
+
+## Errors caught at boot
+
+- A duplicate plugin name.
+- A name that collides with a built-in context property, which would shadow the real thing in a
+  way that surfaces far from the plugin responsible.
+- A missing or circular dependency.
+- Registering a plugin after the first request, since setup runs at boot.

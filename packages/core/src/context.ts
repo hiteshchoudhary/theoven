@@ -44,8 +44,7 @@ export class Context {
   /** The raw web-standard request. Never wrapped, always available. */
   readonly req: Request
 
-  /** Path parameters from the matched route. Frozen and shared when the route has none. */
-  readonly params: RouteParams
+  private mutableParams: RouteParams
 
   /**
    * Status for the response. Left undefined so the returned value can decide — `null` becomes
@@ -66,9 +65,27 @@ export class Context {
 
   constructor(req: Request, params: RouteParams, init: ContextInit) {
     this.req = req
-    this.params = params
+    this.mutableParams = params
     this.init = init
     this.status = undefined
+  }
+
+  /** Path parameters from the matched route. Frozen and shared when the route has none. */
+  get params(): RouteParams {
+    return this.mutableParams
+  }
+
+  /**
+   * Assigns params once routing has resolved.
+   *
+   * The context is built *before* the route is matched, because middleware has to run for
+   * requests that match nothing — a CORS preflight, a 404 that still needs logging and security
+   * headers. Params simply are not known yet at construction.
+   *
+   * @internal called by the framework; not part of the handler-facing API.
+   */
+  assignParams(params: RouteParams): void {
+    this.mutableParams = params
   }
 
   // ------------------------------------------------------------------ request

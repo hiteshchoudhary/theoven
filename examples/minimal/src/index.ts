@@ -45,7 +45,7 @@ app.get('/slow', async () => {
   return { note: 'Ctrl-C during this request: shutdown waits for it to finish.' }
 })
 
-app.listen()
+await app.listen()
 
 app.logger.info(`Oven listening on ${app.url}`)
 for (const { method, pattern } of app.routes()) {

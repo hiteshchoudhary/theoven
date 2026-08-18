@@ -256,6 +256,38 @@ code, pre { font-family: var(--mono); }
   font-size: 13px; color: var(--text-mute);
 }
 
+/* --- build status ------------------------------------------------------ */
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+
+.status {
+  padding: 20px 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition: border-color 0.25s, transform 0.25s var(--ease);
+}
+.status:hover { transform: translateY(-3px); border-color: #33333f; }
+.status header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.status h3 { font-size: 1rem; font-weight: 650; letter-spacing: -0.015em; }
+.status p { font-size: 14.5px; color: var(--text-dim); }
+.status code { font-size: 0.87em; color: var(--ember-hi); }
+
+/* The tick carries the state, so it must read at a glance without relying on colour alone. */
+.tick {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 50%; font-size: 12px; font-weight: 700; line-height: 1;
+}
+.done .tick { background: rgba(74, 222, 128, 0.14); color: #4ade80; }
+.next .tick { background: var(--ember-dim); color: var(--ember-lit); }
+.todo .tick { background: #1c1c24; color: var(--text-mute); }
+
+.done { border-left: 2px solid rgba(74, 222, 128, 0.5); }
+.next { border-left: 2px solid var(--ember); }
+.todo { opacity: 0.72; }
+
+.caption .link-arrow { margin-left: 6px; font-size: 15px; }
+
 /* --- benchmark bars ---------------------------------------------------- */
 .bars { display: grid; gap: 13px; }
 .bar-row {

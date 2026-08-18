@@ -1,10 +1,11 @@
 # Oven — Task Tracker
 
-**Current state:** Phases 1.1, 1.2 and 1.3 done — router, server, context, errors, logger, response
-coercion, graceful shutdown, and the always-on batteries. **425 tests green**, typecheck and lint clean. Benchmarked against
+**Current state:** Phases 1.1 through 1.5 done — router, server, context, errors, logger, response
+coercion, graceful shutdown, the always-on batteries, middleware and the plugin system.
+**505 tests green**, typecheck and lint clean. Benchmarked against
 Hono, Elysia, Fastify and Express at both dispatch and socket level. Docs site scaffolded and
 building (11 pages). GitHub repo live, `@theoven` npm org claimed.
-**Next task:** Phase 1.4 — middleware and lifecycle hooks.
+**Next task:** Phase 1.6 — validation (Standard Schema + Zod 4).
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -175,21 +176,54 @@ object a bare `ctx.headers` is a coin flip every time you read it.
 arrived as the bare word `Bearer` and was captured as a token whose value was literally
 `"Bearer"`. Bare scheme names are now rejected.
 
-### 1.4 Middleware & hooks
-- [ ] Middleware chain with `next()`, correct ordering, short-circuit on early return
-- [ ] Lifecycle hooks: `onRequest`, `beforeHandle`, `afterHandle`, `onResponse`, `onError`
-- [ ] Directory-scoped middleware via `_middleware.ts`
-- [ ] **Async errors caught automatically** — no `express-async-errors` equivalent needed
-- [ ] Configured-not-installed built-ins: CORS, compression, rate limit, request logging, security headers
-- [ ] Tests
+### 1.4 Middleware & hooks ✅
 
-### 1.5 Plugin system + type inference 🔴 hardest part of the phase
-- [ ] `OvenPlugin` interface (`CLAUDE.md` §4)
-- [ ] `.use()` accumulating plugin context types through the chain
-- [ ] Plugin lifecycle: `setup` at boot, dependency ordering, `onShutdown` on teardown
-- [ ] Plugins can contribute routes (e.g. `/auth/*`) and OpenAPI fragments
-- [ ] `defineConfig()` typed sugar expanding config keys → `.use()` calls
-- [ ] Type-level tests (`expectTypeOf`) proving an unconfigured module is a **compile error**
+`packages/core/src/middleware.ts` — 53 tests.
+
+- [x] Onion-model middleware with `next()`, correct in/out ordering, short-circuit by not
+      calling `next()`
+- [x] Awaiting `next()` twice throws — it would otherwise run the rest of the chain again, and
+      the resulting double-write is very hard to trace back to its cause
+- [x] Lifecycle hooks: `onRequest`, `beforeHandle`, `afterHandle`, `onResponse`, `onError`
+- [x] Path-scoped middleware (`app.use('/admin', fn)`) respecting segment boundaries, so
+      `/admin` never matches `/administrators`
+- [x] **Middleware wraps routing, not just the handler.** Found while testing: CORS preflights
+      could never work otherwise, because an `OPTIONS` request with no `OPTIONS` route never
+      reached middleware. 404s that need security headers and request logs that should include
+      misses had the same problem
+- [x] Chains composed once per applicable middleware set and cached — keyed by that set rather
+      than by path, since paths with parameters are unbounded
+- [x] Async errors caught automatically (§1.2)
+- [x] Built-ins, configured not installed: CORS, security headers, rate limiting, request
+      logging, compression
+- [ ] Directory-scoped `_middleware.ts` — belongs with file-based routing in §1.8
+
+**Note:** Bun has no `CompressionStream`, so compression uses `Bun.gzipSync` and deliberately
+passes streaming responses through untouched. Buffering a stream to compress it would stop
+server-sent events arriving and pull a large download into memory.
+
+### 1.5 Plugin system + type inference ✅
+
+`packages/core/src/plugin.ts` — 28 tests, including type-level assertions.
+
+- [x] `OvenPlugin` interface: `name`, `setup`, `dependsOn`, `onRequest`, `onShutdown`
+- [x] `.use()` accumulates plugin context types through the chain
+- [x] Plugin values live on a `Context` **subclass prototype**, so ten plugins cost nothing per
+      request; per-request state goes through `onRequest` instead
+- [x] Dependency ordering by topological sort; missing dependencies and cycles throw at boot
+      naming the plugins involved
+- [x] Plugins can contribute their own routes (`/auth/*`, the docs UI)
+- [x] `setup()` runs once, is awaited, and is idempotent via `ready()`; `fetch()` boots
+      automatically so tests need no explicit call
+- [x] Rejected at boot: duplicate names, names colliding with built-in context properties, and
+      registration after the first request
+- [x] `defineConfig()` / `appFromConfig()` for a declarative config file
+- [x] **Type-level tests** proving an unregistered plugin is a compile error — and verified that
+      those tests actually fail when inference breaks, rather than passing vacuously
+
+**Known limit:** `appFromConfig()` returns a plain `App`. A runtime array of plugins cannot
+express each contribution in the type system, so `.use()` chaining stays the typed surface.
+Config keys mapping to plugins (`{ storage: {...} }`) needs the module packages to exist.
 
 ### 1.6 Validation
 - [ ] Standard Schema v1 adapter (`schema['~standard'].validate`)

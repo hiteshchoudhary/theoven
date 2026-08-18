@@ -4,6 +4,8 @@ import { Context, type ContextInit } from './context'
 import type { CookieJarInit } from './cookies'
 import { type OvenError, toOvenError } from './errors'
 import { ConsoleLogger, type Logger, type LogLevel } from './logger'
+import { appliesTo, compose, type Middleware } from './middleware'
+import { type OvenPlugin, orderPlugins, type PluginSetupContext } from './plugin'
 import type { QueryOptions } from './query'
 import { Router } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
@@ -12,13 +14,23 @@ import type { TokenOptions } from './token'
 /**
  * A route handler. Returns anything — the value is coerced into a `Response`.
  *
- * There is no `next`, no `res`, and no callback. A handler either returns a value or throws;
- * async throws are caught identically to synchronous ones.
+ * `Ext` carries whatever plugins have contributed, so `ctx.storage` exists exactly when the
+ * storage plugin is registered. There is no `next`, no `res`, and no callback: a handler either
+ * returns a value or throws, and async throws are caught identically to synchronous ones.
  */
-export type Handler = (ctx: Context) => unknown
+export type Handler<Ext = unknown> = (ctx: Context & Ext) => unknown
 
 /** Replaces the default problem+json rendering for failures. */
 export type ErrorHandler = (error: OvenError, ctx: Context) => unknown
+
+/** Runs before routing. Returning anything but `undefined` short-circuits the request. */
+export type RequestHook = (ctx: Context) => unknown
+/** Runs after routing, before the handler. Returning a value skips the handler. */
+export type BeforeHandleHook = (ctx: Context) => unknown
+/** Transforms the handler's result. Return `undefined` to leave it alone. */
+export type AfterHandleHook = (ctx: Context, result: unknown) => unknown
+/** Inspects or replaces the finished response. */
+export type ResponseHook = (ctx: Context, response: Response) => unknown
 
 export interface AppOptions {
   /** Port for `listen()`. Defaults to `PORT` from the environment, then 3000. */
@@ -33,7 +45,7 @@ export interface AppOptions {
   echoRequestId?: boolean
   /**
    * Controls whether internal error messages and stacks reach the client.
-   * Defaults to `NODE_ENV !== 'production'` — safe by default in the environment that matters.
+   * Defaults to `NODE_ENV !== 'production'` — safe by default where it matters.
    */
   development?: boolean
   /** How long `close()` waits for in-flight requests before forcing the socket shut. Default 10s. */
@@ -59,15 +71,18 @@ export interface AppOptions {
 
 const PROBLEM_TYPE = 'application/problem+json; charset=utf-8'
 
+/** Shared by every context until routing resolves; frozen so nothing can mutate it. */
+const EMPTY_PARAMS: Record<string, string> = Object.freeze({})
+
 /**
  * An Oven application.
  *
  * Two ways in: `listen()` binds a socket, and `fetch()` dispatches a `Request` directly. They
- * run the exact same pipeline, which is why the test suite never needs a real port — and why
- * a passing test means the served behaviour is genuinely covered.
+ * run the identical pipeline, which is why the test suite never needs a real port — and why a
+ * passing test means the served behaviour is genuinely covered.
  */
-export class App {
-  private readonly router = new Router<Handler>()
+export class App<Ext = unknown> {
+  private readonly router = new Router<(ctx: Context) => unknown>()
   /**
    * Resolved configuration.
    *
@@ -81,14 +96,40 @@ export class App {
       'logger' | 'onError' | 'port' | 'hostname' | 'body' | 'query' | 'cookies' | 'token'
     >
   >
-  private readonly contextInit: Omit<ContextInit, 'server'>
+  private readonly rawOptions: AppOptions
   private readonly baseLogger: Logger
-  private readonly errorHandler: ErrorHandler | undefined
+  private errorHandler: ErrorHandler | undefined
   private readonly port: number
   private readonly hostname: string | undefined
 
   private server: Server<unknown> | undefined
   private shutdownHooks: Array<() => unknown> = []
+
+  private readonly middleware: Array<{ prefix: string | undefined; handler: Middleware }> = []
+  /**
+   * Composed chains, keyed by which middleware apply.
+   *
+   * Keyed by the applicable set rather than by path: paths containing parameters are unbounded,
+   * so a path-keyed cache would grow without limit. The number of distinct applicable sets is
+   * tiny — one, in the common case where no middleware is path-scoped.
+   */
+  private readonly chains = new Map<string, (ctx: Context) => Promise<unknown>>()
+  private readonly hooks = {
+    request: [] as RequestHook[],
+    beforeHandle: [] as BeforeHandleHook[],
+    afterHandle: [] as AfterHandleHook[],
+    response: [] as ResponseHook[],
+  }
+
+  private readonly plugins: OvenPlugin[] = []
+  private readonly resolved: Record<string, unknown> = {}
+  /** Context subclass carrying plugin values on its prototype; built once at boot. */
+  private ContextClass: new (
+    req: Request,
+    params: Record<string, string>,
+    init: ContextInit,
+  ) => Context = Context
+  private readyPromise: Promise<void> | undefined
 
   /** In-flight request accounting, so shutdown can drain rather than guillotine. */
   private inFlight = 0
@@ -97,6 +138,7 @@ export class App {
   private signalHandler: (() => void) | undefined
 
   constructor(options: AppOptions = {}) {
+    this.rawOptions = options
     this.port = options.port ?? Number(Bun.env.PORT ?? 3000)
     this.hostname = options.hostname
     this.errorHandler = options.onError
@@ -109,59 +151,142 @@ export class App {
       trustProxy: options.trustProxy ?? false,
     }
     this.baseLogger = options.logger ?? new ConsoleLogger({ level: this.settings.logLevel })
+  }
 
-    this.contextInit = {
+  private get contextInit(): Omit<ContextInit, 'server'> {
+    return {
       logger: this.baseLogger,
       requestIdHeader: this.settings.requestIdHeader,
-      body: options.body,
-      query: options.query,
-      // Secure cookies by default wherever we are not in development, so shipping to production
-      // does not quietly downgrade every session cookie.
-      cookies: { secureByDefault: !this.settings.development, ...options.cookies },
-      token: options.token,
+      body: this.rawOptions.body,
+      query: this.rawOptions.query,
+      // Secure cookies wherever we are not in development, so shipping to production does not
+      // quietly downgrade every session cookie.
+      cookies: { secureByDefault: !this.settings.development, ...this.rawOptions.cookies },
+      token: this.rawOptions.token,
       trustProxy: this.settings.trustProxy,
     }
   }
 
-  // ---------------------------------------------------------------- registration
+  // ---------------------------------------------------------------- extension
+
+  /**
+   * Registers middleware or a plugin.
+   *
+   * A function is middleware; an object is a plugin. They share a name because they are the
+   * same idea at two scales — "wrap the request" and "add a capability" — and the runtime can
+   * tell them apart with no ambiguity.
+   */
+  use(middleware: Middleware): this
+  use(prefix: string, middleware: Middleware): this
+  use<Name extends string, Value>(
+    plugin: OvenPlugin<Name, Value>,
+  ): App<Ext & { [K in Name]: Value }>
+  // The implementation signature must be compatible with every overload above, and no concrete
+  // type is assignable to both `this` and `App<Ext & {...}>`. `any` here is confined to the
+  // signature; callers only ever see the typed overloads.
+  // biome-ignore lint/suspicious/noExplicitAny: overload implementation signature
+  use(first: Middleware | string | OvenPlugin<string, unknown>, second?: Middleware): any {
+    if (typeof first === 'string') {
+      if (!second) throw new Error('use(prefix, middleware) needs a middleware function.')
+      this.middleware.push({ prefix: first, handler: second })
+      this.invalidateChains()
+      return this
+    }
+
+    if (typeof first === 'function') {
+      this.middleware.push({ prefix: undefined, handler: first })
+      this.invalidateChains()
+      return this
+    }
+
+    if (this.readyPromise) {
+      throw new Error(
+        `Plugin "${first.name}" was registered after the app started. Plugins must be added ` +
+          'before the first request, because their setup runs at boot.',
+      )
+    }
+    if (this.plugins.some((plugin) => plugin.name === first.name)) {
+      throw new Error(`Plugin "${first.name}" is already registered.`)
+    }
+
+    this.plugins.push(first)
+    return this
+  }
+
+  /** Runs before routing. Returning a value short-circuits the request. */
+  onRequest(hook: RequestHook): this {
+    this.hooks.request.push(hook)
+    return this
+  }
+
+  /** Runs after routing with params available. Returning a value skips the handler. */
+  beforeHandle(hook: BeforeHandleHook): this {
+    this.hooks.beforeHandle.push(hook)
+    return this
+  }
+
+  /** Transforms the handler's result. Returning `undefined` leaves it unchanged. */
+  afterHandle(hook: AfterHandleHook): this {
+    this.hooks.afterHandle.push(hook)
+    return this
+  }
+
+  /** Inspects or replaces the finished response. */
+  onResponse(hook: ResponseHook): this {
+    this.hooks.response.push(hook)
+    return this
+  }
+
+  /** Replaces the default problem+json error rendering. */
+  onError(handler: ErrorHandler): this {
+    this.errorHandler = handler
+    return this
+  }
+
+  /** Runs during `close()`, before the socket is released. */
+  onShutdown(hook: () => unknown): this {
+    this.shutdownHooks.push(hook)
+    return this
+  }
+
+  /** Middleware changed, so every cached chain is stale. */
+  private invalidateChains(): void {
+    this.chains.clear()
+  }
+
+  // ---------------------------------------------------------------- routing
 
   /**
    * Registers a handler.
    *
    * File-based routing (§1.8) is the DX users see, but it compiles down to this, and plugins
-   * that contribute their own endpoints — `/auth/*`, the docs UI — call it directly.
+   * that contribute endpoints — `/auth/*`, the docs UI — call it directly.
    */
-  route(method: HttpMethod, path: string, handler: Handler): this {
-    this.router.insert(method, path, handler)
+  route(method: HttpMethod, path: string, handler: Handler<Ext>): this {
+    this.router.insert(method, path, handler as (ctx: Context) => unknown)
     return this
   }
 
-  get(path: string, handler: Handler): this {
+  get(path: string, handler: Handler<Ext>): this {
     return this.route('GET', path, handler)
   }
-  post(path: string, handler: Handler): this {
+  post(path: string, handler: Handler<Ext>): this {
     return this.route('POST', path, handler)
   }
-  put(path: string, handler: Handler): this {
+  put(path: string, handler: Handler<Ext>): this {
     return this.route('PUT', path, handler)
   }
-  patch(path: string, handler: Handler): this {
+  patch(path: string, handler: Handler<Ext>): this {
     return this.route('PATCH', path, handler)
   }
-  delete(path: string, handler: Handler): this {
+  delete(path: string, handler: Handler<Ext>): this {
     return this.route('DELETE', path, handler)
   }
-  head(path: string, handler: Handler): this {
+  head(path: string, handler: Handler<Ext>): this {
     return this.route('HEAD', path, handler)
   }
-  options(path: string, handler: Handler): this {
+  options(path: string, handler: Handler<Ext>): this {
     return this.route('OPTIONS', path, handler)
-  }
-
-  /** Runs during `close()`, before the socket is released. Plugins use this to free resources. */
-  onShutdown(hook: () => unknown): this {
-    this.shutdownHooks.push(hook)
-    return this
   }
 
   /** Every registered route. Backs `oven routes` and the boot banner. */
@@ -171,6 +296,60 @@ export class App {
 
   get logger(): Logger {
     return this.baseLogger
+  }
+
+  // ---------------------------------------------------------------- boot
+
+  /**
+   * Sets up plugins. Idempotent, and awaited by both `listen()` and `fetch()`.
+   *
+   * Plugin values are installed on a `Context` subclass prototype rather than copied onto each
+   * context, so ten plugins cost nothing per request.
+   */
+  async ready(): Promise<void> {
+    this.readyPromise ??= this.boot()
+    return this.readyPromise
+  }
+
+  private async boot(): Promise<void> {
+    if (this.plugins.length === 0) return
+
+    for (const plugin of orderPlugins(this.plugins)) {
+      // Colliding with a core property would shadow the real thing in a way that surfaces far
+      // from the plugin responsible, so it is rejected here, by name, at boot.
+      if (plugin.name in Context.prototype || plugin.name === 'req' || plugin.name === 'params') {
+        throw new Error(
+          `Plugin "${plugin.name}" collides with a built-in context property. Choose another name.`,
+        )
+      }
+
+      const setup: PluginSetupContext = {
+        resolved: this.resolved,
+        route: (method, path, handler) => {
+          if (!isHttpMethod(method)) {
+            throw new Error(`Plugin "${plugin.name}" registered an unsupported method: ${method}`)
+          }
+          this.route(method, path, handler as Handler<Ext>)
+        },
+        development: this.settings.development,
+      }
+
+      this.resolved[plugin.name] = await plugin.setup(setup)
+    }
+
+    const Extended = class extends Context {}
+    for (const [name, value] of Object.entries(this.resolved)) {
+      Object.defineProperty(Extended.prototype, name, { value, enumerable: false })
+    }
+    this.ContextClass = Extended as unknown as typeof this.ContextClass
+
+    for (const plugin of this.plugins) {
+      const teardown = plugin.onShutdown
+      if (teardown) {
+        const value = this.resolved[plugin.name]
+        this.onShutdown(() => teardown(value))
+      }
+    }
   }
 
   // ---------------------------------------------------------------- dispatch
@@ -190,6 +369,8 @@ export class App {
       })
     }
 
+    if (this.readyPromise === undefined) await this.ready()
+
     this.inFlight++
     try {
       return await this.dispatch(request, server)
@@ -199,9 +380,39 @@ export class App {
     }
   }
 
+  /**
+   * Builds the context, runs the request hooks, then routes inside the middleware chain.
+   *
+   * Middleware wraps *routing*, not just the handler. A CORS preflight, a 404 that still needs
+   * security headers, a request log that should include misses — none of those work if
+   * middleware only runs once a route has matched. This is the ordering Express and Koa use,
+   * and getting it wrong makes CORS impossible to configure correctly.
+   */
   private async dispatch(request: Request, server: Server<unknown> | undefined): Promise<Response> {
-    const method = request.method
-    const path = pathnameOf(request.url)
+    const ctx = new this.ContextClass(request, EMPTY_PARAMS, { ...this.contextInit, server })
+
+    try {
+      for (const hook of this.hooks.request) {
+        const result = await hook(ctx)
+        if (result !== undefined) return await this.finish(ctx, result)
+      }
+
+      const chain = this.chainFor(pathnameOf(request.url))
+      return await this.finish(ctx, await chain(ctx))
+    } catch (thrown) {
+      return this.handleError(thrown, ctx)
+    }
+  }
+
+  /**
+   * Routes the request and runs its handler. This is what the middleware chain wraps.
+   *
+   * Refusals are returned as `Response` objects rather than thrown, so middleware still sees
+   * them on the way out and can add its headers.
+   */
+  private readonly runRoute = async (ctx: Context): Promise<unknown> => {
+    const method = ctx.method
+    const path = ctx.path
 
     if (!isHttpMethod(method)) {
       return this.refuse(501, 'Not Implemented', `Method ${method} is not supported.`)
@@ -227,27 +438,77 @@ export class App {
         return new Response(null, { status: 204, headers: { allow } })
       }
       if (match.allowed.length > 0) {
-        const allow = match.allowed.join(', ')
         return this.refuse(405, 'Method Not Allowed', `${method} is not allowed on ${path}.`, {
-          allow,
+          allow: match.allowed.join(', '),
         })
       }
       return this.refuse(404, 'Not Found', `No route matches ${path}.`)
     }
 
-    const ctx = new Context(request, match.params, { ...this.contextInit, server })
+    ctx.assignParams(match.params)
 
-    try {
-      const result = await match.payload(ctx)
-      const response = ctx.respond(result)
-      this.stampRequestId(response, ctx)
-      // A HEAD response must carry the GET headers but no body.
-      return headOfGet
-        ? new Response(null, { status: response.status, headers: response.headers })
-        : response
-    } catch (thrown) {
-      return this.handleError(thrown, ctx)
+    for (const plugin of this.plugins) {
+      if (plugin.onRequest) await plugin.onRequest(ctx)
     }
+
+    for (const hook of this.hooks.beforeHandle) {
+      const short = await hook(ctx)
+      if (short !== undefined) return short
+    }
+
+    let result = await match.payload(ctx)
+
+    for (const hook of this.hooks.afterHandle) {
+      const transformed = await hook(ctx, result)
+      if (transformed !== undefined) result = transformed
+    }
+
+    if (headOfGet) {
+      const response = ctx.respond(result)
+      return new Response(null, { status: response.status, headers: response.headers })
+    }
+
+    return result
+  }
+
+  /**
+   * Returns the composed chain for a path, building it at most once per applicable set.
+   *
+   * Composing per request would allocate a closure per layer on the hot path, for a structure
+   * that does not change between requests to the same kind of path.
+   */
+  private chainFor(path: string): (ctx: Context) => Promise<unknown> {
+    if (this.middleware.length === 0) return this.runRoute
+
+    const applicable: number[] = []
+    for (let index = 0; index < this.middleware.length; index++) {
+      const entry = this.middleware[index]
+      if (entry && appliesTo(entry.prefix, path)) applicable.push(index)
+    }
+
+    const key = applicable.join(',')
+    let chain = this.chains.get(key)
+    if (chain === undefined) {
+      const layers = applicable.map(
+        (index) => (this.middleware[index] as { handler: Middleware }).handler,
+      )
+      chain = compose(layers, this.runRoute)
+      this.chains.set(key, chain)
+    }
+    return chain
+  }
+
+  /** Coerces a result to a Response and runs the response hooks. */
+  private async finish(ctx: Context, result: unknown): Promise<Response> {
+    let response = ctx.respond(result)
+
+    for (const hook of this.hooks.response) {
+      const replacement = await hook(ctx, response)
+      if (replacement instanceof Response) response = replacement
+    }
+
+    this.stampRequestId(response, ctx)
+    return response
   }
 
   private async handleError(thrown: unknown, ctx: Context): Promise<Response> {
@@ -284,10 +545,9 @@ export class App {
   /**
    * Renders a problem document without constructing an `Error`.
    *
-   * 404s and 405s are not exceptional — a crawler or a scanner can produce thousands a second —
-   * and building an `Error` for each one captures a stack trace, which is one of the most
-   * expensive things a runtime does. These refusals never surface a stack to anyone, so paying
-   * for one is pure waste. Genuine thrown errors still go through `problem()` and keep theirs.
+   * 404s and 405s are not exceptional — a scanner can produce thousands a second — and building
+   * an `Error` for each captures a stack trace, one of the most expensive things a runtime does.
+   * These refusals never surface a stack to anyone, so paying for one is pure waste.
    */
   private refuse(
     status: number,
@@ -324,8 +584,7 @@ export class App {
   /**
    * Echoes the request id, but only when something actually used it.
    *
-   * Generating an id for a request nobody traced would violate the lazy rule for no benefit,
-   * so the header appears exactly when the id was materialised.
+   * Generating an id for a request nobody traced would violate the lazy rule for no benefit.
    */
   private stampRequestId(response: Response, ctx: Context): void {
     if (!this.settings.echoRequestId || !ctx.hasId) return
@@ -337,8 +596,10 @@ export class App {
   // ---------------------------------------------------------------- lifecycle
 
   /** Starts the server. Signal handlers are installed so SIGTERM drains rather than kills. */
-  listen(port = this.port): Server<unknown> {
+  async listen(port = this.port): Promise<Server<unknown>> {
     if (this.server) throw new Error('This app is already listening.')
+
+    await this.ready()
 
     this.server = Bun.serve({
       port,
@@ -365,8 +626,8 @@ export class App {
    *
    * Stops accepting new requests, lets in-flight ones finish, runs shutdown hooks, then
    * releases the socket. Requests arriving during the drain get a 503 with `Retry-After`
-   * rather than a dropped connection, which is the difference between a clean rolling deploy
-   * and a burst of client-side errors.
+   * rather than a dropped connection — the difference between a clean rolling deploy and a
+   * burst of client-side errors.
    */
   async close(options: { timeout?: number } = {}): Promise<void> {
     if (this.closing) return
@@ -418,8 +679,7 @@ export class App {
  *
  * `new URL()` is one of the most expensive things a router can do per request, and the path is
  * needed on every single one. Scanning for the third slash and stopping at `?` or `#` is
- * roughly an order of magnitude cheaper; `ctx.url` still gives handlers the full parse when
- * they ask for it.
+ * roughly an order of magnitude cheaper; `ctx.url` still gives handlers the full parse.
  */
 export function pathnameOf(url: string): string {
   const start = url.indexOf('/', url.indexOf('//') + 2)
@@ -437,4 +697,42 @@ export function pathnameOf(url: string): string {
 /** Creates an Oven application. */
 export function createApp(options: AppOptions = {}): App {
   return new App(options)
+}
+
+/**
+ * A project's configuration in one declarative object.
+ *
+ * `defineConfig` is sugar over the same plugin mechanism `.use()` drives — the config surface
+ * and the chaining surface are two views of one implementation, not two implementations.
+ *
+ * ```ts
+ * export default defineConfig({
+ *   trustProxy: 1,
+ *   cookies: { secret: process.env.COOKIE_SECRET },
+ *   plugins: [storage({ driver: 's3' }), queue({ driver: 'redis' })],
+ * })
+ * ```
+ */
+export interface OvenConfig extends AppOptions {
+  plugins?: OvenPlugin[]
+}
+
+export function defineConfig(config: OvenConfig): OvenConfig {
+  return config
+}
+
+/**
+ * Builds an app from a config object.
+ *
+ * The returned app is typed as `App` rather than carrying each plugin's contribution, because
+ * a runtime array cannot express that in the type system. Chain `.use()` directly when you
+ * want `ctx.storage` typed at the call site; that is the whole reason both surfaces exist.
+ */
+export function appFromConfig(config: OvenConfig): App {
+  const { plugins = [], ...options } = config
+  let app: App = createApp(options)
+  for (const plugin of plugins) {
+    app = app.use(plugin) as unknown as App
+  }
+  return app
 }

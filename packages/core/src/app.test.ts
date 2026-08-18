@@ -372,22 +372,22 @@ describe('response shaping', () => {
 describe('over a real socket', () => {
   test('serves requests on a bound port', async () => {
     const app = make().get('/ping', () => ({ pong: true }))
-    app.listen(0)
+    await app.listen(0)
     const response = await fetch(`${app.url}ping`)
     expect(await response.json()).toEqual({ pong: true })
   })
 
   test('exposes the client ip', async () => {
     const app = make().get('/ip', (ctx) => ({ ip: ctx.ip }))
-    app.listen(0)
+    await app.listen(0)
     const body = (await (await fetch(`${app.url}ip`)).json()) as { ip: string }
     expect(body.ip).toBeTruthy()
   })
 
-  test('refuses a second listen', () => {
+  test('refuses a second listen', async () => {
     const app = make().get('/x', () => 'x')
-    app.listen(0)
-    expect(() => app.listen(0)).toThrow(/already listening/)
+    await app.listen(0)
+    expect(app.listen(0)).rejects.toThrow(/already listening/)
   })
 
   test('url is undefined before listening', () => {
@@ -403,7 +403,7 @@ describe('graceful shutdown', () => {
       finished = true
       return 'done'
     })
-    app.listen(0)
+    await app.listen(0)
 
     const pending = fetch(`${app.url}slow`)
     await Bun.sleep(10)
@@ -480,7 +480,7 @@ describe('graceful shutdown', () => {
 
   test('returns promptly when nothing is in flight', async () => {
     const app = make().get('/x', () => 'x')
-    app.listen(0)
+    await app.listen(0)
     const start = Bun.nanoseconds()
     await app.close()
     expect((Bun.nanoseconds() - start) / 1e6).toBeLessThan(500)

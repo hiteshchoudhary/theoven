@@ -1,0 +1,142 @@
+---
+title: Middleware & hooks
+description: Onion-model middleware, five lifecycle hooks, and the built-ins that ship configured.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## Middleware
+
+Each middleware receives the context and a `next` it may await. Everything before the `await`
+runs on the way in, everything after runs on the way out.
+
+```ts
+app.use(async (ctx, next) => {
+  const start = Bun.nanoseconds()
+  const result = await next()
+  ctx.set('server-timing', `total;dur=${(Bun.nanoseconds() - start) / 1e6}`)
+  return result
+})
+```
+
+There is no `(req, res, next)` and no Connect compatibility. A middleware either returns a
+value or throws, exactly like a handler — which is what lets the two compose without special
+cases.
+
+### Short-circuiting
+
+Not calling `next()` skips the handler. This is how guards and caches work:
+
+```ts
+app.use(async (ctx, next) => {
+  if (!ctx.token) throw new Unauthorized()
+  return next()
+})
+```
+
+<Aside type="caution" title="next() may only be awaited once">
+  Awaiting `next()` twice runs the rest of the chain a second time. The resulting double-write
+  is very hard to trace back to its cause, so Oven throws instead.
+</Aside>
+
+### Path scoping
+
+```ts
+app.use('/admin', requireAdmin)
+```
+
+Prefixes respect segment boundaries: `/admin` matches `/admin` and `/admin/users`, but never
+`/administrators`.
+
+### Middleware wraps routing, not just the handler
+
+Middleware runs for **every** request, including ones that match no route. A CORS preflight, a
+404 that still needs security headers, a request log that should include misses — none of those
+work if middleware only runs once a route has matched.
+
+## Lifecycle hooks
+
+| Hook | When | Returning a value |
+| --- | --- | --- |
+| `onRequest` | before routing | short-circuits the request |
+| `beforeHandle` | after routing, params available | skips the handler |
+| `afterHandle` | after the handler | replaces the result |
+| `onResponse` | after the `Response` is built | replaces the response |
+| `onError` | on any thrown error | replaces the error body |
+
+```ts
+app.onRequest((ctx) => (maintenance ? 'Back shortly' : undefined))
+app.beforeHandle((ctx) => cache.get(ctx.path))
+app.afterHandle((_ctx, result) => ({ data: result }))
+app.onResponse((_ctx, response) => { metrics.record(response.status) })
+app.onError((error) => ({ ok: false, code: error.status }))
+```
+
+Returning `undefined` from any hook means "carry on unchanged", which is why a hook that only
+observes needs no return at all.
+
+## Built-ins
+
+These ship in the box but stay configurable — the cases where behaviour genuinely varies
+between apps, unlike body parsing where it does not. **Configured, not installed.**
+
+### CORS
+
+```ts
+app.use(cors({ origin: ['https://app.example'], credentials: true }))
+```
+
+Preflights are answered with `204`, and a reflected origin always sets `Vary: Origin` so a
+shared cache cannot serve one origin's response to another.
+
+<Aside type="caution" title="Wildcard plus credentials is refused">
+  Browsers reject a wildcard origin on credentialed requests, so the combination fails at
+  runtime looking like a server bug. Oven throws when you construct it instead.
+</Aside>
+
+### Security headers
+
+```ts
+app.use(securityHeaders({ contentSecurityPolicy: "default-src 'self'" }))
+```
+
+Sets `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`.
+HSTS is only sent over HTTPS — sending it on plain HTTP would pin `localhost` to https in your
+browser for a year.
+
+### Rate limiting
+
+```ts
+app.use(rateLimit({ limit: 100, window: 60_000, key: (ctx) => ctx.token ?? ctx.ip }))
+```
+
+Sets `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`; a rejection carries
+`Retry-After`.
+
+<Aside type="caution" title="In memory means per process">
+  Behind a load balancer each instance counts separately, so the effective limit is
+  `limit × instances`. Fine for shedding obvious abuse, wrong for anything you must enforce
+  exactly. A Redis-backed limiter arrives with `@theoven/queue`.
+</Aside>
+
+### Request logging
+
+```ts
+app.use(requestLogger({ ignore: ['/health'] }))
+```
+
+One structured line per request with the request id already bound. Slow requests log at `warn`,
+failures at `error`.
+
+### Compression
+
+```ts
+app.use(compression({ threshold: 1024 }))
+```
+
+Compresses text-shaped payloads above a threshold. Streaming responses — a returned `Response`,
+`ReadableStream` or `Blob` — are passed through untouched: buffering them to compress would stop
+server-sent events arriving and pull a large download entirely into memory.
+
+Most Bun deployments sit behind a CDN that already compresses, in which case this is redundant.
+Measure before reaching for it.

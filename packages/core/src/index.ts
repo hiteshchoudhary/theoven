@@ -1,10 +1,17 @@
 export {
+  type AfterHandleHook,
   App,
   type AppOptions,
+  appFromConfig,
+  type BeforeHandleHook,
   createApp,
+  defineConfig,
   type ErrorHandler,
   type Handler,
+  type OvenConfig,
   pathnameOf,
+  type RequestHook,
+  type ResponseHook,
 } from './app'
 export {
   type BodyOptions,
@@ -39,6 +46,23 @@ export {
   type LogLevel,
   silentLogger,
 } from './logger'
+export {
+  appliesTo,
+  type CompressionOptions,
+  type CorsOptions,
+  compose,
+  compression,
+  cors,
+  type Middleware,
+  type Next,
+  type RateLimitOptions,
+  type RequestLoggerOptions,
+  rateLimit,
+  requestLogger,
+  type SecurityHeadersOptions,
+  securityHeaders,
+} from './middleware'
+export { type OvenPlugin, orderPlugins, type PluginSetupContext } from './plugin'
 export { type ParsedQuery, parseQuery, type QueryOptions, type QueryValue } from './query'
 export { toResponse } from './response'
 export { normalisePath, RouteConflictError, Router } from './router/router'
