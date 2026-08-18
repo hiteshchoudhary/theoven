@@ -2,7 +2,7 @@ import type { Server } from 'bun'
 import type { BodyOptions } from './body'
 import { Context, type ContextInit } from './context'
 import type { CookieJarInit } from './cookies'
-import { type OvenError, toOvenError } from './errors'
+import { OvenError, toOvenError } from './errors'
 import { ConsoleLogger, type Logger, type LogLevel } from './logger'
 import { appliesTo, compose, type Middleware } from './middleware'
 import { type OvenPlugin, orderPlugins, type PluginSetupContext } from './plugin'
@@ -10,6 +10,12 @@ import type { QueryOptions } from './query'
 import { Router } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
 import type { TokenOptions } from './token'
+import {
+  type RouteSchema,
+  type ValidatedHandler,
+  validateRequest,
+  validateResponse,
+} from './validation'
 
 /**
  * A route handler. Returns anything — the value is coerced into a `Response`.
@@ -67,12 +73,26 @@ export interface AppOptions {
    * trusting it without one lets callers pick their own IP and walk past anything keyed on it.
    */
   trustProxy?: boolean | number
+  /**
+   * Check handler results against their declared response schemas. Defaults to `development`.
+   *
+   * Off in production on purpose. This validates *our* code, not untrusted input, so the bug it
+   * catches is one CI and local development should have caught already — and unlike request
+   * validation, the cost is paid on every successful response.
+   */
+  validateResponses?: boolean
 }
 
 const PROBLEM_TYPE = 'application/problem+json; charset=utf-8'
 
 /** Shared by every context until routing resolves; frozen so nothing can mutate it. */
 const EMPTY_PARAMS: Record<string, string> = Object.freeze({})
+
+/** What the router stores: the handler plus the schemas declared alongside it, if any. */
+interface RouteEntry {
+  handler: (ctx: Context) => unknown
+  schema: RouteSchema | undefined
+}
 
 /**
  * An Oven application.
@@ -82,7 +102,7 @@ const EMPTY_PARAMS: Record<string, string> = Object.freeze({})
  * passing test means the served behaviour is genuinely covered.
  */
 export class App<Ext = unknown> {
-  private readonly router = new Router<(ctx: Context) => unknown>()
+  private readonly router = new Router<RouteEntry>()
   /**
    * Resolved configuration.
    *
@@ -149,6 +169,8 @@ export class App<Ext = unknown> {
       development: options.development ?? Bun.env.NODE_ENV !== 'production',
       shutdownTimeout: options.shutdownTimeout ?? 10_000,
       trustProxy: options.trustProxy ?? false,
+      validateResponses:
+        options.validateResponses ?? options.development ?? Bun.env.NODE_ENV !== 'production',
     }
     this.baseLogger = options.logger ?? new ConsoleLogger({ level: this.settings.logLevel })
   }
@@ -257,36 +279,112 @@ export class App<Ext = unknown> {
   // ---------------------------------------------------------------- routing
 
   /**
-   * Registers a handler.
+   * Shared registration path.
+   *
+   * The public verbs are overloaded so a schema is optional, and TypeScript requires one
+   * implementation signature compatible with every overload. Funnelling them through one
+   * private method keeps that awkwardness in a single place instead of seven.
+   */
+  private register(
+    method: HttpMethod,
+    path: string,
+    schemaOrHandler: RouteSchema | Handler<Ext>,
+    maybeHandler?: ValidatedHandler<RouteSchema, Ext>,
+  ): this {
+    const hasSchema = typeof schemaOrHandler === 'object'
+    const handler = (hasSchema ? maybeHandler : schemaOrHandler) as (ctx: Context) => unknown
+    const schema = hasSchema ? (schemaOrHandler as RouteSchema) : undefined
+
+    if (typeof handler !== 'function') {
+      throw new Error(`Route ${method} ${path} was registered without a handler function.`)
+    }
+
+    this.router.insert(method, path, { handler, schema })
+    return this
+  }
+
+  /**
+   * Registers a handler, optionally with schemas.
    *
    * File-based routing (§1.8) is the DX users see, but it compiles down to this, and plugins
    * that contribute endpoints — `/auth/*`, the docs UI — call it directly.
    */
-  route(method: HttpMethod, path: string, handler: Handler<Ext>): this {
-    this.router.insert(method, path, handler as (ctx: Context) => unknown)
-    return this
+  route(method: HttpMethod, path: string, handler: Handler<Ext>): this
+  route<const Schema extends RouteSchema>(
+    method: HttpMethod,
+    path: string,
+    schema: Schema,
+    handler: ValidatedHandler<Schema, Ext>,
+  ): this
+  route(
+    method: HttpMethod,
+    path: string,
+    schemaOrHandler: RouteSchema | Handler<Ext>,
+    maybeHandler?: ValidatedHandler<RouteSchema, Ext>,
+  ): this {
+    return this.register(method, path, schemaOrHandler, maybeHandler)
   }
 
-  get(path: string, handler: Handler<Ext>): this {
-    return this.route('GET', path, handler)
+  get(path: string, handler: Handler<Ext>): this
+  get<const S extends RouteSchema>(path: string, schema: S, handler: ValidatedHandler<S, Ext>): this
+  get(a: string, b: RouteSchema | Handler<Ext>, c?: ValidatedHandler<RouteSchema, Ext>): this {
+    return this.register('GET', a, b, c)
   }
-  post(path: string, handler: Handler<Ext>): this {
-    return this.route('POST', path, handler)
+
+  post(path: string, handler: Handler<Ext>): this
+  post<const S extends RouteSchema>(
+    path: string,
+    schema: S,
+    handler: ValidatedHandler<S, Ext>,
+  ): this
+  post(a: string, b: RouteSchema | Handler<Ext>, c?: ValidatedHandler<RouteSchema, Ext>): this {
+    return this.register('POST', a, b, c)
   }
-  put(path: string, handler: Handler<Ext>): this {
-    return this.route('PUT', path, handler)
+
+  put(path: string, handler: Handler<Ext>): this
+  put<const S extends RouteSchema>(path: string, schema: S, handler: ValidatedHandler<S, Ext>): this
+  put(a: string, b: RouteSchema | Handler<Ext>, c?: ValidatedHandler<RouteSchema, Ext>): this {
+    return this.register('PUT', a, b, c)
   }
-  patch(path: string, handler: Handler<Ext>): this {
-    return this.route('PATCH', path, handler)
+
+  patch(path: string, handler: Handler<Ext>): this
+  patch<const S extends RouteSchema>(
+    path: string,
+    schema: S,
+    handler: ValidatedHandler<S, Ext>,
+  ): this
+  patch(a: string, b: RouteSchema | Handler<Ext>, c?: ValidatedHandler<RouteSchema, Ext>): this {
+    return this.register('PATCH', a, b, c)
   }
-  delete(path: string, handler: Handler<Ext>): this {
-    return this.route('DELETE', path, handler)
+
+  delete(path: string, handler: Handler<Ext>): this
+  delete<const S extends RouteSchema>(
+    path: string,
+    schema: S,
+    handler: ValidatedHandler<S, Ext>,
+  ): this
+  delete(a: string, b: RouteSchema | Handler<Ext>, c?: ValidatedHandler<RouteSchema, Ext>): this {
+    return this.register('DELETE', a, b, c)
   }
-  head(path: string, handler: Handler<Ext>): this {
-    return this.route('HEAD', path, handler)
+
+  head(path: string, handler: Handler<Ext>): this
+  head<const S extends RouteSchema>(
+    path: string,
+    schema: S,
+    handler: ValidatedHandler<S, Ext>,
+  ): this
+  head(a: string, b: RouteSchema | Handler<Ext>, c?: ValidatedHandler<RouteSchema, Ext>): this {
+    return this.register('HEAD', a, b, c)
   }
-  options(path: string, handler: Handler<Ext>): this {
-    return this.route('OPTIONS', path, handler)
+
+  options(path: string, handler: Handler<Ext>): this
+  options<const S extends RouteSchema>(
+    path: string,
+    schema: S,
+    handler: ValidatedHandler<S, Ext>,
+  ): this
+  options(a: string, b: RouteSchema | Handler<Ext>, c?: ValidatedHandler<RouteSchema, Ext>): this {
+    return this.register('OPTIONS', a, b, c)
   }
 
   /** Every registered route. Backs `oven routes` and the boot banner. */
@@ -451,12 +549,37 @@ export class App<Ext = unknown> {
       if (plugin.onRequest) await plugin.onRequest(ctx)
     }
 
+    const { handler, schema } = match.payload
+
+    // Validation runs after beforeHandle would have a chance to reject cheaply, but before the
+    // handler — a handler should never see input it did not ask for.
     for (const hook of this.hooks.beforeHandle) {
       const short = await hook(ctx)
       if (short !== undefined) return short
     }
 
-    let result = await match.payload(ctx)
+    if (schema) await validateRequest(ctx, schema)
+
+    let result = await handler(ctx)
+
+    if (schema?.response && this.settings.validateResponses) {
+      const issues = await validateResponse(schema, ctx.status ?? 200, result)
+      if (issues.length > 0) {
+        ctx.log.error('Response does not match its declared schema', {
+          path: ctx.path,
+          status: ctx.status ?? 200,
+          issues,
+        })
+        // The detail is withheld in production for the same reason any internal error is: it
+        // describes our own data shapes, which is not the caller's business.
+        throw new OvenError(
+          500,
+          'Internal Server Error',
+          'Response validation failed.',
+          this.settings.development ? { detail: { errors: issues } } : undefined,
+        )
+      }
+    }
 
     for (const hook of this.hooks.afterHandle) {
       const transformed = await hook(ctx, result)

@@ -1,11 +1,11 @@
 # Oven — Task Tracker
 
-**Current state:** Phases 1.1 through 1.5 done — router, server, context, errors, logger, response
+**Current state:** Phases 1.1 through 1.6 done — router, server, context, errors, logger, response
 coercion, graceful shutdown, the always-on batteries, middleware and the plugin system.
-**505 tests green**, typecheck and lint clean. Benchmarked against
+**553 tests green**, typecheck and lint clean. Benchmarked against
 Hono, Elysia, Fastify and Express at both dispatch and socket level. Docs site scaffolded and
 building (11 pages). GitHub repo live, `@theoven` npm org claimed.
-**Next task:** Phase 1.6 — validation (Standard Schema + Zod 4).
+**Next task:** Phase 1.7 — errors (mostly landed in 1.2; remaining work is redaction and the `onError` surface), then 1.8 file-based routing.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -225,13 +225,33 @@ server-sent events arriving and pull a large download into memory.
 express each contribution in the type system, so `.use()` chaining stays the typed surface.
 Config keys mapping to plugins (`{ storage: {...} }`) needs the module packages to exist.
 
-### 1.6 Validation
-- [ ] Standard Schema v1 adapter (`schema['~standard'].validate`)
-- [ ] Validate `params`, `query`, `body`, `headers` → narrowed context types
-- [ ] Response validation (dev-only by default; decide prod default — open question)
-- [ ] `422` error shape with per-field detail
-- [ ] Coercion for path/query (string → number/boolean/date)
-- [ ] Tests incl. a non-Zod validator (Valibot) to prove no lock-in
+### 1.6 Validation ✅
+
+`packages/core/src/{standard-schema,validation}.ts` — 48 tests.
+
+- [x] Standard Schema v1 adapter. The contract is declared locally rather than depended on: it
+      is type-only, so importing a package to describe it would add a dependency for no runtime
+      code
+- [x] Validate `params`, `query`, `body`, `headers` → narrowed context types. `ctx.body` becomes
+      the value rather than a promise once a schema is declared, since validation already
+      awaited it
+- [x] **Every location is checked before failing.** Reporting only the first problem turns
+      fixing a request into a guessing game, one field per round trip
+- [x] `422` problem document with `location`, `path` and `message` per issue; paths render as
+      `items[0].qty` so they paste back into client code
+- [x] Malformed JSON stays a `400` — the caller sending nonsense is not a shape mismatch
+- [x] Response validation: **on in development, off in production**. A mismatch is a `500`, not
+      a `422` — the caller did nothing wrong, the route drifted from its contract. Detail shown
+      in development, withheld in production
+- [x] Non-Zod validator proven end to end (Valibot), including mixing libraries on one route
+- [x] Type-level tests, verified to fail when inference breaks
+
+**Decision — no automatic coercion.** The TODO originally called for `string → number/boolean/
+date` conversion on path and query values. Implemented instead as explicit `z.coerce.number()`,
+because Oven cannot know the intent: coercing `"123"` to `123` before the schema sees it
+silently breaks a `z.string()` field that legitimately holds digits — an order number, a zip
+code, a phone number. Every Standard Schema library ships coercion of its own, so the framework
+guessing adds risk without adding capability.
 
 ### 1.7 Errors
 - [ ] `OvenError` base + `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Payload TooLarge`, `UnsupportedMediaType`, `TooManyRequests`, `Internal`
@@ -394,7 +414,9 @@ Config keys mapping to plugins (`{ storage: {...} }`) needs the module packages 
 
 - [x] ~~`ctx` as plain object or class with getters?~~ **Class.** Lazy getters need a
       prototype, and a shared hidden class keeps construction to one allocation.
-- [ ] Response validation in prod: on or off by default?
+- [x] ~~Response validation in prod: on or off by default?~~ **Off.** It validates our own
+      code, not untrusted input, and costs a check on every success. Opt in with
+      `validateResponses: true`.
 - [x] ~~Ship our own logger or wrap pino?~~ **Our own, pluggable.** A small built-in so
       `ctx.log` always works with zero setup; `createApp({ logger })` swaps in pino.
 - [ ] Integration test strategy for Postgres/Redis/MinIO — testcontainers or docker-compose in CI?

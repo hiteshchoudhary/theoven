@@ -1,83 +1,139 @@
 ---
 title: 2. Validation
-description: Schemas that validate requests, narrow types, and generate OpenAPI — from one declaration.
+description: One declaration that validates the request, types the handler, and will document the endpoint.
 ---
 
 import { Aside } from '@astrojs/starlight/components'
 
-<Aside type="caution" title="Not built yet">
-  Validation lands in Phase 1.6 and the OpenAPI generation in Phase 1.9. This page describes the
-  designed API so you can see where the framework is going — it does not work today. Follow
-  [`TODO.md`](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for progress.
-</Aside>
+## One declaration, three jobs
 
-## The idea
+FastAPI's insight was that a single declaration should validate the request, type the handler,
+and document the endpoint. Python could do that with type hints because they survive to
+runtime. TypeScript's do not — so a schema takes their place and does the same three jobs.
 
-FastAPI's insight was that one declaration should do three jobs: validate the request, type the
-handler, and document the endpoint. Python type hints did all three. TypeScript types vanish at
-runtime, so they cannot — but a schema can.
-
-```ts title="src/routes/users/[id].patch.ts"
+```ts title="src/index.ts"
 import { z } from 'zod'
 
-export const params = z.object({ id: z.uuid() })
-export const body = z.object({
-  name: z.string().min(1).max(100),
-  email: z.email(),
-})
-
-export default async ({ params, body }) => {
-  //                    ^ { id: string }
-  //                            ^ { name: string, email: string }
-  return db.user.update(params.id, body)
-}
+app.post(
+  '/users/:id',
+  {
+    params: z.object({ id: z.coerce.number() }),
+    body: z.object({ name: z.string().min(1), email: z.email() }),
+  },
+  async (ctx) => {
+    ctx.params.id    // number, coerced and validated
+    ctx.body.email   // string, guaranteed to be an email
+    return db.user.update(ctx.params.id, ctx.body)
+  },
+)
 ```
 
-From that one declaration you get:
+You wrote no generics and no interfaces. A bad request never reaches the handler.
 
-- **Validation.** A bad request never reaches your handler; it gets a `422` with per-field detail.
-- **Types.** `params` and `body` are inferred. You write no generics and no interfaces.
-- **Documentation.** The endpoint appears in `/docs` with its real schema.
+<Aside type="note" title="`ctx.body` is the value, not a promise">
+  On a route with no body schema, `ctx.body` is a promise you await. Once a schema is declared,
+  validation has already awaited and checked it — making you await a second time would be
+  ceremony with no purpose, so the type changes to match.
+</Aside>
 
-## Coercion
+## What can be validated
 
-Path and query values are always strings in a URL. Schemas convert them:
-
-```ts
-export const params = z.object({ id: z.coerce.number().int().positive() })
-export const query = z.object({
-  page: z.coerce.number().default(1),
-  includeArchived: z.coerce.boolean().default(false),
-})
-```
-
-## Bring your own validator
-
-Oven accepts anything implementing [Standard Schema](https://standardschema.dev) — Zod,
-Valibot, ArkType, Effect Schema. Zod 4 is the bundled default because it can emit JSON Schema
-natively, which is what makes the OpenAPI generation free.
-
-```ts
-import * as v from 'valibot'
-export const body = v.object({ name: v.string() })   // works identically
-```
+| Key | Validates |
+| --- | --- |
+| `params` | path parameters |
+| `query` | the parsed query string |
+| `body` | the parsed request body |
+| `headers` | request headers, as a lowercase-keyed object |
+| `response` | the handler's result, by status code |
 
 ## Failures
 
-A validation failure is an RFC 9457 problem document:
+A validation failure is an RFC 9457 problem document with **every** problem listed:
 
 ```json
 {
   "type": "about:blank",
   "title": "Unprocessable Content",
   "status": 422,
-  "detail": "Validation failed",
+  "detail": "Request validation failed.",
   "errors": [
-    { "path": "email", "message": "Invalid email address" }
+    { "location": "body",   "path": "email",        "message": "Invalid email address" },
+    { "location": "body",   "path": "items[0].qty", "message": "Expected number, received string" },
+    { "location": "params", "path": "id",           "message": "Invalid UUID" }
   ]
 }
 ```
 
+Every location is checked before failing. Reporting only the first problem turns fixing a
+request into a guessing game, one field per round trip.
+
+Paths are rendered as `items[0].qty` rather than as a JSON array, so they can be pasted
+straight back into client code.
+
+Unlike an unexpected 500, these messages describe **the caller's own payload**, so they are
+shown in production too. Nothing internal leaks by telling someone their email is malformed.
+
+<Aside type="caution" title="Malformed JSON is a 400, not a 422">
+  A body that is not valid JSON never reaches the schema. That is the caller sending nonsense,
+  not a shape mismatch, and conflating the two makes both harder to debug.
+</Aside>
+
+## Coercion
+
+Everything in a URL is a string. Say so in the schema:
+
+```ts
+{
+  params: z.object({ id: z.coerce.number() }),
+  query: z.object({
+    page: z.coerce.number().default(1),
+    includeArchived: z.coerce.boolean().default(false),
+  }),
+}
+```
+
+Oven does **not** silently coerce for you. It cannot know what you meant: turning `"123"` into
+`123` before the schema sees it would quietly break a `z.string()` field that legitimately holds
+digits — an order number, a zip code, a phone number. Being explicit costs seven characters and
+removes an entire category of surprise.
+
+## Response schemas
+
+```ts
+app.get('/users/:id', { response: { 200: UserSchema } }, (ctx) => db.user.find(ctx.params.id))
+```
+
+A response that does not match is a **500**, not a 422: the caller did nothing wrong, your route
+drifted from its contract. In development the mismatch is described in the response; in
+production it is logged and withheld.
+
+Response validation is **on in development, off in production** by default. It checks your own
+code rather than untrusted input, so the bug it catches is one local development and CI should
+already have caught — and unlike request validation, the cost is paid on every success. Turn it
+on with `createApp({ validateResponses: true })` if you would rather pay it.
+
+## Bring your own validator
+
+Oven accepts anything implementing [Standard Schema](https://standardschema.dev) — Zod,
+Valibot, ArkType, Effect Schema. You can even mix them on one route:
+
+```ts
+import * as v from 'valibot'
+
+app.post(
+  '/users/:id',
+  {
+    params: z.object({ id: z.coerce.number() }),   // zod
+    body: v.object({ name: v.string() }),          // valibot
+  },
+  (ctx) => ({ id: ctx.params.id, name: ctx.body.name }),
+)
+```
+
+Zod is the bundled default because it emits JSON Schema natively, which is what will make
+OpenAPI generation free. It is not a requirement — and the test suite validates a Valibot schema
+end to end so that claim stays true.
+
 ## Next
 
-[Errors](/docs/tutorial/errors/) — which already works today.
+[Errors](/docs/tutorial/errors/).

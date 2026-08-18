@@ -34,7 +34,8 @@
     "fastify": "^5.12.1",
     "hono": "^4.13.3",
     "sharp": "^0.35.3",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "valibot": "^1.4.2"
   },
   "engines": {
     "bun": ">=1.2.0"

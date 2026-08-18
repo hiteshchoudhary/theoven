@@ -35,7 +35,7 @@ export default defineConfig({
           label: 'Tutorial',
           items: [
             { label: '1. Your first route', slug: 'tutorial/first-route' },
-            { label: '2. Validation', slug: 'tutorial/validation', badge: 'Planned' },
+            { label: '2. Validation', slug: 'tutorial/validation' },
             { label: '3. Errors', slug: 'tutorial/errors' },
           ],
         },
