@@ -64,6 +64,18 @@ oven dev
 The scaffolder asks which modules you want — auth, database, storage, mail, queue — and writes
 a configured, working app. No copy-pasted boilerplate.
 
+## Configuration
+
+Bun loads `.env`, `.env.local` and `.env.<NODE_ENV>` on its own, so there is nothing to install.
+Read them safely with `env.*`, or validate the whole set at boot with `defineEnv` — see
+[Environment variables](/docs/reference/env/).
+
+```ts
+import { env } from '@theoven/core'
+
+const port = env.port('PORT', 3000)
+```
+
 ## Verifying the test suite
 
 Oven's test suite is the contract. If you are contributing, run it first so you know a failure

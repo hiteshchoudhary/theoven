@@ -159,6 +159,21 @@ Repeated keys become arrays, `a[b]=1` nests, and `a[]=1` is an explicit array. D
 count are capped, and `__proto__`, `constructor` and `prototype` are dropped wherever they
 appear — this is the `qs` CVE class, and the only safe amount of it is none.
 
+## Environment variables
+
+```ts
+import { env } from '@theoven/core'
+
+const port = env.port('PORT', 3000)
+const debug = env.bool('DEBUG', false)
+```
+
+Parsing that throws instead of guessing — `Boolean('false')` is `true`, `Number('')` is `0`, and
+`parseInt('12abc')` is `12`, all silently. Secrets are redacted from errors and dumps.
+
+Bun loads `.env` files itself, so there is no dotenv to install. See
+[Environment variables](/docs/reference/env/).
+
 ## Headers, IP and negotiation
 
 ```ts

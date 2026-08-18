@@ -2,7 +2,7 @@
 
 **Current state:** **Phases 1 and 4 complete.** Router, server, context, errors, logger, response
 coercion, graceful shutdown, the always-on batteries, middleware, plugins, validation,
-file-based routing, OpenAPI, and the CLI. **762 tests green**, typecheck and lint clean.
+file-based routing, OpenAPI, and the CLI. **850 tests green**, typecheck and lint clean.
 
 Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
 Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
@@ -386,6 +386,19 @@ guessing adds risk without adding capability.
 - [x] `oven doctor` — Bun version, entry, app module, routes, env files, port. Every non-ok
       check says what to do about it
 - [x] Typed env loading via `defineEnv` in core, reporting every problem at once
+- [x] `env.*` reader for single variables — `port`, `bool`, `int`, `url`, `list`, `oneOf`,
+      `duration`, `bytes` — parsing that throws rather than guessing. `Boolean('false')` is
+      `true`, `Number('')` is `0`, and `parseInt('12abc')` is `12`; all three produce a service
+      that starts, looks healthy, and behaves wrongly
+- [x] Secret-looking values redacted in `env.all()` **and** in error messages. The variable is
+      always named; the value appears only when safe
+- [x] No dotenv shipped — Bun already loads `.env`, `.env.local` and `.env.<NODE_ENV>` with the
+      right precedence, and a second implementation that disagrees slightly would be worse than
+      none
+- [x] The scaffold catches `EnvError` in `src/env.ts` and prints it alone. Bun renders an
+      uncaught throw with source context from inside the library, which buries the one line
+      naming the variable. Setting `error.stack` does not suppress that — tried, reverted, since
+      shipping code that claims an effect it does not have is worse than the rough edge
 - [x] `oven db` / `oven worker` report that they need an unbuilt module, rather than looking
       like a typo the user made
 - [ ] `bun create oven` — needs a published `create-oven` package; Phase 5, at release

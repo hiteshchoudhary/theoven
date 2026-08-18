@@ -100,6 +100,7 @@ function appModule(options: TemplateOptions): string {
   .use(securityHeaders())`
 
   return `${imports}
+import { config } from './env'
 
 /**
  * The configured app.
@@ -107,7 +108,7 @@ function appModule(options: TemplateOptions): string {
  * This module builds the app but never calls listen(), so \`oven routes\` and \`oven openapi\`
  * can import it without starting a server. Listening happens in index.ts.
  */
-export const app = createApp()
+export const app = createApp({ logLevel: config.logLevel })
 ${plugins}
 
 await loadRoutes(app, \`\${import.meta.dir}/routes\`)
@@ -116,9 +117,48 @@ export default app
 `
 }
 
-const ENTRY = `import app from './app'
+const ENV_MODULE = `import { env, EnvError } from '@theoven/core'
 
-await app.listen()
+/**
+ * Configuration, read once.
+ *
+ * Bun loads .env, .env.local and .env.<NODE_ENV> already, so there is no dotenv here. These
+ * readers throw when a value is missing or unparseable, rather than letting Boolean('false')
+ * quietly mean true or Number('') quietly mean 0.
+ *
+ * For a larger surface, validate the whole environment at once with defineEnv and a schema.
+ */
+function read() {
+  return {
+    port: env.port('PORT', 3000),
+    logLevel: env.oneOf('LOG_LEVEL', ['debug', 'info', 'warn', 'error'], 'info'),
+    isProduction: env.isProduction,
+  }
+}
+
+/**
+ * A bad variable is a configuration mistake, not a crash. Left to propagate, the runtime prints
+ * a stack through library internals and buries the one line that names the variable, so it is
+ * caught here and printed on its own.
+ */
+let loaded: ReturnType<typeof read>
+try {
+  loaded = read()
+} catch (error) {
+  if (error instanceof EnvError) {
+    console.error(\`\\n\${error.message}\\n\`)
+    process.exit(1)
+  }
+  throw error
+}
+
+export const config = loaded
+`
+
+const ENTRY = `import app from './app'
+import { config } from './env'
+
+await app.listen(config.port)
 
 app.logger.info(\`listening on \${app.url}\`)
 for (const { method, pattern } of app.routes()) {
@@ -229,6 +269,7 @@ ${docsLine}
 
 \`\`\`
 src/
+  env.ts       configuration, read and validated once
   app.ts       builds and exports the app (never listens)
   index.ts     starts the server
   routes/      the route table — the filesystem is the router
@@ -255,8 +296,9 @@ export function renderTemplate(template: TemplateName, options: TemplateOptions)
     { path: 'package.json', contents: packageJson(options.name) },
     { path: 'tsconfig.json', contents: TSCONFIG },
     { path: '.gitignore', contents: GITIGNORE },
-    { path: '.env.example', contents: 'PORT=3000\n' },
+    { path: '.env.example', contents: '# Copy to .env and adjust.\nPORT=3000\nLOG_LEVEL=info\n' },
     { path: 'README.md', contents: readme(options) },
+    { path: 'src/env.ts', contents: ENV_MODULE },
     { path: 'src/app.ts', contents: appModule(options) },
     { path: 'src/index.ts', contents: ENTRY },
     { path: 'src/routes/index.get.ts', contents: ROOT_ROUTE },

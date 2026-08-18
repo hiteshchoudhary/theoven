@@ -280,8 +280,29 @@ describe('templates', () => {
     const entry = files.find((file) => file.path === 'src/index.ts')?.contents ?? ''
 
     expect(app).toContain('export default app')
-    expect(app).not.toContain('app.listen()')
-    expect(entry).toContain('app.listen()')
+    // Matched on the call, not an exact string: the entry passes a port, and the invariant is
+    // "the entry listens and the app module does not", not the argument list.
+    expect(app).not.toContain('app.listen(')
+    expect(entry).toContain('app.listen(')
+  })
+
+  test('config is read in one place and used by both', () => {
+    const files = renderTemplate('api', { name: 'test-app', openapi: true })
+    const paths = files.map((file) => file.path)
+    expect(paths).toContain('src/env.ts')
+
+    const envModule = files.find((file) => file.path === 'src/env.ts')?.contents ?? ''
+    expect(envModule).toContain('env.port(')
+    // A bad variable must read as a config error, not as a stack through library internals.
+    expect(envModule).toContain('EnvError')
+    expect(envModule).toContain('process.exit(1)')
+  })
+
+  test('.env.example lists what the scaffold reads', () => {
+    const files = renderTemplate('api', { name: 'test-app', openapi: true })
+    const example = files.find((file) => file.path === '.env.example')?.contents ?? ''
+    expect(example).toContain('PORT=')
+    expect(example).toContain('LOG_LEVEL=')
   })
 
   test('the openapi plugin is included or omitted as asked', () => {

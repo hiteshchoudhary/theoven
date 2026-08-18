@@ -22,7 +22,15 @@ export {
 } from './body'
 export { Context, type ContextInit } from './context'
 export { type CookieJarInit, type CookieOptions, Cookies } from './cookies'
-export { defineEnv, EnvError, type EnvOptions } from './env'
+export {
+  createEnvReader,
+  defineEnv,
+  EnvError,
+  type EnvOptions,
+  EnvReader,
+  env,
+  isSecretName,
+} from './env'
 export {
   BadRequest,
   Conflict,

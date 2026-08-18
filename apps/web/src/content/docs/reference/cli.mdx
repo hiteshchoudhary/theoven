@@ -102,31 +102,20 @@ oven doctor
 Every check that is not `ok` says what to do about it. A diagnostic that only reports a problem
 has done half the job.
 
-## Typed environment variables
+## Environment variables
 
 Not a command, but the same class of problem — catching configuration mistakes at boot rather
 than in production:
 
-```ts title="src/env.ts"
-import { defineEnv } from '@theoven/core'
-import { z } from 'zod'
+```ts
+import { env, defineEnv } from '@theoven/core'
 
-export const env = defineEnv(
-  z.object({
-    DATABASE_URL: z.url(),
-    PORT: z.coerce.number().default(3000),
-    STRIPE_KEY: z.string().startsWith('sk_'),
-  }),
-)
-
-env.PORT  // number
+const port = env.port('PORT', 3000)      // parses, or throws naming PORT
+const debug = env.bool('DEBUG', false)   // DEBUG=false is false, not truthy
 ```
 
-A missing `DATABASE_URL` otherwise surfaces forty minutes into production as
-`connect ECONNREFUSED undefined:undefined`, from a stack trace pointing at a connection pool
-rather than at the config. This refuses to start instead, and lists **every** problem at once —
-fixing environment configuration one variable per restart is a genuinely awful way to spend
-twenty minutes.
+`oven doctor` checks that a `.env` and `.env.example` agree. See
+[Environment variables](/docs/reference/env/) for the full reader and for `defineEnv`.
 
 ## Not built yet
 

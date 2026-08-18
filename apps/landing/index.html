@@ -99,7 +99,7 @@
     <dl class="stats">
       <div><dt>110k</dt><dd>req/s on Bun</dd></div>
       <div><dt>6&times;</dt><dd>faster than Express</dd></div>
-      <div><dt>762</dt><dd>tests, all green</dd></div>
+      <div><dt>850</dt><dd>tests, all green</dd></div>
     </dl>
   </div>
 </section>
@@ -208,7 +208,7 @@
       </article>
       <article class="status done">
         <header><span class="tick">&check;</span><h3>The CLI</h3></header>
-        <p><code>oven create</code>, <code>dev</code>, <code>build</code>, <code>start</code>, <code>routes</code>, <code>openapi</code>, <code>doctor</code>. Plus typed env vars validated at boot.</p>
+        <p><code>oven create</code>, <code>dev</code>, <code>build</code>, <code>start</code>, <code>routes</code>, <code>openapi</code>, <code>doctor</code>.</p>
       </article>
       <article class="status next">
         <header><span class="tick">&rarr;</span><h3>Auth &amp; database</h3></header>
@@ -266,6 +266,11 @@
         <h3>Async errors</h3>
         <p>A throw becomes an RFC 9457 response, whether it happened synchronously or three awaits deep.</p>
         <p class="replaces">replaces <code>express-async-errors</code></p>
+      </article>
+      <article class="card">
+        <h3>Environment variables</h3>
+        <p><code>env.port()</code>, <code>env.bool()</code>, <code>env.duration()</code> — parsing that throws instead of guessing, with secrets redacted from errors and dumps.</p>
+        <p class="replaces">replaces <code>dotenv</code> + <code>Boolean('false') === true</code></p>
       </article>
       <article class="card">
         <h3>Graceful shutdown</h3>
