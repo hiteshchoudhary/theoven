@@ -1,0 +1,18 @@
+{
+  "name": "oven-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*", "examples/*"],
+  "scripts": {
+    "build": "bun run --filter '@theoven/*' build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "docs:dev": "bun run --cwd apps/web dev",
+    "example:minimal": "bun run --cwd examples/minimal dev"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.0"
+  },
+  "engines": { "bun": ">=1.2.0" }
+}

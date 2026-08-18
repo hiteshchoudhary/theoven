@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.oven/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage/
+.astro/
+apps/web/dist/
