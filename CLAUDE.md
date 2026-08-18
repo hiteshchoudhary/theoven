@@ -83,6 +83,66 @@ These are settled. Do not re-litigate them in a new session without the user exp
 | D9 | Runtime | **Bun-only, unapologetically** | Use `Bun.serve`, `Bun.file`, `Bun.password`, `Bun.S3Client`, `bun:sqlite`, `bun:test` directly. Far less code, best perf, clearest story. No Node adapter, no abstraction tax. |
 | D10 | License | **MIT** | Maximum adoption. What Express/Fastify/Hono/Elysia all use. |
 | D11 | CLI | **Ships in v1** — `bun create oven`, `oven dev/build/routes/db` | A batteries framework lives or dies on the 60-second first-run experience. |
+| D12 | Compatibility | **No backward compatibility with anything.** Not Express, not Connect, not `req/res`, not Node streams, not CommonJS. | Oven is a 2026 reset. Every framework carrying Express's shape carries its mistakes. Web-standard `Request`/`Response`, ESM only, async only. Compatibility shims are the single biggest source of API rot — we ship none. |
+| D13 | Batteries in core | **Cookies, body parsing, file handling and token capture are always-on core behaviour** — not middleware, not opt-in, not installable. | `app.use(cookieParser())` is a bug in framework design, not a feature. If 100% of real apps need it, it belongs in the runtime. Nothing to install, nothing to order, nothing to forget. |
+
+---
+
+## 2b. Principles
+
+These are the beliefs the decisions above fall out of. Apply them when a new question comes up
+that the table does not answer.
+
+### 1. Fresh start. We owe the past nothing.
+
+Oven is designed in 2026 for 2026. There is **no** Express compatibility layer, no
+`(req, res, next)` signature, no Connect middleware support, no CommonJS build, no
+callback API, no Node stream interop, no polyfills.
+
+Every framework that offered an Express compatibility shim ended up shaped by Express.
+We are deliberately not doing that. If someone wants Express, Express exists.
+
+Practically this means:
+- **ESM only.** No `require`, no dual build, no `.cjs`.
+- **Web standards only.** `Request`, `Response`, `Headers`, `URL`, `FormData`, `ReadableStream`, `File`.
+- **Async only.** Every extension point returns a promise or a value; nothing takes a callback.
+- **Bun only.** See D9.
+- **Breaking changes are fine before 1.0.** We will move fast and change APIs. Semver discipline
+  starts at 1.0, not before. Do not add a deprecation path for something that shipped last week.
+
+### 2. If every app needs it, it is not a plugin.
+
+Express made you assemble a working server from parts: `body-parser`, `cookie-parser`, `multer`,
+`cors`, `morgan`. That was never a real choice — it was homework. Oven ships those behaviours in
+core, always on, correctly ordered, with no install and no registration.
+
+**Always on, zero configuration, cannot be forgotten:**
+
+| Behaviour | What you get | Express equivalent you no longer install |
+|---|---|---|
+| **Cookie parsing** | `ctx.cookies.get(name)`, `.set(name, val, opts)`, `.delete()`, signed cookies | `cookie-parser` |
+| **Body parsing** | `ctx.body` — content-type aware: JSON, urlencoded, multipart, text, raw. Lazy, size-limited, never blocks a route that does not read it | `body-parser`, `express.json()` |
+| **File handling** | Uploads arrive as web `File` objects in `ctx.body`. Streaming, size/type limits, temp-file spill for large uploads | `multer` |
+| **Token capture** | `ctx.token` — pulled automatically from `Authorization: Bearer`, cookie, or `?token=`, in that precedence. Present with or without the auth plugin | hand-rolled every time |
+| **Query parsing** | `ctx.query`, lazily parsed, with arrays and nested keys | `qs` |
+| **Request ID + logging** | `ctx.id`, `ctx.log` — structured, request-scoped | `morgan` + `uuid` |
+| **Errors** | Thrown errors become RFC 9457 responses. Async errors caught automatically | Express needs `express-async-errors` |
+| **Graceful shutdown** | SIGTERM drains in-flight requests and closes plugin resources | hand-rolled every time |
+
+The rule: **if it appears in more than 80% of real apps, it goes in core with no switch.**
+Things that vary by app (CORS policy, rate limits, compression) stay configurable but still
+ship in the box — configured, not installed.
+
+### 3. Lazy, not eager.
+
+Always-on must not mean always-paid. Body is not parsed until `ctx.body` is read. Query is not
+parsed until `ctx.query` is read. Cookies are not parsed until touched. A route that returns a
+string does zero parsing work. Measure this — it is a benchmark requirement, not an aspiration.
+
+### 4. Types are the documentation.
+
+If a user needs to read docs to know a property exists, we failed. Autocomplete on `ctx` should
+teach the framework.
 
 ---
 

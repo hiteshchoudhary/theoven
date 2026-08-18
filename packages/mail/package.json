@@ -1,0 +1,23 @@
+{
+  "name": "@theoven/mail",
+  "version": "0.0.0",
+  "description": "Transactional email for Oven",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:*"
+  }
+}

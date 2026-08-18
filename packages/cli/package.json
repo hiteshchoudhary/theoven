@@ -1,0 +1,26 @@
+{
+  "name": "@theoven/cli",
+  "version": "0.0.0",
+  "description": "The Oven CLI",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "oven": "./src/index.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@theoven/core": "workspace:*"
+  }
+}
