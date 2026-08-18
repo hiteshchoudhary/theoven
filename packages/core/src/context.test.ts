@@ -100,9 +100,9 @@ describe('laziness', () => {
 
   test('allocates no header bag until a header is set', () => {
     const ctx = makeContext()
-    expect(ctx.headers).toBeUndefined()
+    expect(ctx.responseHeaders).toBeUndefined()
     ctx.set('x-custom', 'v')
-    expect(ctx.headers).toBeDefined()
+    expect(ctx.responseHeaders).toBeDefined()
   })
 
   test('derives no child logger until log is read', () => {
@@ -149,22 +149,24 @@ describe('log', () => {
 })
 
 describe('response headers', () => {
+  // Named `responseHeaders`, not `headers`: with request headers on the same object, a bare
+  // `ctx.headers` is a coin flip every time you read it.
   test('set stores a header', () => {
     const ctx = makeContext()
     ctx.set('x-a', '1')
-    expect(ctx.headers?.get('x-a')).toBe('1')
+    expect(ctx.responseHeaders?.get('x-a')).toBe('1')
   })
 
   test('set replaces an existing value', () => {
     const ctx = makeContext()
     ctx.set('x-a', '1').set('x-a', '2')
-    expect(ctx.headers?.get('x-a')).toBe('2')
+    expect(ctx.responseHeaders?.get('x-a')).toBe('2')
   })
 
   test('append keeps both values, which set-cookie needs', () => {
     const ctx = makeContext()
     ctx.append('set-cookie', 'a=1').append('set-cookie', 'b=2')
-    expect(ctx.headers?.getSetCookie()).toEqual(['a=1', 'b=2'])
+    expect(ctx.responseHeaders?.getSetCookie()).toEqual(['a=1', 'b=2'])
   })
 
   test('is chainable', () => {

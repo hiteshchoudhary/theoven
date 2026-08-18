@@ -6,7 +6,15 @@ export {
   type Handler,
   pathnameOf,
 } from './app'
+export {
+  type BodyOptions,
+  type FormBody,
+  filesOf,
+  parseBody,
+  readRaw,
+} from './body'
 export { Context, type ContextInit } from './context'
+export { type CookieJarInit, type CookieOptions, Cookies } from './cookies'
 export {
   BadRequest,
   Conflict,
@@ -31,6 +39,7 @@ export {
   type LogLevel,
   silentLogger,
 } from './logger'
+export { type ParsedQuery, parseQuery, type QueryOptions, type QueryValue } from './query'
 export { toResponse } from './response'
 export { normalisePath, RouteConflictError, Router } from './router/router'
 export {
@@ -40,3 +49,12 @@ export {
   type RouteMatch,
   type RouteParams,
 } from './router/types'
+export {
+  type BasicCredentials,
+  type CapturedToken,
+  captureToken,
+  decodeBasic,
+  redactToken,
+  type TokenOptions,
+  type TokenSource,
+} from './token'

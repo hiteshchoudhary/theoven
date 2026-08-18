@@ -1,10 +1,10 @@
 # Oven — Task Tracker
 
-**Current state:** Phases 1.1 and 1.2 done — router, server, context, errors, logger, response
-coercion, graceful shutdown. **223 tests green**, typecheck and lint clean. Benchmarked against
+**Current state:** Phases 1.1, 1.2 and 1.3 done — router, server, context, errors, logger, response
+coercion, graceful shutdown, and the always-on batteries. **425 tests green**, typecheck and lint clean. Benchmarked against
 Hono, Elysia, Fastify and Express at both dispatch and socket level. Docs site scaffolded and
 building (11 pages). GitHub repo live, `@theoven` npm org claimed.
-**Next task:** Phase 1.3 — the always-on batteries (body, files, cookies, token capture, query).
+**Next task:** Phase 1.4 — middleware and lifecycle hooks.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -113,57 +113,67 @@ Everything else depends on this. Do not start Phase 2 until Phase 1 is done and 
 **Note:** `app.options()` (the verb) collided with a private `options` field — the field silently
 shadowed the method on the instance. Renamed to `settings`, with a comment so it stays fixed.
 
-### 1.3 Always-on batteries 🔴 the differentiator — none of these are middleware
+### 1.3 Always-on batteries ✅
 
-Each item below must work with **zero configuration and zero registration**, and must be
-**lazy** — untouched means unparsed.
+`packages/core/src/{body,cookies,query,token}.ts` — 202 tests. Every item below works with
+**zero configuration and zero registration**, and none of it runs until it is read.
 
 **Body parsing** (replaces `body-parser`)
-- [ ] `ctx.body` as a lazy getter — parsed on first access, cached after
-- [ ] Content-type dispatch: `application/json`, `application/x-www-form-urlencoded`, `multipart/form-data`, `text/*`, everything else → raw `ArrayBuffer`/stream
-- [ ] `ctx.rawBody` for webhook signature verification (Stripe et al.) — must not conflict with `ctx.body`
-- [ ] Size limits with a `413` response, configurable globally and per route
-- [ ] Malformed JSON → `400` with a useful message, never a stack trace
-- [ ] Empty body → `undefined`, not a throw
-- [ ] Tests incl. large bodies, wrong content-type, truncated payloads
+- [x] `ctx.body` — lazy, memoised, content-type dispatched: JSON, `+json`, urlencoded,
+      multipart, `text/*`, and raw bytes for anything else
+- [x] `ctx.rawBody` — byte-exact input for webhook signature checks. Reading it first is safe;
+      `ctx.body` then parses from those bytes rather than a consumed stream
+- [x] Size limits enforced **by counting bytes as they arrive**, not by trusting
+      `Content-Length` — the header is client-supplied and often absent
+- [x] Malformed JSON → `400` with the parser's own message; empty body → `undefined`, not a throw
+- [x] Tests: large bodies, wrong content-type, truncated payloads, a lying `Content-Length`
 
 **File handling** (replaces `multer`)
-- [ ] Multipart uploads arrive as web `File` objects inside `ctx.body`
-- [ ] Streaming parse — never buffer an entire upload in memory by default
-- [ ] Temp-file spill to disk above a threshold, cleaned up after the response
-- [ ] Per-file and total size limits, file-count limit, MIME allowlist → `413`/`415`
-- [ ] `ctx.files` convenience accessor for multi-file fields
-- [ ] Zod integration: `z.file()` validates size/type declaratively
-- [ ] Direct handoff to `@theoven/storage` without a round trip through memory
-- [ ] Tests incl. 1GB upload, malicious filenames, path traversal in filenames
+- [x] Multipart uploads arrive as web `File` objects in `ctx.body`; `ctx.files()` for a
+      by-field view
+- [x] Streamed rather than buffered — Bun's `FormData` spills large parts to disk, so we
+      deliberately do not buffer multipart first
+- [x] Per-file limit, total limit, file-count limit, MIME allowlist with `image/*` wildcards
+      → `413`/`415`
+- [x] Tests including a path-traversal filename, which is preserved verbatim and never resolved
+- [ ] Zod integration (`z.file()`) — waits on §1.6
+- [ ] Direct handoff to `@theoven/storage` without a round trip through memory — waits on §3.1
 
 **Cookies** (replaces `cookie-parser`)
-- [ ] `ctx.cookies.get(name)` — lazy parse of the `Cookie` header
-- [ ] `.set(name, value, opts)` with sensible secure defaults (`httpOnly`, `sameSite: 'lax'`, `secure` in prod)
-- [ ] `.delete(name)`, `.all()`
-- [ ] Signed cookies via a configured secret (HMAC); tampered cookie reads as absent
-- [ ] Correct encoding/decoding, multiple `Set-Cookie` headers, `__Host-`/`__Secure-` prefixes
-- [ ] Tests
+- [x] `ctx.cookies.get/has/all/set/delete`, lazily parsed
+- [x] Secure defaults: `httpOnly` and `SameSite=Lax` unless opted out, `Secure` outside
+      development, and `Secure` forced when `SameSite=None` since browsers drop it otherwise
+- [x] Signed cookies (HMAC-SHA256) with a **constant-time** signature comparison; a tampered
+      cookie reads as absent rather than as a value with a flag
+- [x] Signing without a configured secret throws instead of silently not signing
 
 **Token capture** (replaces the snippet everyone rewrites)
-- [ ] `ctx.token` — automatic extraction, precedence: `Authorization: Bearer` → configured cookie → `?token=`
-- [ ] Works with **no auth plugin installed** — capture is core, verification is the plugin's job
-- [ ] `ctx.tokenSource` so handlers can tell where it came from
-- [ ] Other schemes recognised: `Basic` (parsed to user/pass), `ApiKey`, custom header
-- [ ] Never logged, never serialised into errors — redaction test required
-- [ ] Tests
+- [x] `ctx.token` — `Authorization` header → cookie → query string, in that order
+- [x] Works with **no auth module installed**: capture is core, verification is the plugin's job
+- [x] `ctx.tokenSource` and `ctx.tokenScheme`; `ctx.basicAuth` decodes `Basic` credentials
+- [x] Query capture can be disabled (`token: { query: null }`) — query strings reach access
+      logs, history and `Referer`
+- [x] `redactToken()` for logging; `Context.toJSON()` omits credentials entirely, with tests
+      asserting no token or cookie can reach an error response
 
 **Query parsing** (replaces `qs`)
-- [ ] `ctx.query` lazy getter
-- [ ] Repeated keys → array; `a[b]=1` → nested object; `a[]=1&a[]=2` → array
-- [ ] Depth + key-count limits (prototype-pollution and DoS guards)
-- [ ] Tests incl. `__proto__` and `constructor` keys
+- [x] `ctx.query`, lazy. Repeated keys → arrays, `a[b]=1` → nested, `a[]=1` → array
+- [x] Depth and key-count limits, null-prototype result
+- [x] `__proto__`, `constructor` and `prototype` dropped wherever they appear — the `qs` CVE
+      class, tested against real pollution attempts
 
 **Headers, IP, misc**
-- [ ] `ctx.headers` typed accessor, case-insensitive
-- [ ] `ctx.ip` honouring `X-Forwarded-For` only when `trustProxy` is configured
-- [ ] `ctx.url` parsed once, shared
-- [ ] Content negotiation helper (`ctx.accepts`)
+- [x] `ctx.header(name)` returns `undefined` rather than `null`, case-insensitive
+- [x] `ctx.ip` honours `X-Forwarded-For` **only** when `trustProxy` is set, counting hops from
+      the right so a client cannot prepend its way to a spoofed address
+- [x] `ctx.url` parsed once and shared; `ctx.accepts()` with `q`-weight and wildcard support
+
+**Note:** `ctx.headers` was renamed to `ctx.responseHeaders`. With request headers on the same
+object a bare `ctx.headers` is a coin flip every time you read it.
+
+**Bug found while testing:** `Headers` trims trailing whitespace, so `Authorization: Bearer `
+arrived as the bare word `Bearer` and was captured as a token whose value was literally
+`"Bearer"`. Bare scheme names are now rejected.
 
 ### 1.4 Middleware & hooks
 - [ ] Middleware chain with `next()`, correct ordering, short-circuit on early return
@@ -301,8 +311,7 @@ Each item below must work with **zero configuration and zero registration**, and
       fell through to npm, which cannot parse `workspace:*`. Set `SKIP_DEPENDENCY_INSTALL=1`
       and drive Bun ourselves
 - [x] Pages deploy green at theoven.pages.dev
-- [ ] Update the Pages **Build output directory** from `apps/web/dist` to `dist` — the build
-      now assembles landing + docs together
+- [x] Pages build output directory switched to `dist`; deploy green with landing + docs
 - [x] Internal link checking wired into `scripts/build-site.sh` and CI. Mounting the docs under
       `/docs` produced three separate classes of broken link that all passed review; the crawl
       catches every one and fails the build

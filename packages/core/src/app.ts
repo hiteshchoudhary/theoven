@@ -1,9 +1,13 @@
 import type { Server } from 'bun'
-import { Context } from './context'
+import type { BodyOptions } from './body'
+import { Context, type ContextInit } from './context'
+import type { CookieJarInit } from './cookies'
 import { type OvenError, toOvenError } from './errors'
 import { ConsoleLogger, type Logger, type LogLevel } from './logger'
+import type { QueryOptions } from './query'
 import { Router } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
+import type { TokenOptions } from './token'
 
 /**
  * A route handler. Returns anything — the value is coerced into a `Response`.
@@ -35,6 +39,22 @@ export interface AppOptions {
   /** How long `close()` waits for in-flight requests before forcing the socket shut. Default 10s. */
   shutdownTimeout?: number
   onError?: ErrorHandler
+
+  /** Body parsing limits: total size, per-file size, file count, MIME allowlist. */
+  body?: BodyOptions
+  /** Query parsing limits: nesting depth and key count. */
+  query?: QueryOptions
+  /** Cookie settings, notably the secret used for signed cookies. */
+  cookies?: CookieJarInit
+  /** Where `ctx.token` is looked for beyond the `Authorization` header. */
+  token?: TokenOptions
+  /**
+   * Whether `X-Forwarded-For` may set `ctx.ip`. Default `false`.
+   *
+   * Leave it off unless a proxy you control is in front: the header is client-supplied, so
+   * trusting it without one lets callers pick their own IP and walk past anything keyed on it.
+   */
+  trustProxy?: boolean | number
 }
 
 const PROBLEM_TYPE = 'application/problem+json; charset=utf-8'
@@ -55,7 +75,13 @@ export class App {
    * field of the same name silently shadows it on the instance, and the resulting failure
    * (`app.options is not a function`) points nowhere near the cause.
    */
-  private readonly settings: Required<Omit<AppOptions, 'logger' | 'onError' | 'port' | 'hostname'>>
+  private readonly settings: Required<
+    Omit<
+      AppOptions,
+      'logger' | 'onError' | 'port' | 'hostname' | 'body' | 'query' | 'cookies' | 'token'
+    >
+  >
+  private readonly contextInit: Omit<ContextInit, 'server'>
   private readonly baseLogger: Logger
   private readonly errorHandler: ErrorHandler | undefined
   private readonly port: number
@@ -80,8 +106,21 @@ export class App {
       echoRequestId: options.echoRequestId ?? true,
       development: options.development ?? Bun.env.NODE_ENV !== 'production',
       shutdownTimeout: options.shutdownTimeout ?? 10_000,
+      trustProxy: options.trustProxy ?? false,
     }
     this.baseLogger = options.logger ?? new ConsoleLogger({ level: this.settings.logLevel })
+
+    this.contextInit = {
+      logger: this.baseLogger,
+      requestIdHeader: this.settings.requestIdHeader,
+      body: options.body,
+      query: options.query,
+      // Secure cookies by default wherever we are not in development, so shipping to production
+      // does not quietly downgrade every session cookie.
+      cookies: { secureByDefault: !this.settings.development, ...options.cookies },
+      token: options.token,
+      trustProxy: this.settings.trustProxy,
+    }
   }
 
   // ---------------------------------------------------------------- registration
@@ -196,11 +235,7 @@ export class App {
       return this.refuse(404, 'Not Found', `No route matches ${path}.`)
     }
 
-    const ctx = new Context(request, match.params, {
-      logger: this.baseLogger,
-      requestIdHeader: this.settings.requestIdHeader,
-      server,
-    })
+    const ctx = new Context(request, match.params, { ...this.contextInit, server })
 
     try {
       const result = await match.payload(ctx)

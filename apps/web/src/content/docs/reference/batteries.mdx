@@ -1,0 +1,180 @@
+---
+title: Always-on batteries
+description: Body parsing, uploads, cookies, token capture and query parsing — with nothing to install.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+Everything on this page is core behaviour. There is no `app.use()` to call, no order to get
+right, and no way to forget it.
+
+<Aside type="tip" title="All of it is lazy">
+  A route that returns a constant never parses a body, never splits a cookie header, never
+  parses the query string, and never generates a request id. Batteries included is worthless if
+  you pay for batteries you do not use — so this is enforced by tests, not good intentions.
+</Aside>
+
+## Body
+
+`ctx.body` is awaited, and parsed from the request's `Content-Type`.
+
+```ts
+app.post('/users', async (ctx) => {
+  const body = await ctx.body      // parsed, whatever the content type
+  return db.user.create(body)
+})
+```
+
+| Content-Type | You get |
+| --- | --- |
+| `application/json`, `*+json` | the parsed value |
+| `application/x-www-form-urlencoded` | an object, nesting and arrays kept |
+| `multipart/form-data` | an object, files as `File` |
+| `text/*` | a string |
+| anything else | an `ArrayBuffer` |
+
+An empty body is `undefined`, not a throw. Malformed JSON is a `400` before your handler runs.
+Awaiting twice is safe — the result is memoised, so it never fails on a consumed stream.
+
+### Raw bytes for webhooks
+
+`ctx.rawBody` gives the exact bytes that arrived. Webhook signatures cover those bytes, and
+re-serialising parsed JSON produces different ones — a genuinely miserable thing to debug.
+
+```ts
+app.post('/webhooks/stripe', async (ctx) => {
+  const raw = await ctx.rawBody
+  verifySignature(raw, ctx.header('stripe-signature'))
+  const event = await ctx.body        // still works; parses from the same bytes
+})
+```
+
+### Limits
+
+```ts
+createApp({
+  body: {
+    limit: 8 * 1024 * 1024,
+    fileLimit: 2 * 1024 * 1024,
+    maxFiles: 10,
+    allowedFileTypes: ['image/*', 'application/pdf'],
+  },
+})
+```
+
+The size limit is enforced by **counting bytes as they arrive**, not by reading
+`Content-Length`. That header is client-supplied and often absent, so a limit that trusts it
+is not a limit.
+
+## Files
+
+Uploads arrive as web `File` objects. Oven does not buffer multipart bodies — Bun spills large
+parts to temporary files, and buffering first would defeat that.
+
+```ts
+app.post('/avatar', async (ctx) => {
+  const { avatar } = await ctx.files()
+  const file = avatar?.[0]
+  if (!file) throw new BadRequest('No file uploaded.')
+  return { name: file.name, size: file.size, type: file.type }
+})
+```
+
+Over the per-file limit is a `413`. Outside the MIME allowlist is a `415`. Filenames are kept
+exactly as sent and never resolved as paths — a filename is attacker-controlled input.
+
+## Cookies
+
+```ts
+ctx.cookies.get('session')
+ctx.cookies.set('session', id, { maxAge: 60 * 60 * 24 })
+ctx.cookies.delete('session')
+ctx.cookies.all()
+```
+
+Defaults lean secure: `httpOnly` and `SameSite=Lax` unless you opt out, and `Secure` outside
+development. `SameSite=None` forces `Secure`, because browsers drop the cookie otherwise and
+you would never see why.
+
+### Signed cookies
+
+```ts
+const app = createApp({ cookies: { secret: process.env.COOKIE_SECRET } })
+
+ctx.cookies.set('uid', '42', { signed: true })
+ctx.cookies.get('uid', { signed: true })   // undefined if tampered with
+```
+
+Signatures are compared in constant time. A tampered cookie reads as **absent** rather than as
+a value with a warning flag — returning it would invite someone to use it by mistake.
+
+<Aside type="caution" title="Deleting needs a matching path">
+  A cookie set with `path: '/admin'` must be deleted with the same path, or the browser treats
+  it as a different cookie. This is the usual reason "logout does not work".
+</Aside>
+
+## Token capture
+
+`ctx.token` is populated on every request, **with or without an auth module installed**.
+
+```ts
+app.get('/me', (ctx) => {
+  if (!ctx.token) throw new Unauthorized()
+  const claims = jwt.verify(ctx.token, secret)   // your verification, your keys
+  return claims
+})
+```
+
+Capture and verification are different jobs. Pulling a bearer token out of a header is trivial
+and universal, so core does it. Deciding whether it means anything needs keys or a session
+store, so `@theoven/auth` does that — and if you do not use our auth module, verifying a
+third-party JWT should not require installing one.
+
+| Property | What it holds |
+| --- | --- |
+| `ctx.token` | the credential |
+| `ctx.tokenSource` | `'header'`, `'cookie'` or `'query'` |
+| `ctx.tokenScheme` | `Bearer`, `Basic`, … when it came from a header |
+| `ctx.basicAuth` | `{ username, password }` for `Basic` |
+
+Precedence is header → cookie → query. A caller sending an `Authorization` header meant it; a
+token in a URL is the weakest and most leak-prone form, so it never wins.
+
+```ts
+createApp({ token: { cookie: 'session', query: null } })
+```
+
+Setting `query: null` disables query capture entirely — worth doing, since query strings reach
+access logs, browser history and `Referer` headers.
+
+## Query
+
+```ts
+// ?tag=a&tag=b&filter[status]=open&page=2
+ctx.query
+// { tag: ['a', 'b'], filter: { status: 'open' }, page: '2' }
+```
+
+Repeated keys become arrays, `a[b]=1` nests, and `a[]=1` is an explicit array. Depth and key
+count are capped, and `__proto__`, `constructor` and `prototype` are dropped wherever they
+appear — this is the `qs` CVE class, and the only safe amount of it is none.
+
+## Headers, IP and negotiation
+
+```ts
+ctx.header('x-api-version')          // undefined when absent, never null
+ctx.accepts('application/json', 'text/html')
+ctx.ip
+```
+
+`ctx.ip` uses the socket address. It honours `X-Forwarded-For` **only** when you configure
+`trustProxy`:
+
+```ts
+createApp({ trustProxy: 1 })   // one proxy hop in front
+```
+
+This is a security setting, not a convenience one. Any client can send that header, so
+trusting it without a proxy in front lets callers choose their own IP — and walk past anything
+keyed on it, including rate limits and audit logs. The hop count is applied from the right,
+because a client can prepend as many entries as it likes.
