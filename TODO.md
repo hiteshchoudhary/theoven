@@ -1,8 +1,9 @@
 # Oven — Task Tracker
 
-**Current state:** Phase 1.1 done (router: 50 tests green, benchmarked). Phase 0 complete except the
-GitHub/npm/domain steps, which only you can do.
-**Next task:** Phase 1.2 — server + context (`createApp`, `Bun.serve`, graceful shutdown).
+**Current state:** Phases 1.1 and 1.2 done — router, server, context, errors, logger, response
+coercion, graceful shutdown. **223 tests green**, typecheck and lint clean, benchmarked against
+Hono and Elysia. Phase 0 complete except the GitHub/npm/domain steps, which only you can do.
+**Next task:** Phase 1.3 — the always-on batteries (body, files, cookies, token capture, query).
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -67,19 +68,43 @@ Everything else depends on this. Do not start Phase 2 until Phase 1 is done and 
       encoded segments, 405 collection, 1500-route table
 - [x] Micro-benchmark in `benchmarks/router.bench.ts` — 11.9M static lookups/s,
       8.6M single-param/s, 4.9M with backtracking
-- [ ] Comparative benchmark vs Express / Hono / Elysia — **blocked on Phase 1.2**; a router-only
-      comparison would be dishonest since routing is ~1% of real request cost
+- [x] Comparative benchmark vs Hono / Elysia — see `benchmarks/README.md`. Express excluded on
+      purpose: it has no `Request` entry point, so the comparison would not be like-for-like
+- [ ] Socket-level throughput benchmark with a real load generator, including Express
 
-### 1.2 Server + Context
-- [ ] `createApp()` → `App` with `.use()`, `.listen()`, `.fetch()`, `.close()`
-- [ ] `Bun.serve` integration
-- [ ] **Graceful shutdown built in** — SIGTERM/SIGINT drains in-flight requests, runs plugin `onShutdown`, closes with a timeout
-- [ ] Context object shape + a `ctx` that is cheap to construct (benchmark: plain object vs class w/ getters)
-- [ ] `ctx.id` — request ID, generated or taken from `X-Request-Id`
-- [ ] `ctx.log` — structured, request-scoped logger with the request ID bound
-- [ ] `ctx.set` / `ctx.status` / `ctx.redirect` / `ctx.headers`
-- [ ] Response coercion: object → JSON, string → text, `Response` → passthrough, `Bun.file` → streamed, `null` → 204
-- [ ] Tests
+### 1.2 Server + Context ✅
+
+`packages/core/src/{app,context,response,errors,logger}.ts` — 173 tests.
+
+- [x] `createApp()` → `App` with `.route()`/`.get()`/`.post()`/…, `.fetch()`, `.listen()`, `.close()`
+- [x] `Bun.serve` integration; `fetch()` also dispatches directly, so **tests exercise the exact
+      pipeline the socket uses** without binding a port
+- [x] **Graceful shutdown** — SIGTERM/SIGINT stop new work, in-flight requests drain, shutdown
+      hooks run, socket closes. Requests arriving mid-drain get `503` + `Retry-After` rather
+      than a dropped connection. Times out instead of hanging forever
+- [x] Context as a class: lazy getters need a prototype, and a shared hidden class keeps
+      construction to one allocation (resolves the open question below)
+- [x] `ctx.id` — adopted from `x-request-id` when a proxy set one, generated otherwise, **lazily**
+- [x] `ctx.log` — request-scoped child logger with the id bound, derived on first read
+- [x] `ctx.set` / `ctx.append` / `ctx.status` / `ctx.redirect` / `ctx.url` / `ctx.path` / `ctx.ip`
+- [x] Response coercion: object/array/number/boolean → JSON, string → text, `Response` →
+      passthrough, `Blob`/`Bun.file` → streamed, `ReadableStream` → streamed, `ArrayBuffer` →
+      binary, `URL` → redirect, `null` → 204. Bodiless statuses (204/205/304) drop the body
+      rather than throw
+- [x] `HEAD` served from the `GET` handler per RFC 9110; `OPTIONS` answered automatically with
+      a correct `Allow`; unknown methods get `501`
+- [x] Errors: `OvenError` + 12 subclasses, RFC 9457 problem+json, async throws caught
+      automatically, `onError` override that cannot mask the original failure
+- [x] **Production leak test** — internal error messages and connection strings never reach the
+      client outside development
+- [x] Logger: levels, JSON and pretty formats, child binding, circular-safe fields. Ships in
+      core but `createApp({ logger })` accepts pino or anything matching the interface
+      (resolves the open question below)
+- [x] `ctx.headers` deferred to §1.3, where the rest of the request accessors live
+- [x] 173 tests covering all of the above
+
+**Note:** `app.options()` (the verb) collided with a private `options` field — the field silently
+shadowed the method on the instance. Renamed to `settings`, with a comment so it stays fixed.
 
 ### 1.3 Always-on batteries 🔴 the differentiator — none of these are middleware
 
@@ -286,13 +311,20 @@ Each item below must work with **zero configuration and zero registration**, and
 - [ ] 💡 i18n plugin
 - [ ] 💡 Payments plugin (Stripe)
 - [ ] 💡 `oven deploy` to Fly/Railway/Cloudflare Containers
+- [ ] 💡 **AOT route compilation.** Elysia is ~2× faster than Oven on dispatch because it
+      compiles each route into a specialised function with `new Function` at boot, leaving no
+      generic dispatch on the hot path. Adopting this is the only way to close that gap — but
+      it is a large change and must wait until the plugin and context contracts stop moving,
+      or we will be recompiling the compiler. See `benchmarks/README.md`.
 
 ---
 
 ## Open questions
 
-- [ ] `ctx` as plain object or class with getters? Benchmark before deciding (§1.2)
+- [x] ~~`ctx` as plain object or class with getters?~~ **Class.** Lazy getters need a
+      prototype, and a shared hidden class keeps construction to one allocation.
 - [ ] Response validation in prod: on or off by default?
-- [ ] Ship our own logger or wrap pino?
+- [x] ~~Ship our own logger or wrap pino?~~ **Our own, pluggable.** A small built-in so
+      `ctx.log` always works with zero setup; `createApp({ logger })` swaps in pino.
 - [ ] Integration test strategy for Postgres/Redis/MinIO — testcontainers or docker-compose in CI?
 - [ ] Temp-file spill threshold for uploads — what default? (16MB?)
