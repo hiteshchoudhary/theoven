@@ -1,0 +1,83 @@
+---
+title: 2. Validation
+description: Schemas that validate requests, narrow types, and generate OpenAPI — from one declaration.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+<Aside type="caution" title="Not built yet">
+  Validation lands in Phase 1.6 and the OpenAPI generation in Phase 1.9. This page describes the
+  designed API so you can see where the framework is going — it does not work today. Follow
+  [`TODO.md`](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for progress.
+</Aside>
+
+## The idea
+
+FastAPI's insight was that one declaration should do three jobs: validate the request, type the
+handler, and document the endpoint. Python type hints did all three. TypeScript types vanish at
+runtime, so they cannot — but a schema can.
+
+```ts title="src/routes/users/[id].patch.ts"
+import { z } from 'zod'
+
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({
+  name: z.string().min(1).max(100),
+  email: z.email(),
+})
+
+export default async ({ params, body }) => {
+  //                    ^ { id: string }
+  //                            ^ { name: string, email: string }
+  return db.user.update(params.id, body)
+}
+```
+
+From that one declaration you get:
+
+- **Validation.** A bad request never reaches your handler; it gets a `422` with per-field detail.
+- **Types.** `params` and `body` are inferred. You write no generics and no interfaces.
+- **Documentation.** The endpoint appears in `/docs` with its real schema.
+
+## Coercion
+
+Path and query values are always strings in a URL. Schemas convert them:
+
+```ts
+export const params = z.object({ id: z.coerce.number().int().positive() })
+export const query = z.object({
+  page: z.coerce.number().default(1),
+  includeArchived: z.coerce.boolean().default(false),
+})
+```
+
+## Bring your own validator
+
+Oven accepts anything implementing [Standard Schema](https://standardschema.dev) — Zod,
+Valibot, ArkType, Effect Schema. Zod 4 is the bundled default because it can emit JSON Schema
+natively, which is what makes the OpenAPI generation free.
+
+```ts
+import * as v from 'valibot'
+export const body = v.object({ name: v.string() })   // works identically
+```
+
+## Failures
+
+A validation failure is an RFC 9457 problem document:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Unprocessable Content",
+  "status": 422,
+  "detail": "Validation failed",
+  "errors": [
+    { "path": "email", "message": "Invalid email address" }
+  ]
+}
+```
+
+## Next
+
+[Errors](/tutorial/errors/) — which already works today.

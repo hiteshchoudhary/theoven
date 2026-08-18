@@ -1,0 +1,76 @@
+---
+title: Installation
+description: Get Oven running on Bun in under a minute.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+<Aside type="caution" title="Not published yet">
+  Oven is pre-alpha and not on npm. To follow along today, clone the repo and run the example.
+  These instructions are what installation will look like at 1.0.
+</Aside>
+
+## Requirements
+
+Bun 1.2 or newer. Oven is Bun-only by design — it uses `Bun.serve`, `Bun.file`, `Bun.S3Client`
+and `bun:sqlite` directly rather than abstracting over them, which is what keeps the framework
+small and fast. There is no Node build and no plan for one.
+
+```bash
+bun --version   # 1.2.0 or higher
+```
+
+## Running the example today
+
+<Steps>
+
+1. Clone the repository.
+
+   ```bash
+   git clone https://github.com/hiteshchoudhary/theoven.git
+   cd theoven
+   ```
+
+2. Install dependencies.
+
+   ```bash
+   bun install
+   ```
+
+3. Start the minimal example.
+
+   ```bash
+   bun run example:minimal
+   ```
+
+4. Try it.
+
+   ```bash
+   curl http://localhost:3000/users/1
+   ```
+
+</Steps>
+
+## What installation will look like at 1.0
+
+```bash
+bun create oven my-app
+cd my-app
+oven dev
+```
+
+The scaffolder asks which modules you want — auth, database, storage, mail, queue — and writes
+a configured, working app. No copy-pasted boilerplate.
+
+## Verifying the test suite
+
+Oven's test suite is the contract. If you are contributing, run it first so you know a failure
+is yours:
+
+```bash
+bun test        # every package
+bun run lint    # Biome
+bun run typecheck
+```

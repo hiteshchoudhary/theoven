@@ -1,8 +1,9 @@
 # Oven — Task Tracker
 
 **Current state:** Phases 1.1 and 1.2 done — router, server, context, errors, logger, response
-coercion, graceful shutdown. **223 tests green**, typecheck and lint clean, benchmarked against
-Hono and Elysia. Phase 0 complete except the GitHub/npm/domain steps, which only you can do.
+coercion, graceful shutdown. **223 tests green**, typecheck and lint clean. Benchmarked against
+Hono, Elysia, Fastify and Express at both dispatch and socket level. Docs site scaffolded and
+building (11 pages). GitHub repo live, `@theoven` npm org claimed.
 **Next task:** Phase 1.3 — the always-on batteries (body, files, cookies, token capture, query).
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
@@ -38,7 +39,11 @@ Read `CLAUDE.md` §2b before working. The short version:
 - [x] Biome config (lint + format) — chosen over ESLint/Prettier for speed
 - [x] Changesets init (`.changeset/config.json`)
 - [x] GitHub Actions: CI (typecheck, lint, `bun test`) + release (changesets publish)
-- [ ] **You:** create GitHub repo, push, claim `@theoven` npm org, buy `theoven.app`
+- [x] GitHub repo created and pushed: `hiteshchoudhary/theoven`
+- [x] `@theoven` npm org claimed (owner: hiteshchoudhary); local `npm login` working
+- [ ] **You:** buy `theoven.app` and point it at the Cloudflare Pages project
+- [ ] **You:** rotate the npm token that was pasted into chat, then add the new one as the
+      `NPM_TOKEN` GitHub Actions secret so releases can publish
 
 ---
 
@@ -70,7 +75,9 @@ Everything else depends on this. Do not start Phase 2 until Phase 1 is done and 
       8.6M single-param/s, 4.9M with backtracking
 - [x] Comparative benchmark vs Hono / Elysia — see `benchmarks/README.md`. Express excluded on
       purpose: it has no `Request` entry point, so the comparison would not be like-for-like
-- [ ] Socket-level throughput benchmark with a real load generator, including Express
+- [x] Socket-level throughput benchmark with a real load generator, including Express and
+      Fastify — `benchmarks/http.bench.ts`. Oven ~6x Express, ~1.35x Fastify, level with
+      Elysia and Hono. Confirms the dispatch-level Elysia gap is worth 2.5% at the socket
 
 ### 1.2 Server + Context ✅
 
@@ -287,15 +294,19 @@ Each item below must work with **zero configuration and zero registration**, and
 
 ## Phase 5 — Docs & launch (`apps/web`)
 
-- [ ] Astro + Starlight, deployed to theoven.app
-- [ ] Landing page: hero, the config pitch, benchmarks, comparison table
+- [x] Astro + Starlight scaffolded in `apps/web`, builds to `apps/web/dist` (11 pages,
+      Pagefind search, sitemap, `_headers` for caching + security)
+- [ ] Connect the repo to Cloudflare Pages and deploy to theoven.app
+- [x] Landing page: hero, config pitch, always-on batteries grid, comparison table
 - [ ] **"Batteries included" page** — the always-on table from `CLAUDE.md` §2b as a headline feature
-- [ ] Tutorial, FastAPI-style and progressive: first route → validation → errors → db → auth → file upload → queue → mail → deploy
-- [ ] How-to guides: testing, deployment (Docker/Fly/Railway), and **"Coming from Express"** — a translation guide, explicitly *not* a compatibility layer
-- [ ] API reference for every package
+- [~] Tutorial, FastAPI-style and progressive. Written: first route, validation (marked
+      Planned), errors. Remaining: db, auth, file upload, queue, mail, deploy
+- [~] How-to guides. Written: "Coming from Express" (translation, explicitly not a shim),
+      benchmarks. Remaining: testing, deployment (Docker/Fly/Railway)
+- [~] API reference. Written: `App`, `Context`. Remaining: every other package
 - [ ] Docs code samples compiled and tested in CI
 - [ ] `examples/minimal` + `examples/kitchen-sink` complete and CI-tested
-- [ ] Benchmarks page with reproducible methodology
+- [x] Benchmarks page with reproducible methodology, including where we lose
 - [ ] Launch: HN, r/bun, Bun Discord, X thread
 
 ---

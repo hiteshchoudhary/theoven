@@ -1,0 +1,74 @@
+---
+title: Context
+description: The single argument every handler receives.
+---
+
+`ctx` is passed to every handler. Everything expensive on it is lazy: reading nothing costs
+nothing.
+
+## Request
+
+### `ctx.req`
+The raw web-standard [`Request`](https://developer.mozilla.org/docs/Web/API/Request). Never
+wrapped, always available.
+
+### `ctx.params`
+Path parameters from the matched route, as strings. Frozen and shared when the route has none.
+
+### `ctx.url`
+The parsed `URL`. Built on first read and reused.
+
+### `ctx.path`
+The pathname. Extracted without constructing a `URL`, since routing needs it on every request.
+
+### `ctx.method`
+The request method.
+
+### `ctx.ip`
+The client address, or `undefined` when a `Request` was dispatched directly rather than served
+over a socket.
+
+## Observability
+
+### `ctx.id`
+A stable id for this request. Adopted from the `x-request-id` header when a proxy already set
+one, so a trace survives the hop; generated otherwise.
+
+Generated **lazily** — an app that never logs never pays for a UUID. The id is echoed on the
+response only when something actually read it.
+
+### `ctx.log`
+A `Logger` with `requestId` bound to every line. Derived on first read.
+
+```ts
+ctx.log.info('charging card', { amount: 1200 })
+```
+
+## Response
+
+### `ctx.status`
+Set to choose the status. Left unset, the returned value decides: `null` becomes `204`,
+everything else `200`.
+
+### `ctx.set(name, value)`
+Sets a response header. Chainable.
+
+### `ctx.append(name, value)`
+Appends a response header, keeping existing values — needed for `set-cookie`.
+
+### `ctx.redirect(location, status?)`
+Builds a redirect response. `302` by default.
+
+```ts
+app.get('/old', (ctx) => ctx.redirect('/new', 301))
+```
+
+### `ctx.respond(value)`
+Coerces a value into a `Response` using this context's status and headers. Called by the server
+for you; exposed because middleware occasionally needs it.
+
+## Coming in Phase 1.3
+
+`ctx.body`, `ctx.query`, `ctx.cookies`, `ctx.token`, `ctx.headers` and `ctx.files` — all
+always-on, all lazy. See the
+[roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md).

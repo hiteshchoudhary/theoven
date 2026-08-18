@@ -1,0 +1,64 @@
+---
+title: Philosophy
+description: Why Oven makes the choices it makes.
+sidebar:
+  order: 2
+---
+
+## 1. If every app needs it, it is not a plugin
+
+Express asked you to assemble a working server from `body-parser`, `cookie-parser`, `multer`,
+`cors` and `morgan`. That was never a real choice. Nobody sat down and decided their API should
+*not* parse JSON bodies — they just had to remember, in the right order, forever.
+
+Oven ships those behaviours in core. Always on. Nothing to install, nothing to register,
+nothing to order, nothing to forget.
+
+The rule we apply: **if it appears in more than 80% of real apps, it goes in core with no
+switch.** Things that genuinely vary — CORS policy, rate limits, compression — stay
+configurable, but they still ship in the box. Configured, not installed.
+
+## 2. Always-on must be lazy
+
+Batteries included is worthless if you pay for batteries you never use.
+
+Nothing in Oven is computed until it is read. A route that returns a string never parses a
+body, never parses the query string, never touches cookies, never generates a request id, and
+never derives a logger. This is enforced by tests, not by good intentions — the test suite
+asserts that reading the URL does not materialise a request id, and that setting a header does
+not either.
+
+## 3. Fresh start. We owe the past nothing.
+
+Oven is designed in 2026 for 2026. There is no Express compatibility layer, no
+`(req, res, next)` signature, no Connect middleware support, no CommonJS build, no callback
+API, and no Node stream interop.
+
+Every framework that offered an Express shim ended up shaped by Express, inheriting its
+mistakes along with its users. We would rather be honest: if you want Express, Express exists
+and is very good at being Express.
+
+What this means in practice:
+
+- **ESM only.** No `require`, no dual build.
+- **Web standards only.** `Request`, `Response`, `Headers`, `URL`, `FormData`, `ReadableStream`.
+- **Async only.** Every extension point returns a promise or a value. Nothing takes a callback.
+- **Bun only.** `Bun.serve`, `Bun.file`, `Bun.S3Client`, `bun:sqlite`, `bun:test`.
+
+## 4. Types are the documentation
+
+If you need to read docs to discover that a property exists, we failed. Autocomplete on `ctx`
+should teach you the framework.
+
+This is why modules contribute their types through the config: add storage and `ctx.storage`
+appears, fully typed. Leave it out and touching `ctx.storage` is a compile error, not a
+runtime crash at 3am.
+
+## 5. Errors are values, not accidents
+
+A handler either returns a value or throws. Throwing `NotFound` produces a correct RFC 9457
+`application/problem+json` response, whether the throw was synchronous or not.
+
+Errors we did not plan for are treated as bugs: they become a 500, and their message and stack
+are withheld in production. An unplanned error message is exactly where connection strings and
+internal hostnames leak.

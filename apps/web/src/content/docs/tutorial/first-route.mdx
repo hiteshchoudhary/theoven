@@ -1,0 +1,122 @@
+---
+title: 1. Your first route
+description: Create an Oven app, register a route, and understand the context object.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+Every Oven app starts with `createApp()`.
+
+```ts title="src/index.ts"
+import { createApp } from '@theoven/core'
+
+const app = createApp()
+
+app.get('/', () => ({ framework: 'oven', status: 'warm' }))
+
+app.listen(3000)
+```
+
+```bash
+curl http://localhost:3000/
+# {"framework":"oven","status":"warm"}
+```
+
+Returning an object gave you JSON with the right `Content-Type`. You did not serialise
+anything, and you did not touch a response object — because there isn't one.
+
+<Aside type="note" title="Where is `res`?">
+  There is no `res`, and no `next`. A handler either returns a value or throws. That is the
+  entire contract. It means handlers are ordinary functions you can call directly in a test.
+</Aside>
+
+## Route parameters
+
+Use `:name` for a path parameter. It arrives on `ctx.params`.
+
+```ts
+app.get('/users/:id', (ctx) => {
+  return { id: ctx.params.id }
+})
+```
+
+```bash
+curl http://localhost:3000/users/42
+# {"id":"42"}
+```
+
+Parameters are always strings — that is what a URL contains. Turning `"42"` into a number is
+validation's job, and validation will do it for you in the next chapter.
+
+## The context
+
+`ctx` is the single argument every handler receives. The properties you have today:
+
+| Property | What it is |
+| --- | --- |
+| `ctx.req` | The raw web-standard `Request`. Never wrapped, always available. |
+| `ctx.params` | Path parameters from the matched route. |
+| `ctx.url` | The parsed `URL`, built once and reused. |
+| `ctx.path` | The pathname, without parsing the full URL. |
+| `ctx.method` | The request method. |
+| `ctx.id` | A stable request id, adopted from `x-request-id` or generated. |
+| `ctx.log` | A logger with the request id already bound to every line. |
+| `ctx.ip` | The client address. |
+| `ctx.status` | Set it to choose the response status. |
+| `ctx.set(name, value)` | Set a response header. |
+| `ctx.redirect(to, status?)` | Build a redirect response. |
+
+Everything on that list is **lazy**. A handler that returns a constant string never generates a
+request id, never derives a logger, and never parses the URL. Reading nothing costs nothing.
+
+## Setting status and headers
+
+```ts
+app.post('/users', async (ctx) => {
+  const body = await ctx.req.json()
+
+  ctx.status = 201
+  ctx.set('location', '/users/3')
+
+  return { id: '3', name: body.name }
+})
+```
+
+Return `null` when there is nothing to say, and Oven sends a `204`:
+
+```ts
+app.delete('/users/:id', () => null)   // -> 204 No Content
+```
+
+## What gets returned
+
+Oven coerces whatever you return, so handlers stay about your domain rather than about HTTP.
+
+| You return | You get |
+| --- | --- |
+| an object or array | `application/json` |
+| a string | `text/plain` |
+| a number or boolean | `application/json` (both are valid JSON documents) |
+| `null` or nothing | `204 No Content` |
+| `Bun.file(...)` | streamed from disk, content type detected |
+| a `ReadableStream` | streamed |
+| a `Response` | passed through untouched — you took control on purpose |
+| a `URL` | a `302` redirect |
+
+## Methods you get for free
+
+Register a `GET` and you have also answered `HEAD` and `OPTIONS` correctly:
+
+```bash
+curl -I http://localhost:3000/users        # HEAD: GET's headers, no body
+curl -X OPTIONS -i http://localhost:3000/users  # 204, Allow: GET, POST, OPTIONS
+curl -X PUT -i http://localhost:3000/users      # 405, Allow: GET, POST
+```
+
+A wrong method returns `405` with a correct `Allow` header — not a lazy `404` that leaves the
+caller guessing whether the path or the verb was wrong.
+
+## Next
+
+Right now `ctx.params.id` is an unvalidated string, and `await ctx.req.json()` gives you
+`any`. Next: [validation](/tutorial/validation/).

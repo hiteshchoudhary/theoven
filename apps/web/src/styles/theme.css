@@ -1,0 +1,32 @@
+/* Oven's accent: the warm orange of a hot oven, tuned to stay legible on both themes. */
+:root {
+  --sl-color-accent-low: #3a1a05;
+  --sl-color-accent: #e8590c;
+  --sl-color-accent-high: #ffb27a;
+  --sl-color-white: #ffffff;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #ffd8bf;
+  --sl-color-accent: #d94f00;
+  --sl-color-accent-high: #7a2e00;
+}
+
+/* The landing hero: a warm gradient behind the title, not a flat block. */
+.hero > img,
+.hero > .hero-html {
+  filter: drop-shadow(0 0 2rem rgba(232, 89, 12, 0.35));
+}
+
+.hero h1 {
+  background: linear-gradient(120deg, var(--sl-color-white), var(--sl-color-accent-high));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Comparison table on the landing page reads better centred. */
+.comparison td:not(:first-child),
+.comparison th:not(:first-child) {
+  text-align: center;
+}

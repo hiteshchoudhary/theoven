@@ -1,0 +1,81 @@
+---
+title: App
+description: createApp, route registration, and the server lifecycle.
+---
+
+## `createApp(options?)`
+
+```ts
+import { createApp } from '@theoven/core'
+
+const app = createApp({
+  port: 3000,
+  logLevel: 'info',
+})
+```
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `port` | `PORT` env, then `3000` | Port for `listen()`. |
+| `hostname` | — | Interface to bind. |
+| `logger` | built-in `ConsoleLogger` | Any object matching `Logger` — swap in pino. |
+| `logLevel` | `'info'` | `debug` / `info` / `warn` / `error` / `silent`. |
+| `requestIdHeader` | `'x-request-id'` | Header consulted for an inbound request id. |
+| `echoRequestId` | `true` | Echo the id on responses that used it. |
+| `development` | `NODE_ENV !== 'production'` | Whether internal error detail reaches the client. |
+| `shutdownTimeout` | `10000` | How long `close()` waits for in-flight requests. |
+| `onError` | — | Replace the default problem+json rendering. |
+
+## Registering routes
+
+```ts
+app.get('/users', handler)
+app.post('/users', handler)
+app.put('/users/:id', handler)
+app.patch('/users/:id', handler)
+app.delete('/users/:id', handler)
+app.head('/users', handler)
+app.options('/users', handler)
+
+app.route('GET', '/users', handler)   // the primitive the others call
+```
+
+Patterns use `:name` for one segment and `*name` for a trailing catch-all.
+
+Conflicts — a duplicate route, a wildcard that is not the final segment, or two names claiming
+the same parameter position — throw **at registration**, not at request time. You find out at
+boot, not from a support ticket.
+
+## `app.fetch(request)`
+
+Dispatches a `Request` through the full pipeline and returns a `Response`. This is what
+`Bun.serve` calls, and it is how the test suite exercises the framework without binding a port:
+
+```ts
+const response = await app.fetch(new Request('https://x/users/1'))
+expect(await response.json()).toEqual({ id: '1' })
+```
+
+## `app.listen(port?)`
+
+Starts the server and installs `SIGTERM`/`SIGINT` handlers that shut down gracefully. Returns
+Bun's `Server`.
+
+## `app.close(options?)`
+
+Shuts down gracefully:
+
+1. Stops accepting new requests — anything arriving now gets `503` with `Retry-After`.
+2. Waits for in-flight requests to finish, up to `shutdownTimeout`.
+3. Runs shutdown hooks in registration order. A failing hook does not stop the others.
+4. Releases the socket.
+
+This is the difference between a clean rolling deploy and a burst of client-side errors.
+
+## `app.onShutdown(hook)`
+
+Registers a teardown hook. Plugins use this to close database pools and drain workers.
+
+## `app.routes()`
+
+Every registered route in registration order. Backs `oven routes` and the boot banner.

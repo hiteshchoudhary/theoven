@@ -1,0 +1,120 @@
+---
+title: 3. Errors
+description: Throw an error, get a correct HTTP response — synchronously or not.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## Throwing is the error path
+
+There is no `next(err)`. Throw, and Oven turns it into the right response.
+
+```ts
+import { NotFound } from '@theoven/core'
+
+app.get('/users/:id', (ctx) => {
+  const user = users.get(ctx.params.id)
+  if (!user) throw new NotFound(`No user with id ${ctx.params.id}`)
+  return user
+})
+```
+
+```json title="404 response"
+{
+  "type": "about:blank",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "No user with id 99"
+}
+```
+
+That is [RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457) `application/problem+json` —
+the standard shape for HTTP error bodies, so clients and gateways already understand it.
+
+## Async throws are caught too
+
+```ts
+app.get('/report', async () => {
+  await Bun.sleep(10)
+  throw new BadRequest('Date range is too wide')   // caught, becomes 400
+})
+```
+
+Express needed `express-async-errors` for this, or every async handler needed its own
+`try/catch`. In Oven it is simply how errors work.
+
+## The error classes
+
+| Class | Status |
+| --- | --- |
+| `BadRequest` | 400 |
+| `Unauthorized` | 401 |
+| `Forbidden` | 403 |
+| `NotFound` | 404 |
+| `MethodNotAllowed` | 405 |
+| `Conflict` | 409 |
+| `PayloadTooLarge` | 413 |
+| `UnsupportedMediaType` | 415 |
+| `UnprocessableContent` | 422 |
+| `TooManyRequests` | 429 |
+| `InternalServerError` | 500 |
+| `ServiceUnavailable` | 503 |
+
+## Adding detail and headers
+
+Extra members are merged into the problem document — this is how validation reports fields:
+
+```ts
+throw new UnprocessableContent('Validation failed', {
+  detail: { errors: [{ path: 'email', message: 'Invalid email address' }] },
+})
+```
+
+Headers travel with the error, which is how a `429` carries `Retry-After`:
+
+```ts
+throw new TooManyRequests('Slow down', { headers: { 'retry-after': '30' } })
+```
+
+## Unexpected errors are treated as bugs
+
+Anything thrown that is *not* an `OvenError` becomes a `500`. In development you see the real
+message. In production you do not:
+
+```ts
+app.get('/boom', () => {
+  throw new Error('postgres://user:hunter2@db-primary/app')
+})
+```
+
+```json title="production response"
+{ "type": "about:blank", "title": "Internal Server Error", "status": 500 }
+```
+
+<Aside type="tip" title="Why this matters">
+  The original error still reaches your logs in full, including the stack. The operator gets the
+  detail; the internet does not. An unplanned error message is exactly where connection strings
+  and internal hostnames leak — so Oven has a test asserting that this specific string cannot
+  appear in a production response.
+</Aside>
+
+## Customising the output
+
+```ts
+const app = createApp({
+  onError: (error, ctx) => {
+    ctx.log.warn('request failed', { status: error.status })
+    return { ok: false, code: error.status }
+  },
+})
+```
+
+Return `undefined` to fall back to the default rendering. If your handler itself throws, Oven
+logs that and still renders the original error — a broken error handler must not hide the
+problem it was meant to describe.
+
+## Next
+
+That is everything Oven does today. [Validation](/tutorial/validation/), auth, database,
+storage, mail and queues are on the way — see
+[`TODO.md`](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md).

@@ -1,0 +1,17 @@
+{
+  "name": "@theoven/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "astro": "^7.2.3",
+    "@astrojs/starlight": "^0.41.7",
+    "sharp": "^0.34.0"
+  }
+}

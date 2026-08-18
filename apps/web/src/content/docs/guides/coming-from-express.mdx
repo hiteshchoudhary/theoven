@@ -1,0 +1,102 @@
+---
+title: Coming from Express
+description: A translation guide — deliberately not a compatibility layer.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+<Aside type="caution" title="This is a translation, not a shim">
+  Oven has no Express compatibility layer and will not get one. Every framework that shipped an
+  Express shim ended up shaped by Express. Your middleware will not run here; your mental model
+  mostly will.
+</Aside>
+
+## The handler signature
+
+```js title="Express"
+app.get('/users/:id', (req, res) => {
+  res.status(200).json({ id: req.params.id })
+})
+```
+
+```ts title="Oven"
+app.get('/users/:id', (ctx) => {
+  return { id: ctx.params.id }
+})
+```
+
+No `res`. Return a value; Oven works out the rest. `200` and `application/json` are what
+returning an object means.
+
+## Middleware you can delete
+
+| Express | Oven |
+| --- | --- |
+| `express.json()` / `body-parser` | `ctx.body`, always on, lazy |
+| `cookie-parser` | `ctx.cookies`, always on |
+| `multer` | uploads arrive as `File` in `ctx.body` |
+| `express-async-errors` | async throws are caught natively |
+| `morgan` | `ctx.log`, request-scoped and structured |
+| hand-rolled bearer-token parsing | `ctx.token` |
+| hand-rolled graceful shutdown | built into `close()` |
+
+## Errors
+
+```js title="Express"
+app.get('/users/:id', async (req, res, next) => {
+  try {
+    const user = await db.find(req.params.id)
+    if (!user) return res.status(404).json({ error: 'Not found' })
+    res.json(user)
+  } catch (err) {
+    next(err)
+  }
+})
+```
+
+```ts title="Oven"
+app.get('/users/:id', async (ctx) => {
+  const user = await db.find(ctx.params.id)
+  if (!user) throw new NotFound()
+  return user
+})
+```
+
+The `try/catch` and the `next(err)` are gone because the framework already does that. The
+`404` body is a standard problem document instead of an ad-hoc shape you invented.
+
+## Status and headers
+
+```js title="Express"
+res.status(201).set('Location', '/users/3').json(user)
+```
+
+```ts title="Oven"
+ctx.status = 201
+ctx.set('location', '/users/3')
+return user
+```
+
+## Sending files
+
+```js title="Express"
+res.sendFile('/path/to/report.pdf')
+```
+
+```ts title="Oven"
+return Bun.file('/path/to/report.pdf')   // streamed, content type detected
+```
+
+## Things that genuinely do not translate
+
+- **Connect middleware.** The `(req, res, next)` signature does not exist. Anything from the
+  Express ecosystem must be rewritten as an Oven plugin or a `_middleware.ts` file.
+- **`res.write()` streaming.** Return a `ReadableStream` instead.
+- **CommonJS.** Oven is ESM only.
+- **Running on Node.** Oven is Bun-only. This is a deliberate, permanent choice.
+
+## What you gain
+
+The reason to move is not the handler signature — it is that auth, database, storage, mail and
+queues become configuration instead of a week of wiring. See the
+[philosophy](/start/philosophy/) page for why that is the whole point.
