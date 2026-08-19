@@ -1,0 +1,126 @@
+---
+title: db-mongoose
+description: MongoDB through Mongoose, on the same database contract as Drizzle.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/db-mongoose` |
+| **Adds to context** | `ctx.db` — a Mongoose `Connection` |
+| **Endpoints** | none |
+| **Creates files** | none |
+| **Creates tables** | only the collections your models declare |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/db @theoven/db-mongoose mongoose
+```
+
+```ts title="src/app.ts"
+import { createApp, env } from '@theoven/core'
+import { db } from '@theoven/db'
+import { mongooseDb } from '@theoven/db-mongoose'
+
+export const app = createApp().use(db(mongooseDb({ url: env.string('MONGO_URL') })))
+```
+
+```ts title="src/routes/users.ts"
+import { Schema } from 'mongoose'
+
+const userSchema = new Schema({ name: String, email: String })
+
+export const GET = async (ctx) => ctx.db.model('User', userSchema).find()
+```
+
+## A Connection, not the global singleton
+
+`ctx.db` is a Mongoose [`Connection`](https://mongoosejs.com/docs/api/connection.html), created
+with `createConnection` — not the `mongoose` default export everyone reaches for first.
+
+Models come off it: `ctx.db.model('User', schema)`. The difference matters in three places. Two
+Oven apps in one process do not fight over global state. A test suite gets its own connection
+instead of sharing one with whatever ran before it. And `app.close()` genuinely closes *this*
+app's connection rather than a global one something else may still be using.
+
+## Configuration
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `url` | — | **required**; `mongodb://…` |
+| `connection` | — | passed to Mongoose unchanged |
+
+Everything Mongoose can be told about pooling, timeouts and TLS goes in `connection`. Restating
+those options here would mean falling behind Mongoose's own within a release.
+
+```ts
+mongooseDb({
+  url: env.string('MONGO_URL'),
+  connection: { maxPoolSize: 20, serverSelectionTimeoutMS: 5000 },
+})
+```
+
+## Health checks
+
+The [`db`](/docs/bricks/db/) brick's health path issues a real `ping` to the server. `readyState`
+would be cheaper and would report healthy for a connection whose server had gone away — a health
+check that cannot fail is not a health check.
+
+## Transactions
+
+This is the one place the adapter does **not** fit the shared contract, and it is worth
+explaining rather than hiding.
+
+```ts
+// This throws for Mongoose, naming the provider.
+await transaction(ctx.db, async (tx) => { /* … */ })
+
+// This is the form to use.
+await ctx.db.transaction(async (session) => {
+  await Order.create([order], { session })
+  await Inventory.updateOne(query, update, { session })
+})
+```
+
+Every SQL provider scopes a transaction to a *client*: Drizzle hands you a `tx` and every query
+through it is inside the transaction. Mongoose scopes a transaction to a **session**, attached
+to each query individually — there is no session-scoped `Connection` to hand you.
+
+We could fake one by proxying the connection and every model it returns. It would work for
+`find` and `save`, and quietly not work for `aggregate`, `bulkWrite`, `watch` and whatever else
+you reached for. A transaction that silently covers *some* of your writes is worse than none, so
+the provider declares the truth and `transaction()` refuses.
+
+The same applies to [`transactional()`](/docs/bricks/db/#one-transaction-per-request) — it fails
+loudly on a Mongo app rather than pretending.
+
+<Aside type="note" title="Mongo transactions need a replica set">
+  A standalone `mongod` has no transactions at all, whatever API you call. This is a second
+  reason not to pretend at the contract level.
+</Aside>
+
+## What this adapter is for
+
+Beyond running Mongo: it is the **second, structurally different implementation** that tests
+whether the database contract is real. One adapter proves nothing — a contract shaped around a
+single ORM will fit that ORM perfectly and nothing else.
+
+Three of the four contract methods fit Mongoose unchanged. The fourth did not, and the contract
+did not bend to accommodate it: `transaction` is optional, and a provider that lacks it says so.
+That is the outcome the split was designed for.
+
+## Limitations
+
+- **No portable transactions** — see above.
+- **Mongoose 8, not 9.** Mongoose 9 pulls `bson@7`, which calls a `node:v8` API Bun has not
+  implemented (`isBuildingSnapshot`); importing it fails outright under Bun 1.2. The peer range
+  is `^8.0.0` until that lands.
+- **No migration commands.** `oven db` covers Drizzle and Prisma; Mongo's schema lives in your
+  models, and there is no equivalent worth wrapping.
+- **Integration tests run in CI, not on your laptop**, against a real `mongo:8` service. Locally
+  they skip unless `MONGO_URL` is set, and say so rather than passing silently.

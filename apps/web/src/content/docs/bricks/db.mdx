@@ -93,6 +93,8 @@ Portable across providers. You can equally use the ORM's own form — `ctx.db.tr
 
 A provider without transaction support **refuses** rather than running the work unwrapped. Work
 that silently escapes its transaction is the failure nobody notices until the data is wrong.
+[`db-mongoose`](/docs/bricks/db-mongoose/#transactions) is the one that does this, and its page
+explains why — Mongoose scopes a transaction to a session, not to a client.
 
 ### One transaction per request
 

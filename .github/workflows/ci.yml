@@ -8,6 +8,38 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # Integration suites are gated on these URLs being set, so they run here and skip on a
+    # contributor's laptop. A green local run is not a claim that Postgres and Mongo were tested.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: oven
+          POSTGRES_USER: oven
+          POSTGRES_DB: oven_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oven"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      POSTGRES_URL: postgres://oven:oven@localhost:5432/oven_test
+      MONGO_URL: mongodb://localhost:27017/oven_test
+
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -20,5 +52,14 @@ jobs:
         run: bun run typecheck
       - name: Test
         run: bun test
+      # Guards the gate itself. A typo in an env name would silently skip both integration
+      # suites and still print a green run, which is the failure this catches.
+      - name: Confirm the integration suites ran
+        run: |
+          bun test packages/db-drizzle packages/db-mongoose 2>&1 | tee /tmp/integration.log
+          if grep -q "integration tests skipped" /tmp/integration.log; then
+            echo "::error::An integration suite was skipped in CI. Check POSTGRES_URL / MONGO_URL."
+            exit 1
+          fi
       - name: Build site
         run: bash scripts/build-site.sh

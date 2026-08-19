@@ -212,7 +212,9 @@ describe('transactions', () => {
     const app = make().use(db(provider))
     await app.ready()
 
-    expect(transaction(client, async () => 'x')).rejects.toThrow(/does not support transactions/)
+    expect(transaction(client, async () => 'x')).rejects.toThrow(
+      /does not support the portable transaction form/,
+    )
   })
 
   test('refuses a client Oven did not make', () => {

@@ -362,12 +362,26 @@ the required shape. A brick without a page is not done.
       migration tool, detected from its config file (`drizzle.config.ts` → drizzle-kit,
       `prisma/schema.prisma` → Prisma CLI), translating names where the two disagree. Replacing the
       stub that currently reports the module is missing
-- [ ] Tests against real SQLite and Postgres
+- [x] Tests against real SQLite (`bun:sqlite`, already real), Postgres and MongoDB. The
+      Postgres and Mongo suites are gated on `POSTGRES_URL` / `MONGO_URL` and run in CI against
+      `postgres:17` and `mongo:8` service containers. CI fails if either suite *skips*, so a
+      typo in an env name cannot turn a green run into a false one.
 
 ### 2.3 A second db adapter
-- [ ] `@theoven/db-prisma` or `@theoven/db-mongoose` — **the point is that it is structurally
+- [x] `@theoven/db-mongoose` shipped — **the point is that it is structurally
       different from Drizzle.** A contract with one implementation is a guess; the second one
-      is what proves it holds, exactly as Valibot proved the validator contract
+      is what proves it holds, exactly as Valibot proved the validator contract.
+
+      **What it found:** three of the four contract methods fit Mongoose unchanged. `transaction`
+      did not — Mongoose scopes a transaction to a *session* attached per query, not to a client
+      that can be handed to `work`. The contract did not bend: `transaction` stays optional, the
+      provider declares no support, and `transaction()` refuses rather than running unwrapped.
+      Faking a session-bound client by proxying every model would have worked for `find` and
+      `save` and quietly not for `aggregate`, `bulkWrite` and `watch`.
+
+      Also found: Mongoose 9 cannot be imported under Bun 1.2 at all — its `bson@7` calls
+      `node:v8`'s `isBuildingSnapshot`, which Bun has not implemented. Peer range pinned to
+      `^8.0.0`, with the reason on the brick page rather than in a lockfile nobody reads.
 
 ### 2.4 `@theoven/auth` — contract and flows (D26) ✅
 - [x] `identify(ctx) → Identity | null` — the only required method (D19)

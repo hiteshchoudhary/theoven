@@ -107,8 +107,9 @@ export async function transaction<Client, Result>(
 
   if (!provider.transaction) {
     throw new DatabaseError(
-      `The "${provider.name}" provider does not support transactions. Running this work ` +
-        'without one would be worse than failing, so it fails.',
+      `The "${provider.name}" provider does not support the portable transaction form. ` +
+        'Running this work without a transaction would be worse than failing, so it fails. ' +
+        "Use the client's own transaction method instead.",
       { provider: provider.name },
     )
   }

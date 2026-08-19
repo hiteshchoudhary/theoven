@@ -1,0 +1,38 @@
+{
+  "name": "@theoven/db-mongoose",
+  "version": "0.0.0",
+  "description": "Mongoose for Oven — MongoDB through the same database contract",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "database",
+    "mongodb",
+    "mongoose"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:*",
+    "@theoven/db": "workspace:*",
+    "mongoose": "^8.0.0"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:*",
+    "@theoven/db": "workspace:*",
+    "mongoose": "^8.24.3"
+  }
+}
