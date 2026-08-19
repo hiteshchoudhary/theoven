@@ -40,6 +40,9 @@ export default defineConfig({
           ],
         },
         { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
+        // The catalogue. One page per shipped brick, all following the same shape so a reader
+        // — or a model — can find "what endpoints does this add" without hunting.
+        { label: 'Bricks', items: [{ autogenerate: { directory: 'bricks' } }] },
         { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
       ],
       lastUpdated: true,

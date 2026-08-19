@@ -1,0 +1,134 @@
+---
+title: openapi
+description: Serves an OpenAPI 3.1 document and a browsable reference, generated from the schemas your routes already declare.
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/core` (built in) |
+| **Adds to context** | `ctx.openapi` |
+| **Endpoints** | `GET /openapi.json`, `GET /docs` |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+Built into core, so there is nothing to install.
+
+```ts title="src/app.ts"
+import { createApp, openapi } from '@theoven/core'
+
+export const app = createApp().use(openapi({ info: { title: 'My API', version: '1.0.0' } }))
+```
+
+## What it does
+
+Generates an OpenAPI 3.1 document from the schemas your routes already declare, and serves a
+browsable reference at `/docs`. You write nothing extra.
+
+A documentation page that drifts from the implementation is worse than no page at all, and
+deriving one from the other is the only way to stop that.
+
+## Endpoints
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `GET` | `/openapi.json` | the generated document | none |
+| `GET` | `/docs` | the browsable reference | none |
+
+Both paths are configurable, and both exclude themselves from the document they describe —
+documenting the docs endpoint is noise in every generated client.
+
+## Configuration
+
+```ts
+openapi({
+  info: { title: 'My API', version: '1.0.0', description: 'Does things' },
+  servers: [{ url: 'https://api.example' }],
+  path: '/openapi.json',
+  ui: '/docs',                  // or false to omit the UI
+  securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+  exclude: ['/internal/metrics'],
+})
+```
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `info` | `{ title: 'API', version: '0.0.0' }` | document metadata |
+| `servers` | — | base URLs for generated clients |
+| `path` | `/openapi.json` | where the document is served |
+| `ui` | `/docs` | where the reference is served; `false` to omit |
+| `securitySchemes` | — | merged with anything auth bricks contribute |
+| `exclude` | — | paths to leave out |
+
+## What it generates
+
+| From your route | Becomes |
+| --- | --- |
+| `params` | path parameters, always required |
+| `query` | query parameters, optional per the schema |
+| `headers` | header parameters |
+| `body` | a request body — `multipart/form-data` when it contains a file |
+| `response` | responses by status code |
+| `summary`, `description`, `tags` | operation metadata |
+
+Two things are added for you:
+
+- **`422` on any route that validates input**, with the RFC 9457 problem shape, so a generated
+  client knows the error type it will actually receive.
+- **Path parameters for routes with no `params` schema.** `/users/:id` puts `{id}` in the URL
+  template, and the spec requires a matching parameter object whether or not you declared one.
+
+`HEAD` routes are skipped: they are served from `GET` and carry no separate contract.
+
+## Using it from code
+
+```ts
+app.get('/spec-summary', (ctx) => {
+  const document = ctx.openapi.document()
+  return { paths: Object.keys(document.paths ?? {}).length }
+})
+```
+
+Or from the CLI, which is the usual way to feed a client generator:
+
+```bash
+oven openapi > openapi.json
+oven openapi --out openapi.json --title "My API" --api-version 1.0.0
+```
+
+## Limitations
+
+**Only Zod schemas can be described.** Zod is the one Standard Schema library that emits JSON
+Schema today, which is exactly why it is the bundled default. Other validators still work for
+validation; their operations are documented **permissively** — the route appears with an
+unconstrained body — and a warning names the vendor at startup so the gap is discoverable.
+
+Saying "any value" is honest. Inventing a shape would not be.
+
+**A document with no paths warns.** The 3.1 spec permits an empty `paths` object, but strict
+validators reject a document with no entries anywhere. Rather than fake compliance, the
+generator says so — a zero-route document usually means the brick was registered before any
+routes, or `exclude` over-matched.
+
+<Aside type="note" title="The UI loads from a CDN">
+  The reference page pulls Scalar from jsDelivr, the same way FastAPI loads Swagger UI.
+  Vendoring a megabyte of JavaScript into core would make every install pay for a page most
+  deployments never open. Pass `ui: false` to omit it entirely.
+</Aside>
+
+## How it is verified
+
+Generated documents are handed to `@readme/openapi-parser` in the test suite and asserted valid.
+Structural tests confirm the shape we intended; only a real parser confirms the shape the
+ecosystem accepts — and it has already caught two bugs that structural tests missed.
+
+## Why 3.1
+
+OpenAPI 3.1's schema dialect **is** JSON Schema 2020-12 — exactly what `z.toJSONSchema` emits.
+Targeting 3.0 would mean down-converting every schema and losing fidelity on the way.

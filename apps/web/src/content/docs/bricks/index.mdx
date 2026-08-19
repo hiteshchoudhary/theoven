@@ -1,0 +1,55 @@
+---
+title: Brick catalogue
+description: Every brick Oven ships — what it does, what it adds, and whether it is built yet.
+sidebar:
+  order: 0
+  label: Overview
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+**Add a brick, get a feature.** Each one contributes a capability to the request context, fully
+typed — and leaving it out makes using it a compile error rather than a crash at 3am.
+
+Every page below answers the same questions in the same order: what it installs, what files and
+tables it creates, what endpoints it adds, and what it cannot do. If a brick has no endpoints,
+its page says so rather than omitting the section.
+
+## Shipped
+
+| Brick | Adds | Endpoints |
+| --- | --- | --- |
+| [`openapi`](/docs/bricks/openapi/) | `ctx.openapi` | `/openapi.json`, `/docs` |
+
+## In progress
+
+| Brick | Adds | Notes |
+| --- | --- | --- |
+| `@theoven/db` | the contract | lifecycle only; queries stay native |
+| `@theoven/db-drizzle` | `ctx.db` | Drizzle over `bun:sqlite`, Postgres, MySQL |
+| `@theoven/auth` | the contract | identity, guards, named policies |
+| `@theoven/auth-basic` | `ctx.user` | signup, login, reset — Drizzle storage |
+
+## Planned
+
+| Brick | Adds |
+| --- | --- |
+| `@theoven/auth-clerk` | `ctx.user` from Clerk, hosted sign-in |
+| `@theoven/auth-better` | `ctx.user` from better-auth, mounted routes |
+| `@theoven/auth-mongo` | the `auth-basic` flows over Mongoose |
+| `@theoven/db-prisma`, `@theoven/db-mongoose` | `ctx.db` |
+| `@theoven/storage` | `ctx.storage` — S3, R2, MinIO |
+| `@theoven/mail` | `ctx.mail` |
+| `@theoven/queue` | `ctx.queue` — jobs and cron |
+
+<Aside type="note" title="Bricks are not middleware">
+  CORS, rate limiting, compression and security headers ship **in core** as
+  [middleware](/docs/reference/middleware/), because they wrap a request rather than add a
+  capability. A brick is the other thing: it puts something new on the context.
+</Aside>
+
+## Writing your own
+
+The brick contract is small and public — see [Writing a brick](/docs/reference/bricks/) for the
+interface and how types flow. A third-party brick is a normal npm package that exports a factory function;
+nothing about the first-party ones is privileged.

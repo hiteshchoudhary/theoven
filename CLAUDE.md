@@ -275,6 +275,54 @@ Each route file exports: `default` (the handler) and optionally `params`, `query
 
 ---
 
+## 5b. Every brick ships with a catalogue page
+
+A brick is not done until `apps/web/src/content/docs/bricks/<name>.mdx` exists. Not "before
+release" — in the same commit, because a brick whose page comes later is a brick nobody can
+use and nobody reviews the ergonomics of.
+
+**Every page uses the same headings, in this order.** The consistency is the feature: a reader
+who has seen one page knows where to look on the next, and a coding agent can find "what
+endpoints does this add" without inference. A section that does not apply says so — `Creates
+files: none` — rather than being dropped, because a missing heading is ambiguous where an
+explicit "none" is not.
+
+```mdx
+---
+title: <brick name, as it is imported>
+description: <one sentence, what it does>
+sidebar:
+  order: <n>
+---
+
+| | |
+| --- | --- |
+| **Package** | @theoven/<name> |
+| **Adds to context** | ctx.<name>, ctx.<per-request state> |
+| **Endpoints** | the paths it mounts, or "none" |
+| **Creates files** | migrations, config, generated code — or "none" |
+| **Creates tables** | its own tables — or "none" |
+| **Status** | shipped | in progress | planned |
+
+## Install          bun add, and the .use() line
+## What it does     two or three sentences, no marketing
+## Endpoints        a table: method, path, purpose, auth — or "This brick adds no endpoints."
+## Configuration    a worked example, then a table of every option with its default
+## What it creates  files written, tables migrated, what to commit — or "Nothing."
+## Usage            typed examples of the common cases
+## Capabilities     what it supports and what it does not (D19), and what fails at boot
+## Limitations      the honest list; where it will not fit
+## How it is verified   what the tests actually prove
+```
+
+Two rules for the content:
+
+- **State what it cannot do.** A brick page that only lists capabilities is an advertisement.
+  `auth-clerk` cannot sign a user in from the server; say so on the page, not in a support
+  thread.
+- **Show the files it writes.** Anything that touches a user's repository — a migration, a
+  generated schema, a config file — is listed by path, so nobody discovers it in `git status`.
+
 ## 6. Commands
 
 ```bash

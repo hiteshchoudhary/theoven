@@ -337,6 +337,9 @@ each. See `CLAUDE.md` D14–D22. Ordered so each step is usable before the next 
    inference and `Value`/`Request` inferred independently. `onShutdown` still receives the
    value `setup()` produced.
 
+**Every brick below ships with its catalogue page in the same commit** — see `CLAUDE.md` §5b for
+the required shape. A brick without a page is not done.
+
 ### 2.1 `@theoven/db` — the contract
 - [ ] `DatabaseProvider<Client>`: `connect`, `health`, `close`, `transaction`
 - [ ] `ctx.db` is the **native client**, fully typed from the user's own schema (D16)
@@ -403,6 +406,8 @@ Only as far as `auth-basic` needs it: password reset cannot work without sending
 - [ ] Mail defaults to the console driver, so password reset works before any provider exists
 
 ### 2.9 Agent ergonomics (D22)
+- [x] Brick catalogue section at `/docs/bricks/`, with a fixed page shape so a reader — or a
+      model — finds the same headings on every brick
 - [ ] `llms.txt` and `llms-full.txt` generated from the docs at build time, so they cannot drift
 - [ ] `AGENTS.md` written by `oven create`: route naming, `defineRoute`, native ORM queries,
       policies, and the things never to do (no Express middleware, no CommonJS)
