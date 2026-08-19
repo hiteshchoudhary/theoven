@@ -313,12 +313,29 @@ guessing adds risk without adding capability.
 Restructured from the original plan: these are **contracts plus adapters**, not one package
 each. See `CLAUDE.md` D14–D22. Ordered so each step is usable before the next begins.
 
-### 2.0 Core: typed per-request brick state 🔴 everything else depends on it
-- [ ] Third type parameter on `Brick`: `setup()` contributes a shared service, `request()`
-      contributes per-request state, both flowing into the context type
-- [ ] Route metadata reaches bricks at request time, so `auth: 'admin'` can be enforced by a
-      brick core knows nothing about
-- [ ] Type-level tests: per-request state is typed, and absent when the brick is not registered
+### 2.0 Core: typed per-request brick state ✅
+
+- [x] `request()` hook on `Brick`: `setup()` contributes a shared service, `request()`
+      contributes per-request state, both flowing into the context type through `.use()`
+- [x] Runs after routing (so `ctx.params` is available) and before middleware, the handler and
+      validation; throwing rejects the request
+- [x] Route metadata reaches bricks at request time, so `auth: 'admin'` can be enforced by a
+      brick core knows nothing about. `RouteSchema.auth` is typed `unknown` on purpose — the
+      moment core knows the shape, core owns auth and auth stops being replaceable
+- [x] Contributions land as own properties, so nothing leaks between requests; apps with no
+      contributors skip the work entirely
+- [x] Type-level tests, verified to fail when inference breaks
+
+**The inference took three attempts, and the reasons are worth keeping:**
+
+1. `Brick<Name, Value, Request>` as the parameter type does not work. Naming a generic interface
+   there fixes its type parameters to their declared defaults during inference, silently
+   collapsing the `request()` return type — `ctx.user` typed as `Record<never, never>`.
+2. A `const` type parameter fixes literal inference for `name`, but also deep-narrows every
+   value inside `setup()`, so `() => ({ count: 0 })` yields `count: 0` rather than `count: number`.
+3. What works: the parameter shape written inline, with `Name extends string` for literal
+   inference and `Value`/`Request` inferred independently. `onShutdown` still receives the
+   value `setup()` produced.
 
 ### 2.1 `@theoven/db` — the contract
 - [ ] `DatabaseProvider<Client>`: `connect`, `health`, `close`, `transaction`
@@ -338,16 +355,20 @@ each. See `CLAUDE.md` D14–D22. Ordered so each step is usable before the next 
       different from Drizzle.** A contract with one implementation is a guess; the second one
       is what proves it holds, exactly as Valibot proved the validator contract
 
-### 2.4 `@theoven/auth` — the contract
+### 2.4 `@theoven/auth` — contract and flows (D26)
 - [ ] `identify(ctx) → Identity | null` — the only required method (D19)
 - [ ] `Identity`: `{ id, email?, name?, image?, raw }` (D17)
 - [ ] Declared capabilities (`routes`, `signOut`, `refresh`), checked at boot with an error
-      naming the adapter and the feature
+      naming the brick and the feature
 - [ ] `auth: true` guard and **named policies** (D18), with policies appearing as named
       security requirements in the OpenAPI document
 - [ ] `ctx.user` narrowed to non-null inside a guarded route
+- [ ] **The security-critical half, written once:** argon2id via `Bun.password`, JWT signing and
+      verification, single-use hashed reset tokens, refresh rotation
+- [ ] `AuthStore` — seven methods, shaped for these flows. Not a general ORM abstraction, and
+      not something db bricks implement (D16 stands)
 
-### 2.5 `@theoven/auth-basic` — batteries, the Laravel/Rails property
+### 2.5 `@theoven/auth-basic` — Drizzle storage, the Laravel/Rails property
 The reason `oven create` gives you a working signup before you have provisioned anything.
 
 - [ ] Signup with name, email, password
@@ -357,7 +378,9 @@ The reason `oven create` gives you a working signup before you have provisioned 
 - [ ] Forgot password → single-use, expiring, hashed reset token sent by email
 - [ ] Passwords hashed with `Bun.password` (argon2id); timing-safe comparisons throughout
 - [ ] Rate limiting on login, signup and reset, since these are the endpoints that get attacked
-- [ ] Schema and migrations shipped for the adapter's own tables
+- [ ] Drizzle schema and migrations shipped for its own tables
+- [ ] `@theoven/auth-mongo` — the same flows over Mongoose, which is what proves `AuthStore`
+      is real rather than a Drizzle interface wearing a disguise (D25)
 - [ ] Tests covering the attacks, not just the happy path: reset-token reuse, expired tokens,
       user enumeration via login and reset responses, refresh-token rotation
 
@@ -373,8 +396,9 @@ Only as far as `auth-basic` needs it: password reset cannot work without sending
 - [ ] One real driver (Resend or SMTP), enabled by setting env values and nothing else
 - [ ] The remaining drivers, templating and the preview inbox stay in §3.2
 
-### 2.8 Default stack and scaffold (D21)
-- [ ] `oven create` defaults to SQLite, with a documented one-line switch to Postgres
+### 2.8 Default stack and scaffold (D21, D24)
+- [ ] `oven create` defaults to **Drizzle over `bun:sqlite`**, with a one-line switch to Postgres
+      that leaves every query untouched
 - [ ] Optional `--auth basic` scaffolds signup, login and reset working out of the box
 - [ ] Mail defaults to the console driver, so password reset works before any provider exists
 

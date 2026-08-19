@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, expectTypeOf, test } from 'bun:test'
+import { z } from 'zod'
 import { type App, type AppOptions, appFromConfig, createApp, defineConfig } from './app'
 import { type Brick, orderBricks } from './brick'
 import type { Context } from './context'
+import { Unauthorized } from './errors'
 import { silentLogger } from './logger'
 
 const opened: Array<{ close(options?: { timeout?: number }): Promise<void> }> = []
@@ -345,6 +347,245 @@ describe('type inference', () => {
     app.get('/x', (ctx) => {
       expectTypeOf(ctx.params).toEqualTypeOf<Record<string, string>>()
       expectTypeOf(ctx.token).toEqualTypeOf<string | undefined>()
+      return null
+    })
+  })
+})
+
+/**
+ * Per-request contributions (D15).
+ *
+ * `setup()` gives a shared service; `request()` gives state that differs per request. `ctx.user`
+ * needs the second, and it must be typed — the alternative, global module augmentation, was
+ * rejected in D5 because it makes `ctx.user` appear in apps with no auth installed.
+ */
+describe('per-request state', () => {
+  test('is merged onto the context', async () => {
+    const app = make().use({
+      name: 'session',
+      setup: () => ({ secret: 'k' }),
+      request: (ctx) => ({ user: { id: ctx.header('x-user') ?? 'anonymous' } }),
+    })
+    app.get('/me', (ctx) => ctx.user)
+
+    const response = await app.fetch(
+      new Request('https://theoven.app/me', { headers: { 'x-user': 'ada' } }),
+    )
+    expect(await response.json()).toEqual({ id: 'ada' })
+  })
+
+  test('differs between requests', async () => {
+    const app = make().use({
+      name: 'session',
+      setup: () => null,
+      request: (ctx) => ({ user: ctx.header('x-user') ?? null }),
+    })
+    app.get('/me', (ctx) => ({ user: ctx.user }))
+
+    const first = await app.fetch(
+      new Request('https://theoven.app/me', { headers: { 'x-user': 'ada' } }),
+    )
+    const second = await app.fetch(
+      new Request('https://theoven.app/me', { headers: { 'x-user': 'grace' } }),
+    )
+
+    expect(await first.json()).toEqual({ user: 'ada' })
+    expect(await second.json()).toEqual({ user: 'grace' })
+  })
+
+  test('runs after routing, so params are available', async () => {
+    const app = make().use({
+      name: 'x',
+      setup: () => null,
+      request: (ctx) => ({ seen: ctx.params.id }),
+    })
+    app.get('/users/:id', (ctx) => ({ seen: ctx.seen }))
+
+    expect(await (await send(app, '/users/42')).json()).toEqual({ seen: '42' })
+  })
+
+  // Core treats `auth: 'admin'` as opaque metadata; the brick is what gives it meaning.
+  test('is told which route matched, including keys core does not interpret', async () => {
+    const seen: unknown[] = []
+    const app = make().use({
+      name: 'inspector',
+      setup: () => null,
+      request: (_ctx, route) => {
+        seen.push({ method: route.method, pattern: route.pattern, auth: route.schema?.auth })
+      },
+    })
+    app.get('/users/:id', { auth: 'admin' }, () => 'ok')
+
+    await send(app, '/users/7')
+    expect(seen[0]).toEqual({ method: 'GET', pattern: '/users/:id', auth: 'admin' })
+  })
+
+  test('throwing rejects the request before the handler runs', async () => {
+    let reached = false
+    const app = make().use({
+      name: 'guard',
+      setup: () => null,
+      request: () => {
+        throw new Unauthorized('no token')
+      },
+    })
+    app.get('/private', () => {
+      reached = true
+      return 'secret'
+    })
+
+    const response = await send(app, '/private')
+    expect(response.status).toBe(401)
+    expect(reached).toBe(false)
+  })
+
+  test('contributing nothing is fine', async () => {
+    const app = make().use({
+      name: 'quiet',
+      setup: () => 'service',
+      request: () => undefined,
+    })
+    app.get('/x', (ctx) => ({ service: ctx.quiet }))
+    expect(await (await send(app, '/x')).json()).toEqual({ service: 'service' })
+  })
+
+  test('several bricks contribute together', async () => {
+    const app = make()
+      .use({ name: 'a', setup: () => null, request: () => ({ one: 1 }) })
+      .use({ name: 'b', setup: () => null, request: () => ({ two: 2 }) })
+
+    app.get('/x', (ctx) => ({ one: ctx.one, two: ctx.two }))
+    expect(await (await send(app, '/x')).json()).toEqual({ one: 1, two: 2 })
+  })
+
+  test('contributions run in dependency order', async () => {
+    const order: string[] = []
+    const app = make()
+      .use({
+        name: 'auth',
+        dependsOn: ['db'],
+        setup: () => null,
+        request: () => {
+          order.push('auth')
+        },
+      })
+      .use({
+        name: 'db',
+        setup: () => null,
+        request: () => {
+          order.push('db')
+        },
+      })
+
+    app.get('/x', () => 'ok')
+    await send(app, '/x')
+    expect(order).toEqual(['db', 'auth'])
+  })
+
+  test('an async contribution is awaited', async () => {
+    const app = make().use({
+      name: 'slow',
+      setup: () => null,
+      request: async () => {
+        await Bun.sleep(2)
+        return { ready: true }
+      },
+    })
+    app.get('/x', (ctx) => ({ ready: ctx.ready }))
+    expect(await (await send(app, '/x')).json()).toEqual({ ready: true })
+  })
+
+  // A per-request property must not leak into the next request through the shared prototype.
+  test('state does not leak between requests', async () => {
+    const app = make().use({
+      name: 'maybe',
+      setup: () => null,
+      request: (ctx) => (ctx.header('x-set') ? { flag: 'set' } : undefined),
+    })
+    app.get('/x', (ctx) => ({ flag: (ctx as { flag?: string }).flag ?? null }))
+
+    const withFlag = await app.fetch(
+      new Request('https://theoven.app/x', { headers: { 'x-set': '1' } }),
+    )
+    const without = await send(app, '/x')
+
+    expect(await withFlag.json()).toEqual({ flag: 'set' })
+    expect(await without.json()).toEqual({ flag: null })
+  })
+
+  test('apps with no contributors are unaffected', async () => {
+    const app = make().use({ name: 'plain', setup: () => 'value' })
+    app.get('/x', (ctx) => ({ plain: ctx.plain }))
+    expect(await (await send(app, '/x')).json()).toEqual({ plain: 'value' })
+  })
+})
+
+describe('per-request type inference', () => {
+  test('contributed state is typed on the context', () => {
+    const app = createApp({ logger: silentLogger }).use({
+      name: 'auth' as const,
+      setup: () => ({ client: 'clerk' }),
+      request: () => ({ user: { id: 'u1', email: 'a@b.c' } }),
+    })
+
+    app.get('/me', (ctx) => {
+      expectTypeOf(ctx.user).toEqualTypeOf<{ id: string; email: string }>()
+      expectTypeOf(ctx.auth).toEqualTypeOf<{ client: string }>()
+      return null
+    })
+  })
+
+  test('an async request hook contributes the awaited type', () => {
+    const app = createApp({ logger: silentLogger }).use({
+      name: 'auth' as const,
+      setup: () => null,
+      request: async () => ({ user: { id: 'u1' } }),
+    })
+
+    app.get('/me', (ctx) => {
+      expectTypeOf(ctx.user).toEqualTypeOf<{ id: string }>()
+      return null
+    })
+  })
+
+  test('state from an unregistered brick is a compile error', () => {
+    const app = createApp({ logger: silentLogger }).use({
+      name: 'auth' as const,
+      setup: () => null,
+      request: () => ({ user: { id: 'u1' } }),
+    })
+
+    app.get('/me', (ctx) => {
+      // @ts-expect-error `tenant` is contributed by no registered brick.
+      void ctx.tenant
+      return null
+    })
+  })
+
+  test('shared and per-request state accumulate across bricks', () => {
+    const app = createApp({ logger: silentLogger })
+      // An annotated return, so the assertion below is about the plumbing rather than about
+      // whether TypeScript widens a literal `1` to `number`.
+      .use({ name: 'db' as const, setup: () => ({ query: (sql: string): number => sql.length }) })
+      .use({ name: 'auth' as const, setup: () => null, request: () => ({ user: { id: 'u' } }) })
+
+    app.get('/x', (ctx) => {
+      expectTypeOf(ctx.db).toEqualTypeOf<{ query: (sql: string) => number }>()
+      expectTypeOf(ctx.user).toEqualTypeOf<{ id: string }>()
+      return null
+    })
+  })
+
+  test('per-request state survives route validation', () => {
+    const app = createApp({ logger: silentLogger }).use({
+      name: 'auth' as const,
+      setup: () => null,
+      request: () => ({ user: { id: 'u1' } }),
+    })
+
+    app.post('/x', { body: z.object({ name: z.string() }) }, (ctx) => {
+      expectTypeOf(ctx.user).toEqualTypeOf<{ id: string }>()
+      expectTypeOf(ctx.body).toEqualTypeOf<{ name: string }>()
       return null
     })
   })

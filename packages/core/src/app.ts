@@ -3,9 +3,11 @@ import type { BodyOptions } from './body'
 import {
   type Brick,
   type BrickHost,
+  type RouteInfo as BrickRouteInfo,
   type BrickSetupContext,
   type OpenApiFragment,
   orderBricks,
+  type RequestResult,
 } from './brick'
 import { Context, type ContextInit } from './context'
 import type { CookieJarInit } from './cookies'
@@ -31,6 +33,12 @@ import {
  * returns a value or throws, and async throws are caught identically to synchronous ones.
  */
 export type Handler<Ext = unknown> = (ctx: Context & Ext) => unknown
+
+/** Bricks that contribute per-request state, kept so dispatch can run them in order. */
+interface RequestContributor {
+  name: string
+  request: NonNullable<Brick['request']>
+}
 
 /** Replaces the default problem+json rendering for failures. */
 export type ErrorHandler = (error: OvenError, ctx: Context) => unknown
@@ -98,6 +106,8 @@ const EMPTY_PARAMS: Record<string, string> = Object.freeze({})
 interface RouteEntry {
   handler: (ctx: Context) => unknown
   schema: RouteSchema | undefined
+  /** Kept so a brick's `request()` hook can be told which route matched. */
+  pattern: string
 }
 
 /**
@@ -148,6 +158,8 @@ export class App<Ext = unknown> implements BrickHost {
   }
 
   private readonly bricks: Brick[] = []
+  /** Bricks with a `request()` hook, in dependency order. Empty for most apps. */
+  private contributors: RequestContributor[] = []
   /** Every registered route with its schemas — what OpenAPI generation reads. */
   private readonly registered: Array<{
     method: HttpMethod
@@ -213,12 +225,38 @@ export class App<Ext = unknown> implements BrickHost {
    */
   use(middleware: Middleware): this
   use(prefix: string, middleware: Middleware): this
-  use<Name extends string, Value>(brick: Brick<Name, Value>): App<Ext & { [K in Name]: Value }>
+  /**
+   * Registering a brick widens the context type with everything it contributes.
+   *
+   * Inferred from the brick object rather than from declared type parameters, so a caller
+   * writing `{ name: 'auth', setup, request }` never spells out a generic.
+   *
+   * The parameter is spelled out inline rather than as `Brick<Name, Value, Request>`. Naming
+   * the interface fixes its type parameters to their declared defaults during inference, which
+   * silently collapses the `request()` return type and loses `ctx.user` — the entire point of
+   * the hook. Written inline, all three infer independently, and `onShutdown` still receives
+   * the value `setup()` produced.
+   */
+  use<
+    Name extends string,
+    Value,
+    Request extends Record<string, unknown> = Record<never, never>,
+  >(brick: {
+    name: Name
+    dependsOn?: readonly string[]
+    setup(context: BrickSetupContext): Value | Promise<Value>
+    request?(ctx: Context, route: BrickRouteInfo): RequestResult<Request>
+    onRequest?(ctx: Context): unknown
+    onShutdown?(value: Value): unknown
+  }): App<Ext & { [K in Name]: Value } & Request>
   // The implementation signature must be compatible with every overload above, and no concrete
   // type is assignable to both `this` and `App<Ext & {...}>`. `any` here is confined to the
   // signature; callers only ever see the typed overloads.
-  // biome-ignore lint/suspicious/noExplicitAny: overload implementation signature
-  use(first: Middleware | string | Brick<string, unknown>, second?: Middleware): any {
+  use(
+    first: Middleware | string | Brick<string, unknown, Record<string, unknown>>,
+    second?: Middleware,
+    // biome-ignore lint/suspicious/noExplicitAny: overload implementation signature
+  ): any {
     if (typeof first === 'string') {
       if (!second) throw new Error('use(prefix, middleware) needs a middleware function.')
       this.middleware.push({ prefix: first, handler: second })
@@ -310,8 +348,9 @@ export class App<Ext = unknown> implements BrickHost {
       throw new Error(`Route ${method} ${path} was registered without a handler function.`)
     }
 
-    this.router.insert(method, path, { handler, schema })
-    this.registered.push({ method, pattern: normalisePath(path), schema })
+    const pattern = normalisePath(path)
+    this.router.insert(method, path, { handler, schema, pattern })
+    this.registered.push({ method, pattern, schema })
     return this
   }
 
@@ -474,6 +513,15 @@ export class App<Ext = unknown> implements BrickHost {
     }
     this.ContextClass = Extended as unknown as typeof this.ContextClass
 
+    // Ordered the same way setup was, so a brick that depends on another also sees its
+    // per-request state already contributed.
+    this.contributors = orderBricks(this.bricks)
+      .filter((brick) => typeof brick.request === 'function')
+      .map((brick) => ({
+        name: brick.name,
+        request: brick.request as RequestContributor['request'],
+      }))
+
     for (const brick of this.bricks) {
       const teardown = brick.onShutdown
       if (teardown) {
@@ -582,7 +630,26 @@ export class App<Ext = unknown> implements BrickHost {
       if (brick.onRequest) await brick.onRequest(ctx)
     }
 
-    const { handler, schema } = match.payload
+    const { handler, schema, pattern } = match.payload
+
+    // Per-request contributions land as own properties, which shadow the prototype. A brick
+    // that contributes nothing costs nothing: apps with no contributors skip this entirely.
+    if (this.contributors.length > 0) {
+      const route: BrickRouteInfo = { method, pattern, schema }
+      for (const contributor of this.contributors) {
+        const contributed = await contributor.request(ctx, route)
+        if (!contributed) continue
+
+        for (const [key, value] of Object.entries(contributed)) {
+          Object.defineProperty(ctx, key, {
+            value,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          })
+        }
+      }
+    }
 
     // Validation runs after beforeHandle would have a chance to reject cheaply, but before the
     // handler — a handler should never see input it did not ask for.

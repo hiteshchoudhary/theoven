@@ -22,11 +22,40 @@ import type { RouteSchema } from './validation'
  * })
  * ```
  *
- * The value lives on the context prototype, so it is shared across requests and costs nothing
- * per request. Anything genuinely per-request — a session, a transaction — belongs in
- * `onRequest`, which runs with the context in hand.
+ * A brick contributes in two places, and the difference matters:
+ *
+ * - **`setup()`** runs once at boot and returns a *shared* service. It lives on the context
+ *   prototype, so ten bricks cost nothing per request.
+ * - **`request()`** runs per request and returns *per-request* state — a session, a
+ *   transaction, the signed-in user.
+ *
+ * Both are typed, and both flow into the context through `.use()`. `request()` exists because
+ * `ctx.user` cannot come from `setup()`: it is different for every request. The alternative —
+ * declaring it globally with module augmentation — was rejected in D5, because it makes
+ * `ctx.user` appear in apps that never installed auth.
+ *
+ * ```ts
+ * function clerk(): Brick<'auth', ClerkClient, { user: User | null }> {
+ *   return {
+ *     name: 'auth',
+ *     setup: () => createClerkClient(...),          // shared, once
+ *     request: async (ctx) => ({                     // per request
+ *       user: await verifyToken(ctx.token),
+ *     }),
+ *   }
+ * }
+ *
+ * app.get('/me', (ctx) => {
+ *   ctx.auth.users.get(...)   // the shared client, typed
+ *   ctx.user?.id              // per-request state, typed
+ * })
+ * ```
  */
-export interface Brick<Name extends string = string, Value = unknown> {
+export interface Brick<
+  Name extends string = string,
+  Value = unknown,
+  Request extends Record<string, unknown> = Record<never, never>,
+> {
   /** Property this brick contributes to the context. Must not collide with anything on it. */
   name: Name
 
@@ -41,11 +70,46 @@ export interface Brick<Name extends string = string, Value = unknown> {
   /** Builds the value exposed as `ctx[name]`. Runs once, at boot. */
   setup(context: BrickSetupContext): Value | Promise<Value>
 
-  /** Runs per request, before middleware. Use for per-request state such as a session. */
+  /**
+   * Contributes per-request state, merged onto the context under its own keys.
+   *
+   * Runs after routing — so `ctx.params` and the route's schema are available — and before
+   * middleware, the handler and any guard. Returning nothing contributes nothing.
+   *
+   * Throwing here rejects the request, which is how an auth brick turns a bad token into a
+   * `401` before a handler ever sees it.
+   */
+  request?(ctx: Context, route: RouteInfo): RequestResult<Request>
+
+  /** Runs per request, before `request()`. Prefer `request()` when you have state to contribute. */
   onRequest?(ctx: Context): unknown
 
   /** Releases resources during graceful shutdown — pools, workers, connections. */
   onShutdown?(value: Value): unknown
+}
+
+/**
+ * What a `request()` hook may return: state to contribute, or nothing at all.
+ *
+ * `void` in the union is deliberate rather than confusing — a brick that only inspects the
+ * request, or that contributes conditionally, has nothing to return, and forcing it to invent
+ * an empty object would be worse.
+ */
+// biome-ignore lint/suspicious/noConfusingVoidType: contributing nothing is a valid outcome
+export type RequestResult<Request> = Request | Promise<Request | void> | void
+
+/**
+ * What a brick is told about the matched route.
+ *
+ * This is how a brick enforces something core knows nothing about. Core sees `auth: 'admin'`
+ * on a route as opaque metadata and passes it along; the auth brick is what gives it meaning.
+ * Without this, every route-level feature would have to be built into core itself.
+ */
+export interface RouteInfo {
+  method: HttpMethod
+  pattern: string
+  /** The route's declared schema, including any keys core does not interpret. */
+  schema: RouteSchema | undefined
 }
 
 /** OpenAPI pieces a brick can contribute, such as the auth module's security schemes. */

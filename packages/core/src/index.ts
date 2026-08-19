@@ -26,6 +26,8 @@ export {
   type BrickSetupContext,
   type OpenApiFragment,
   orderBricks,
+  type RequestResult,
+  type RouteInfo,
 } from './brick'
 export { Context, type ContextInit } from './context'
 export { type CookieJarInit, type CookieOptions, Cookies } from './cookies'
@@ -105,7 +107,6 @@ export {
   type OpenApiService,
   openapi,
   pathParameterNames,
-  type RouteInfo,
   toOpenApiPath,
 } from './openapi'
 export { type ParsedQuery, parseQuery, type QueryOptions, type QueryValue } from './query'

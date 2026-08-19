@@ -32,6 +32,52 @@ Leave the queue brick out and `ctx.queue` is a **compile error**, not a crash at
 the whole point, and the test suite asserts it: registering the brick makes the
 `@ts-expect-error` on that line unnecessary, which fails the build.
 
+## Two kinds of contribution
+
+A brick contributes in two places, and the difference is the whole reason `ctx.user` can exist:
+
+| | Runs | Contributes | Cost per request |
+| --- | --- | --- | --- |
+| `setup()` | once, at boot | a **shared** service | none — it lives on the prototype |
+| `request()` | every request | **per-request** state | only what you compute |
+
+```ts
+const auth = {
+  name: 'auth',
+  setup: () => createClerkClient(...),        // shared, once
+  request: async (ctx) => ({                   // per request
+    user: await verifyToken(ctx.token),
+  }),
+}
+
+app.get('/me', (ctx) => {
+  ctx.auth.users.get(...)   // the shared client, typed
+  ctx.user?.id              // per-request state, typed
+})
+```
+
+`request()` runs **after routing**, so `ctx.params` is available, and **before** middleware, the
+handler and validation. Throwing rejects the request — which is how an auth brick turns a bad
+token into a `401` without a handler ever seeing it.
+
+It is also handed the matched route:
+
+```ts
+request: (ctx, route) => {
+  if (route.schema?.auth) requireSignedIn(ctx)
+}
+```
+
+Core never interprets `auth: 'admin'` on a route. It carries it, and the brick decides what it
+means — which is what keeps auth replaceable instead of built in.
+
+<Aside type="note" title="Why not just declare `ctx.user` globally?">
+  Module augmentation would be simpler to write and is what many frameworks do. It also makes
+  `ctx.user` appear in apps that never installed auth — a type that promises something the
+  runtime will not deliver. D5 rejected that for exactly this reason, and `request()` is the
+  answer that keeps the types honest.
+</Aside>
+
 ## Writing one
 
 ```ts

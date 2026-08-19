@@ -1,9 +1,13 @@
 import { z } from 'zod'
-import type { Brick } from './brick'
+// The same shape a brick is handed for the matched route: method, pattern, schema. Defining a
+// second identical interface here would be two names for one concept.
+import type { Brick, RouteInfo } from './brick'
+
+// Re-exported so callers of the generator do not need to know the type is defined next door.
+export type { RouteInfo }
+
 import type { Logger } from './logger'
-import type { HttpMethod } from './router/types'
 import type { StandardSchemaV1 } from './standard-schema'
-import type { RouteSchema } from './validation'
 
 /**
  * OpenAPI generation.
@@ -13,13 +17,6 @@ import type { RouteSchema } from './validation'
  * the user nothing further. A docs page that drifts from the implementation is worse than no
  * docs page, and the only way to stop that is to derive one from the other.
  */
-
-/** A route as the generator sees it. */
-export interface RouteInfo {
-  method: HttpMethod
-  pattern: string
-  schema: RouteSchema | undefined
-}
 
 export interface OpenApiInfo {
   title?: string

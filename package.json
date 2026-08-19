@@ -40,5 +40,8 @@
   },
   "engines": {
     "bun": ">=1.2.0"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2"
   }
 }

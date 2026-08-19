@@ -25,6 +25,14 @@ export interface RouteSchema {
   headers?: StandardSchemaV1
   /** Response schemas by status code. Checked in development; see `validateResponses`. */
   response?: Record<number, StandardSchemaV1>
+  /**
+   * Authorization requirement for this route.
+   *
+   * Core never interprets this — it carries it to bricks through `request()`, and the auth
+   * brick decides what `true` or `'admin'` means. Typed as `unknown` deliberately: the moment
+   * core knows the shape, core owns auth, and auth stops being replaceable.
+   */
+  auth?: unknown
   /** Shown in the generated OpenAPI document. */
   summary?: string
   description?: string
