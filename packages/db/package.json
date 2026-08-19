@@ -1,16 +1,36 @@
 {
   "name": "@theoven/db",
-  "version": "0.0.0",
-  "description": "The database contract for Oven \u2014 lifecycle, not queries",
-  "type": "module",
+  "version": "0.1.0",
+  "description": "The database contract for Oven — lifecycle, not queries",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "database"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/db/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/db"
+  },
   "license": "MIT",
+  "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "files": [
     "src",
-    "dist"
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
   ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -18,15 +38,9 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@theoven/core": "workspace:*"
+    "@theoven/core": "workspace:^"
   },
-  "keywords": [
-    "bun",
-    "oven",
-    "brick",
-    "database"
-  ],
   "devDependencies": {
-    "@theoven/core": "workspace:*"
+    "@theoven/core": "workspace:^"
   }
 }

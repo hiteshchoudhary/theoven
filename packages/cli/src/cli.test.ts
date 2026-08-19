@@ -578,3 +578,56 @@ describe('scaffolded stack', () => {
     }
   })
 })
+
+/**
+ * The top-level flags.
+ *
+ * `--version` has no command, and the help branch treats "no command" as "show usage" — so
+ * asking for the version printed the whole help and exited 1, which anything scripting against
+ * it would read as a failure.
+ */
+describe('top-level flags', () => {
+  async function capture(argv: string[]): Promise<{ code: number; out: string }> {
+    const written: string[] = []
+    const original = console.log
+    console.log = (...parts: unknown[]) => written.push(parts.join(' '))
+    try {
+      const { run } = await import('./index')
+      const code = await run(argv)
+      return { code, out: written.join('\n') }
+    } finally {
+      console.log = original
+    }
+  }
+
+  test('--version prints only a version, and succeeds', async () => {
+    const { code, out } = await capture(['--version'])
+    expect(code).toBe(0)
+    expect(out.trim()).toMatch(/^\d+\.\d+\.\d+/)
+    expect(out).not.toContain('Usage')
+  })
+
+  test('-v and `version` agree with it', async () => {
+    const long = await capture(['--version'])
+    expect((await capture(['-v'])).out).toBe(long.out)
+    expect((await capture(['version'])).out).toBe(long.out)
+  })
+
+  // The version is read from the manifest, not written into the source, where it gets forgotten.
+  test('the version matches package.json', async () => {
+    const manifest = await Bun.file(new URL('../package.json', import.meta.url)).json()
+    expect((await capture(['--version'])).out.trim()).toBe(manifest.version)
+  })
+
+  test('no arguments prints usage and reports failure', async () => {
+    const { code, out } = await capture([])
+    expect(code).toBe(1)
+    expect(out).toContain('Usage')
+  })
+
+  test('--help prints usage and succeeds', async () => {
+    const { code, out } = await capture(['--help'])
+    expect(code).toBe(0)
+    expect(out).toContain('Usage')
+  })
+})

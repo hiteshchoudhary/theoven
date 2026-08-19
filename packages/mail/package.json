@@ -1,16 +1,36 @@
 {
   "name": "@theoven/mail",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Transactional email for Oven — console and memory drivers included, Resend and SMTP when configured",
-  "type": "module",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "email"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/mail/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/mail"
+  },
   "license": "MIT",
+  "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "files": [
     "src",
-    "dist"
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
   ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -18,16 +38,10 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@theoven/core": "workspace:*"
+    "@theoven/core": "workspace:^"
   },
-  "keywords": [
-    "bun",
-    "oven",
-    "brick",
-    "email"
-  ],
   "devDependencies": {
-    "@theoven/core": "workspace:*",
-    "@theoven/queue": "workspace:*"
+    "@theoven/core": "workspace:^",
+    "@theoven/queue": "workspace:^"
   }
 }

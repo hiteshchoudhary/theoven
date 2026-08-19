@@ -1,26 +1,7 @@
 {
   "name": "@theoven/queue",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Background jobs, retries, dead-letter and cron for Oven — in-memory, Redis or Postgres",
-  "type": "module",
-  "license": "MIT",
-  "exports": {
-    ".": "./src/index.ts",
-    "./testing": "./src/driver-conformance.ts"
-  },
-  "files": [
-    "src",
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "peerDependencies": {
-    "@theoven/core": "workspace:*"
-  },
   "keywords": [
     "bun",
     "oven",
@@ -30,7 +11,40 @@
     "cron",
     "redis"
   ],
+  "homepage": "https://theoven.app/docs/bricks/queue/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/queue"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/driver-conformance.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^"
+  },
   "devDependencies": {
-    "@theoven/core": "workspace:*"
+    "@theoven/core": "workspace:^"
   }
 }

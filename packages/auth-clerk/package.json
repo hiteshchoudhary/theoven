@@ -1,19 +1,7 @@
 {
   "name": "@theoven/auth-clerk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Clerk authentication for Oven — hosted sign-in, verified session tokens, no routes",
-  "type": "module",
-  "license": "MIT",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "files": [
-    "src",
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
   "keywords": [
     "bun",
     "oven",
@@ -21,15 +9,41 @@
     "auth",
     "clerk"
   ],
+  "homepage": "https://theoven.app/docs/bricks/auth-clerk/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/auth-clerk"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@theoven/auth": "workspace:*",
-    "@theoven/core": "workspace:*"
+    "@theoven/auth": "workspace:^",
+    "@theoven/core": "workspace:^"
   },
   "devDependencies": {
-    "@theoven/auth": "workspace:*",
-    "@theoven/core": "workspace:*"
+    "@theoven/auth": "workspace:^",
+    "@theoven/core": "workspace:^"
   }
 }

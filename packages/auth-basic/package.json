@@ -1,20 +1,7 @@
 {
   "name": "@theoven/auth-basic",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Email and password auth for Oven — signup, login, refresh, reset — stored with Drizzle",
-  "type": "module",
-  "license": "MIT",
-  "exports": {
-    ".": "./src/index.ts",
-    "./schema": "./src/schema.ts"
-  },
-  "files": [
-    "src",
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
   "keywords": [
     "bun",
     "oven",
@@ -23,18 +10,45 @@
     "jwt",
     "drizzle"
   ],
+  "homepage": "https://theoven.app/docs/bricks/auth-basic/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/auth-basic"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@theoven/auth": "workspace:*",
-    "@theoven/core": "workspace:*",
+    "@theoven/auth": "workspace:^",
+    "@theoven/core": "workspace:^",
     "drizzle-orm": ">=0.36.0"
   },
   "devDependencies": {
-    "@theoven/auth": "workspace:*",
-    "@theoven/core": "workspace:*",
-    "@theoven/db": "workspace:*",
-    "@theoven/db-drizzle": "workspace:*"
+    "@theoven/auth": "workspace:^",
+    "@theoven/core": "workspace:^",
+    "@theoven/db": "workspace:^",
+    "@theoven/db-drizzle": "workspace:^"
   }
 }

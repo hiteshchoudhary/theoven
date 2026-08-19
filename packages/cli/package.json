@@ -1,19 +1,39 @@
 {
   "name": "@theoven/cli",
-  "version": "0.0.0",
-  "description": "The Oven CLI \u2014 scaffold, run, build and inspect Oven apps",
-  "type": "module",
-  "license": "MIT",
-  "bin": {
-    "oven": "./src/index.ts"
+  "version": "0.1.0",
+  "description": "The Oven CLI — scaffold, run, build and inspect Oven apps",
+  "keywords": [
+    "bun",
+    "oven",
+    "cli",
+    "framework"
+  ],
+  "homepage": "https://theoven.app",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/cli"
+  },
+  "license": "MIT",
+  "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "oven": "./src/index.ts"
+  },
   "files": [
     "src",
-    "dist"
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
   ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -21,12 +41,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@theoven/core": "workspace:*"
-  },
-  "keywords": [
-    "bun",
-    "oven",
-    "cli",
-    "framework"
-  ]
+    "@theoven/core": "workspace:^"
+  }
 }

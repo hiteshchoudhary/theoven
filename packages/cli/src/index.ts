@@ -9,7 +9,19 @@ import { dev, start } from './commands/run'
 import { worker } from './commands/worker'
 import { BANNER, fail, info, style } from './ui'
 
-const VERSION = '0.0.0'
+/**
+ * Read from the manifest rather than written here.
+ *
+ * A hardcoded version is one someone forgets on the release that matters — the CLI printed
+ * `0.0.0` from an installed 0.1.0 package, which is exactly the sort of thing that turns a bug
+ * report into a wrong-version wild goose chase.
+ */
+const VERSION =
+  ((
+    await Bun.file(new URL('../package.json', import.meta.url))
+      .json()
+      .catch(() => ({}))
+  ).version as string) ?? '0.0.0'
 
 const HELP = `${BANNER} ${style.dim(VERSION)}
 
@@ -53,14 +65,23 @@ const PLANNED: Record<string, string> = {}
 export async function run(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv)
 
-  if (args.flags.help || args.flags.h || args.command === 'help' || args.command === undefined) {
-    info(HELP)
-    return args.command === undefined && !args.flags.help && !args.flags.h ? 1 : 0
-  }
-
+  /**
+   * Version before help.
+   *
+   * `oven --version` has no command, and the help branch treats "no command" as "show usage" —
+   * so asking for the version printed the whole help text and exited 1. Anything scripting
+   * against it saw a failure.
+   */
   if (args.flags.version || args.flags.v || args.command === 'version') {
     info(VERSION)
     return 0
+  }
+
+  if (args.flags.help || args.flags.h || args.command === 'help' || args.command === undefined) {
+    info(HELP)
+    // Asking for help succeeded. Running with no arguments at all did not — the shell should
+    // see a usage error, which is what makes `oven && deploy` behave.
+    return args.command === undefined && !args.flags.help && !args.flags.h ? 1 : 0
   }
 
   // A command that exists in the roadmap but not yet in the code should say so, rather than

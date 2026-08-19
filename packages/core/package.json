@@ -1,25 +1,7 @@
 {
   "name": "@theoven/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Router, context, bricks, validation and OpenAPI for Oven",
-  "type": "module",
-  "license": "MIT",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "files": [
-    "src",
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "zod": "^4.0.0"
-  },
   "keywords": [
     "bun",
     "framework",
@@ -28,5 +10,37 @@
     "api",
     "openapi",
     "oven"
-  ]
+  ],
+  "homepage": "https://theoven.app",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  }
 }
