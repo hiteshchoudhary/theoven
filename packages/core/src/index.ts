@@ -122,6 +122,13 @@ export {
   type RouteParams,
 } from './router/types'
 export {
+  type EventStream,
+  formatEvent,
+  type ServerSentEvent,
+  type StreamOptions,
+  sse,
+} from './sse'
+export {
   formatPath,
   isStandardSchema,
   type StandardSchemaV1,
@@ -144,3 +151,9 @@ export {
   validateRequest,
   validateResponse,
 } from './validation'
+export {
+  isUpgrade,
+  type OvenSocket,
+  type SocketData,
+  type SocketHandlers,
+} from './websocket'

@@ -25,6 +25,13 @@ import {
   validateRequest,
   validateResponse,
 } from './validation'
+import {
+  isUpgrade,
+  type SocketData,
+  type SocketHandlers,
+  socketRouter,
+  UPGRADED,
+} from './websocket'
 
 /**
  * A route handler. Returns anything — the value is coerced into a `Response`.
@@ -112,6 +119,8 @@ interface RouteEntry {
   schema: RouteSchema | undefined
   /** Kept so a brick's `request()` hook can be told which route matched. */
   pattern: string
+  /** Present on a route registered with `app.ws()`. */
+  socket?: SocketHandlers<never> | undefined
 }
 
 /**
@@ -132,6 +141,9 @@ export class App<Ext = unknown> implements BrickHost {
   declare readonly __ext?: Ext
 
   private readonly router = new Router<RouteEntry>()
+  private readonly sockets = socketRouter()
+  /** Socket handlers by route pattern, looked up once a route matches. */
+  private readonly socketRoutes = new Map<string, SocketHandlers<unknown>>()
   /**
    * Resolved configuration.
    *
@@ -478,6 +490,62 @@ export class App<Ext = unknown> implements BrickHost {
     return this.register('OPTIONS', a, b, c)
   }
 
+  /**
+   * Registers a WebSocket route.
+   *
+   * ```ts
+   * app.ws('/rooms/:id', { auth: true, params: z.object({ id: z.uuid() }) }, {
+   *   upgrade: (ctx) => ({ room: ctx.params.id, userId: ctx.user.id }),
+   *   open:    (socket) => socket.subscribe(socket.data.data.room),
+   *   message: (socket, text) => { app.publish(socket.data.data.room, String(text)) },
+   * })
+   * ```
+   *
+   * It is a `GET` route that happens to upgrade, which is the whole point: the guard, the params
+   * schema and the brick hooks all run **before** the socket opens. A separate socket entry point
+   * would mean a second, weaker authentication story — and that is how socket endpoints become
+   * the unguarded way into an application.
+   */
+  ws<Data, const Schema extends RouteSchema>(
+    pattern: string,
+    schema: Schema,
+    handlers: SocketHandlers<Data>,
+  ): this
+  ws<Data>(pattern: string, handlers: SocketHandlers<Data>): this
+  ws(pattern: string, b: RouteSchema | SocketHandlers<unknown>, c?: SocketHandlers<unknown>): this {
+    const schema = c ? (b as RouteSchema) : undefined
+    const handlers = (c ?? b) as SocketHandlers<unknown>
+
+    this.register(
+      'GET',
+      pattern,
+      (schema ?? {}) as RouteSchema,
+      // Reached only when the client asked for a plain GET on a socket route.
+      (() =>
+        this.refuse(
+          426,
+          'Upgrade Required',
+          'This endpoint speaks WebSocket. Connect with ws:// or wss://.',
+          { upgrade: 'websocket', connection: 'Upgrade' },
+        )) as never,
+    )
+
+    // The socket handlers ride on the route entry the registration just created.
+    const entry = this.router.find('GET', pattern.replace(/:([^/]+)/g, 'x'))
+    void entry
+    this.socketRoutes.set(pattern, handlers)
+    return this
+  }
+
+  /**
+   * Sends a message to every socket subscribed to a topic.
+   *
+   * Bun's own pub/sub, so a broadcast does not walk a list of connections in JavaScript.
+   */
+  publish(topic: string, message: string): number {
+    return this.server?.publish(topic, message) ?? 0
+  }
+
   /** Every registered route. Backs `oven routes` and the boot banner. */
   routes(): ReadonlyArray<{ method: HttpMethod; pattern: string }> {
     return this.router.routes()
@@ -612,7 +680,31 @@ export class App<Ext = unknown> implements BrickHost {
    * Bound rather than declared as a method so it can be handed straight to `Bun.serve` and to
    * tests without losing `this`.
    */
+  /**
+   * Handles a request and always answers with a `Response`.
+   *
+   * This is the surface tests and `app.fetch()` callers use. The variant Bun gets is `serve`
+   * below, which may answer with nothing — but making *this* return `Response | undefined` would
+   * force every test in every application to handle a case only the socket upgrade can produce.
+   */
   readonly fetch = async (request: Request, server?: Server<unknown>): Promise<Response> => {
+    const response = await this.serve(request, server)
+
+    // Only reachable when a socket upgrade succeeded, which needs a listening server — so never
+    // from a directly dispatched Request.
+    return response ?? new Response(null, { status: 101 })
+  }
+
+  /**
+   * The handler `Bun.serve` gets.
+   *
+   * Returns `undefined` for an accepted upgrade: answering with a `Response` there makes Bun
+   * close the socket it has just opened.
+   */
+  private readonly serve = async (
+    request: Request,
+    server?: Server<unknown>,
+  ): Promise<Response | undefined> => {
     // Refuse new work once draining has started, so a rolling deploy sheds load in a way
     // clients can act on rather than by dropping connections.
     if (this.closing) {
@@ -625,7 +717,10 @@ export class App<Ext = unknown> implements BrickHost {
 
     this.inFlight++
     try {
-      return await this.dispatch(request, server)
+      const response = await this.dispatch(request, server)
+      // An accepted upgrade must answer with nothing: returning a Response here makes Bun close
+      // the socket it has just opened.
+      return response === UPGRADED ? undefined : response
     } finally {
       this.inFlight--
       if (this.closing && this.inFlight === 0) this.drained?.()
@@ -640,7 +735,10 @@ export class App<Ext = unknown> implements BrickHost {
    * middleware only runs once a route has matched. This is the ordering Express and Koa use,
    * and getting it wrong makes CORS impossible to configure correctly.
    */
-  private async dispatch(request: Request, server: Server<unknown> | undefined): Promise<Response> {
+  private async dispatch(
+    request: Request,
+    server: Server<unknown> | undefined,
+  ): Promise<Response | typeof UPGRADED> {
     /**
      * Scanned once, here, and shared by everything downstream.
      *
@@ -747,6 +845,21 @@ export class App<Ext = unknown> implements BrickHost {
 
     if (schema) await validateRequest(ctx, schema)
 
+    /**
+     * The upgrade point.
+     *
+     * Everything protective has already run: the brick hooks populated `ctx.user`, the guard
+     * refused an anonymous request, and the params schema rejected a malformed id. Only now does
+     * the connection become a socket.
+     */
+    const socket = this.socketRoutes.get(pattern)
+    if (socket && isUpgrade(ctx.req)) {
+      const upgraded = await this.upgradeSocket(ctx, socket)
+      if (upgraded !== undefined) return upgraded
+      // `undefined` means Bun took the connection; there is no response to send.
+      return UPGRADED
+    }
+
     let result = await handler(ctx)
 
     if (schema?.response && this.settings.validateResponses) {
@@ -810,8 +923,48 @@ export class App<Ext = unknown> implements BrickHost {
     return chain
   }
 
+  /**
+   * Performs the upgrade, or returns a `Response` explaining why it did not happen.
+   *
+   * `upgrade()` runs first so an application can attach per-connection state or refuse — and it
+   * receives the same context the handler would have, so `ctx.user` and `ctx.params` are there.
+   */
+  private async upgradeSocket(
+    ctx: Context,
+    handlers: SocketHandlers<unknown>,
+  ): Promise<Response | undefined> {
+    const server = this.server
+    if (!server) {
+      // Dispatching a Request directly, as tests do. There is no socket to hand back.
+      return this.refuse(
+        426,
+        'Upgrade Required',
+        'WebSocket upgrades need a listening server; this request was dispatched directly.',
+      )
+    }
+
+    // A throw here is an ordinary framework error: it becomes problem+json and no socket opens.
+    const data = handlers.upgrade ? await handlers.upgrade(ctx) : undefined
+
+    const payload: SocketData<unknown> = { data, requestId: ctx.id, route: handlers }
+
+    const accepted = server.upgrade(ctx.req, {
+      data: payload,
+      ...(ctx.responseHeaders ? { headers: ctx.responseHeaders } : {}),
+    })
+
+    if (!accepted) {
+      return this.refuse(400, 'Bad Request', 'The WebSocket upgrade was refused.')
+    }
+
+    // Bun owns the connection now, and finds its handlers on `socket.data.route`.
+    return undefined
+  }
+
   /** Coerces a result to a Response and runs the response hooks. */
-  private async finish(ctx: Context, result: unknown): Promise<Response> {
+  private async finish(ctx: Context, result: unknown): Promise<Response | typeof UPGRADED> {
+    // An upgraded connection has no response to coerce or stamp.
+    if (result === UPGRADED) return UPGRADED
     let response = ctx.respond(result)
 
     if (this.hooks.response.length > 0) {
@@ -918,7 +1071,8 @@ export class App<Ext = unknown> implements BrickHost {
     this.server = Bun.serve({
       port,
       ...(this.hostname !== undefined ? { hostname: this.hostname } : {}),
-      fetch: this.fetch,
+      fetch: this.serve as (request: Request, server: Server<unknown>) => Promise<Response>,
+      websocket: this.sockets as never,
     })
 
     this.signalHandler = () => {
