@@ -17,7 +17,16 @@
 /assets/*
   Cache-Control: public, max-age=604800
 
-/styles.css
-  Cache-Control: public, max-age=3600
-/main.js
-  Cache-Control: public, max-age=3600
+# Fingerprinted at build time (scripts/fingerprint.mjs), so the filename changes whenever the
+# contents do. That makes "new HTML, cached old stylesheet" impossible rather than merely
+# short-lived — which it was not, at an hour: it rendered as a broken page, not a stale one.
+/styles.*.css
+  Cache-Control: public, max-age=31536000, immutable
+/main.*.js
+  Cache-Control: public, max-age=31536000, immutable
+
+# The HTML must never be cached, or it would keep pointing at an asset that no longer exists.
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate

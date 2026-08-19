@@ -32,6 +32,9 @@ cp -R apps/landing/. "$OUT/"
 mkdir -p "$OUT/docs"
 cp -R apps/web/dist/. "$OUT/docs/"
 
+echo "==> Fingerprinting landing assets"
+bun scripts/fingerprint.mjs "$OUT"
+
 echo "==> Checking documentation code samples"
 bun scripts/check-docs.mjs
 
