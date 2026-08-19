@@ -24,3 +24,16 @@ and graceful shutdown. Validation, auth, database, storage, mail and queues are 
 
 Pages describing features that do not exist yet say so at the top. We would rather tell you
 than have you copy code that cannot run.
+
+## Reading this with a coding agent
+
+The whole documentation set is published in the [llms.txt](https://llmstxt.org) format, generated
+from these pages at build time so it cannot drift from them:
+
+| File | What it is |
+| --- | --- |
+| [`/llms.txt`](/llms.txt) | an index — every page, its one-line description, its URL |
+| [`/llms-full.txt`](/llms-full.txt) | the full text of every page, so no further fetches are needed |
+
+`oven create` also writes an **`AGENTS.md`** into every project, describing the conventions that
+matter and the Express habits that do not apply here.

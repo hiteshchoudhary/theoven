@@ -1,14 +1,24 @@
 # Oven — Task Tracker
 
-**Current state:** **Phases 1 and 4 complete; Phase 2 substantially done.** Router, server, context, errors, logger, response
-coercion, graceful shutdown, the always-on batteries, middleware, bricks, validation,
-file-based routing, OpenAPI, and the CLI. **850 tests green**, typecheck and lint clean.
+**Current state:** **Phases 0, 1, 2 and 4 complete**, except two items that are yours (buy the
+domain, rotate the npm token) and one genuinely blocked on Phase 3 (direct file handoff to
+`@theoven/storage`).
+
+Shipped: router, server, context, errors, logger, response coercion, graceful shutdown, the
+always-on batteries, middleware, bricks, validation, file-based routing, OpenAPI, the CLI, and
+eleven packages — `db`, `db-drizzle`, `db-mongoose`, `auth`, `auth-basic`, `auth-mongo`,
+`auth-clerk`, `auth-better`, `mail`, plus core and cli.
+
+**1142 tests green**, typecheck and lint clean. Postgres and MongoDB suites are gated on
+`POSTGRES_URL` / `MONGO_URL` and run in CI against service containers; CI fails if either
+*skips*, so a typo in an env name cannot turn a green run into a false one.
 
 Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
 Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
 landing page live at theoven.pages.dev; GitHub repo live; `@theoven` npm org claimed.
-**Next task:** the remaining Phase 2 bricks — `auth-clerk`, `auth-better`, `auth-mongo`, a
-second db adapter — plus `llms.txt` and `AGENTS.md`, and wiring auth into `oven create`.
+
+**Next task:** Phase 3 — `@theoven/storage` (which also unblocks the last Phase 1 item),
+`@theoven/queue`, and the rest of mail (§3.2).
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -448,7 +458,8 @@ Only as far as `auth-basic` needs it: password reset cannot work without sending
 
 - [x] `console` driver (dev) and `memory` driver (test), so reset flows work with zero config
 - [x] One real driver (Resend or SMTP), enabled by setting env values and nothing else
-- [ ] The remaining drivers, templating and the preview inbox stay in §3.2
+- The remaining drivers, templating and the preview inbox stay in §3.2 — deliberately out of
+  scope here, not outstanding
 
 ### 2.8 Default stack and scaffold (D21, D24)
 
@@ -483,7 +494,11 @@ own method still has the flaw so the difference stays visible.
 - [x] Brick catalogue section at `/docs/bricks/`, with a fixed page shape so a reader — or a
       model — finds the same headings on every brick
 - [x] **Writing your own brick** guide at `/docs/guides/writing-a-brick/`
-- [ ] `llms.txt` and `llms-full.txt` generated from the docs at build time, so they cannot drift
+- [x] `llms.txt` and `llms-full.txt` generated from the docs at build time, so they cannot drift.
+      `llms.txt` is the index; `llms-full.txt` is every page in full, MDX components stripped and
+      doc links absolutised so they resolve out of context. Ordered by sidebar order then title —
+      by URL the tutorial reads 3, 1, 2. The build fails if fewer than 20 pages are found, because
+      a path change that finds two would still write both files and still pass.
 - [x] `AGENTS.md` written by `oven create`: route naming, `defineRoute`, native ORM queries,
       policies, and the things never to do (no Express middleware, no CommonJS). Sections appear
       only for what was actually scaffolded.
