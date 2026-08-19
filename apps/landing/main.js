@@ -1,63 +1,83 @@
 /**
- * Oven landing page — all of the behaviour, in one file, with no dependencies.
+ * Oven — landing page behaviour.
  *
- * Everything here degrades safely: with JS disabled the page is fully readable, every link
- * works, and the only losses are the scroll animations and the copy button.
+ * Four small things: a border on the nav once you scroll, copy-to-clipboard, the code tabs, and
+ * reveal-on-scroll. No framework and no build step — the page works without any of it.
  */
 ;(() => {
-  'use strict'
-
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-  /* --- sticky nav ------------------------------------------------------ */
+  /* --- nav border on scroll ------------------------------------------- */
   const nav = document.getElementById('nav')
   if (nav) {
-    const onScroll = () => nav.classList.toggle('stuck', window.scrollY > 12)
-    onScroll()
-    addEventListener('scroll', onScroll, { passive: true })
+    const sync = () => nav.classList.toggle('scrolled', window.scrollY > 8)
+    sync()
+    window.addEventListener('scroll', sync, { passive: true })
   }
 
-  /* --- mobile menu ----------------------------------------------------- */
-  const toggle = document.getElementById('nav-toggle')
-  const links = document.getElementById('nav-links')
-  if (toggle && links) {
-    toggle.addEventListener('click', () => {
-      const open = links.classList.toggle('open')
-      toggle.setAttribute('aria-expanded', String(open))
-    })
-    // Close after navigating, otherwise the menu covers the anchor you just jumped to.
-    links.addEventListener('click', (event) => {
-      if (event.target.closest('a')) {
-        links.classList.remove('open')
-        toggle.setAttribute('aria-expanded', 'false')
-      }
-    })
-  }
-
-  /* --- copy the install command ---------------------------------------- */
+  /* --- copy to clipboard ----------------------------------------------- */
   for (const button of document.querySelectorAll('.copy')) {
     button.addEventListener('click', async () => {
       const text = button.dataset.copy
+      if (!text) return
+
       try {
         await navigator.clipboard.writeText(text)
       } catch {
-        // Clipboard API needs a secure context and permission; fall back to a hidden
-        // textarea so the button still does something useful over plain http.
-        const scratch = document.createElement('textarea')
-        scratch.value = text
-        scratch.setAttribute('readonly', '')
-        scratch.style.cssText = 'position:absolute;left:-9999px'
-        document.body.appendChild(scratch)
-        scratch.select()
-        document.execCommand('copy')
-        scratch.remove()
+        // Clipboard access can be refused — over http, or by permission. Falling back to a
+        // selection means the reader can still press cmd-C rather than being told nothing.
+        const field = document.createElement('textarea')
+        field.value = text
+        field.setAttribute('readonly', '')
+        field.style.cssText = 'position:fixed;top:-1000px'
+        document.body.append(field)
+        field.select()
+        try {
+          document.execCommand('copy')
+        } finally {
+          field.remove()
+        }
       }
+
       button.classList.add('done')
       setTimeout(() => button.classList.remove('done'), 1600)
     })
   }
 
-  /* --- reveal on scroll ------------------------------------------------ */
+  /* --- code tabs -------------------------------------------------------
+   * Panels are in the markup and only hidden, so every example is in the page source for
+   * search engines and for anyone with JavaScript off.
+   */
+  const tabs = [...document.querySelectorAll('.tab')]
+  if (tabs.length > 0) {
+    const select = (tab) => {
+      for (const other of tabs) {
+        const selected = other === tab
+        other.setAttribute('aria-selected', String(selected))
+        const panel = document.getElementById(other.getAttribute('aria-controls'))
+        if (panel) panel.hidden = !selected
+      }
+    }
+
+    for (const [index, tab] of tabs.entries()) {
+      tab.addEventListener('click', () => select(tab))
+
+      // Arrow keys move between tabs, which is what the tablist role promises.
+      tab.addEventListener('keydown', (event) => {
+        const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+        if (step === 0) return
+        event.preventDefault()
+        const next = tabs[(index + step + tabs.length) % tabs.length]
+        next.focus()
+        select(next)
+      })
+    }
+  }
+
+  /* --- reveal on scroll -------------------------------------------------
+   * threshold 0 with a negative bottom margin, rather than a visibility ratio: a section taller
+   * than the viewport can never reach a ratio like 0.08, and would stay invisible forever.
+   */
   const revealables = document.querySelectorAll('.reveal')
 
   if (reduced || !('IntersectionObserver' in window)) {
@@ -71,14 +91,14 @@
           observer.unobserve(entry.target)
         }
       },
-      { rootMargin: '0px 0px -12% 0px', threshold: 0.08 },
+      { rootMargin: '0px 0px -10% 0px', threshold: 0 },
     )
     for (const element of revealables) observer.observe(element)
   }
 
   /* --- benchmark bars --------------------------------------------------
-   * Held at zero width until the chart scrolls into view, so the numbers animate up rather
-   * than being already drawn when the reader arrives.
+   * Held at zero width until the chart is in view, so the numbers grow rather than being
+   * already drawn when the reader arrives.
    */
   const bars = document.getElementById('bars')
   if (bars) {
@@ -89,12 +109,11 @@
         (entries) => {
           for (const entry of entries) {
             if (!entry.isIntersecting) continue
-            // A beat after the reveal transition so the two do not fight each other.
-            setTimeout(() => bars.classList.add('run'), 180)
+            setTimeout(() => bars.classList.add('run'), 150)
             barObserver.disconnect()
           }
         },
-        { threshold: 0.3 },
+        { threshold: 0.25 },
       )
       barObserver.observe(bars)
     }

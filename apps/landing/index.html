@@ -26,15 +26,9 @@
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-
-<!-- Grain overlay. SVG turbulence rather than an image: zero bytes, tiles perfectly, no banding. -->
-<svg class="grain" aria-hidden="true">
-  <filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/></filter>
-  <rect width="100%" height="100%" filter="url(#noise)"/>
-</svg>
-
 <a class="skip" href="#main">Skip to content</a>
 
+<!-- ─────────────────────────────  NAV  ─────────────────────────────── -->
 <header class="nav" id="nav">
   <div class="wrap nav-inner">
     <a class="brand" href="/" aria-label="Oven home">
@@ -47,211 +41,162 @@
       <span>Oven</span>
     </a>
 
-    <nav class="nav-links" id="nav-links">
+    <nav class="nav-links" aria-label="Primary">
       <a href="/docs/">Docs</a>
-      <a href="/docs/tutorial/first-route/">Tutorial</a>
       <a href="/docs/bricks/">Bricks</a>
-      <a href="#status">Status</a>
-      <a href="#benchmarks">Benchmarks</a>
-      <a href="https://github.com/hiteshchoudhary/theoven">GitHub</a>
-      <a class="btn btn-sm" href="/docs/start/installation/">Get started</a>
+      <a href="/docs/tutorial/first-route/">Tutorial</a>
+      <a href="/docs/guides/benchmarks/">Benchmarks</a>
     </nav>
 
-    <button class="nav-toggle" id="nav-toggle" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
-      <span></span><span></span>
-    </button>
+    <div class="nav-right">
+      <a class="ghost" href="https://github.com/hiteshchoudhary/theoven">GitHub</a>
+      <a class="btn btn-primary btn-sm" href="/docs/start/installation/">Get started</a>
+    </div>
   </div>
 </header>
 
 <main id="main">
 
-<!-- ─────────────────────────────  HERO  ───────────────────────────── -->
+<!-- ─────────────────────────────  HERO  ────────────────────────────── -->
 <section class="hero">
-  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-grid" aria-hidden="true"></div>
   <div class="wrap hero-inner">
-    <a class="pill" href="https://github.com/hiteshchoudhary/theoven">
-      <span class="dot"></span> v0.1.2 &middot; on npm
+
+    <a class="pill" href="https://www.npmjs.com/package/@theoven/core">
+      <span class="dot"></span> v0.1.2 is on npm
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </a>
 
-    <h1>
-      Stop wiring<br>
-      your backend<br>
-      <em>by hand.</em>
-    </h1>
+    <h1>The batteries-included framework for Bun</h1>
 
     <p class="lede">
-      Every backend needs auth, a database, file storage, email and background jobs.
-      Every backend wires them by hand, badly, again. <strong>Oven ships them.</strong>
+      Auth, a database, file storage, email and background jobs — <strong>configured, not
+      wired</strong>. Every one of them typed, on the request context, documented at
+      <code>/docs</code>.
     </p>
 
     <div class="hero-cta">
-      <a class="btn btn-primary" href="/docs/start/installation/">
-        Get started
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </a>
-      <button class="btn btn-ghost copy" data-copy="bun create theoven my-app">
-        <code>bun create theoven my-app</code>
-        <svg class="ic-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
-        <svg class="ic-done" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
+      <a class="btn btn-primary" href="/docs/start/installation/">Get started</a>
+      <a class="btn btn-secondary" href="/docs/tutorial/first-route/">Read the tutorial</a>
     </div>
+
+    <button class="install copy" data-copy="bun create theoven my-app" type="button" aria-label="Copy install command">
+      <span class="prompt">$</span> bun create theoven my-app
+      <svg class="ic-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+      <svg class="ic-done" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
 
     <dl class="stats">
       <div><dt>110k</dt><dd>req/s on Bun</dd></div>
       <div><dt>6&times;</dt><dd>faster than Express</dd></div>
       <div><dt>1331</dt><dd>tests, all green</dd></div>
+      <div><dt>14</dt><dd>packages on npm</dd></div>
     </dl>
   </div>
-</section>
 
-<!-- ─────────────────────────  CONFIG → FEATURE  ───────────────────── -->
-<section class="section" id="how">
-  <div class="wrap">
-    <header class="section-head reveal">
-      <p class="eyebrow">The whole idea</p>
-      <h2>Add a config. Get a working feature.</h2>
-      <p class="sub">
-        No service locator, no factory, no 400-line bootstrap file. Declare what your app has,
-        and it appears on the request context — fully typed. The route below is real code:
-        the filesystem registers it, the schemas validate it, and <code>/docs</code> documents it.
-      </p>
-    </header>
+  <!-- The product, immediately. A backend framework that shows no code above the fold is
+       asking to be taken on faith. -->
+  <div class="wrap showcase">
+    <div class="tabs" role="tablist" aria-label="Code examples">
+      <button class="tab" role="tab" id="tab-route" aria-controls="panel-route" aria-selected="true">a route</button>
+      <button class="tab" role="tab" id="tab-config" aria-controls="panel-config" aria-selected="false">src/app.ts</button>
+      <button class="tab" role="tab" id="tab-brick" aria-controls="panel-brick" aria-selected="false">a brick</button>
+    </div>
 
-    <div class="split reveal">
-      <figure class="code-card">
-        <figcaption><span class="fname">oven.config.ts</span></figcaption>
-        <pre><code><span class="c-key">import</span> { defineConfig } <span class="c-key">from</span> <span class="c-str">'@theoven/core'</span>
+    <div class="panel" id="panel-route" role="tabpanel" aria-labelledby="tab-route">
+      <figure class="code">
+        <figcaption class="code-head">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          src/routes/users/[id]/avatar.post.ts
+        </figcaption>
+<pre><code><span class="c-key">import</span> { z } <span class="c-key">from</span> <span class="c-str">'zod'</span>
+<span class="c-key">import</span> { route } <span class="c-key">from</span> <span class="c-str">'../../../route'</span>
 
-<span class="c-key">export default</span> <span class="c-fn">defineConfig</span>({
-  routes:  { dir: <span class="c-str">'./src/routes'</span> },
-  db:      { driver: <span class="c-str">'postgres'</span>, url: process.env.<span class="c-num">DATABASE_URL</span> },
-  auth:    { providers: [<span class="c-str">'github'</span>, <span class="c-str">'google'</span>] },
-  storage: { driver: <span class="c-str">'s3'</span>, bucket: <span class="c-str">'uploads'</span> },
-  mail:    { driver: <span class="c-str">'resend'</span> },
-  queue:   { driver: <span class="c-str">'redis'</span> },
-})</code></pre>
-      </figure>
+<span class="c-key">export default</span> <span class="c-fn">route</span>(
+  {
+    auth: <span class="c-num">true</span>,
+    params: z.<span class="c-fn">object</span>({ id: z.<span class="c-fn">uuid</span>() }),
+    body:   z.<span class="c-fn">object</span>({ file: z.<span class="c-fn">file</span>().<span class="c-fn">max</span>(<span class="c-num">5_000_000</span>) }),
+  },
+  <span class="c-key">async</span> (ctx) => {
+    <span class="c-com">// every one of these is typed, validated and guarded</span>
+    <span class="c-key">const</span> { key } = <span class="c-key">await</span> ctx.storage.<span class="c-fn">upload</span>(<span class="c-str">`avatars/</span>${ctx.params.id}<span class="c-str">`</span>, ctx.body.file)
 
-      <figure class="code-card">
-        <figcaption><span class="fname">src/routes/users/[id]/avatar.post.ts</span></figcaption>
-        <pre><code><span class="c-key">import</span> { z } <span class="c-key">from</span> <span class="c-str">'zod'</span>
+    <span class="c-key">await</span> ctx.queue.<span class="c-fn">dispatch</span>(resizeAvatar, { key })
 
-<span class="c-key">export const</span> auth   = <span class="c-num">true</span>
-<span class="c-key">export const</span> params = z.<span class="c-fn">object</span>({ id: z.<span class="c-fn">uuid</span>() })
-<span class="c-key">export const</span> body   = z.<span class="c-fn">object</span>({ file: z.<span class="c-fn">file</span>() })
-
-<span class="c-key">export default async</span> ({
-  params, body, user, storage, db, queue,
-}) =&gt; {
-  <span class="c-com">// every one of these is typed and validated</span>
-  <span class="c-key">const</span> { url } = <span class="c-key">await</span> storage.<span class="c-fn">upload</span>(
-    <span class="c-str">`avatars/${params.id}`</span>, body.file,
-  )
-  <span class="c-key">await</span> queue.<span class="c-fn">dispatch</span>(<span class="c-str">'resize-avatar'</span>, { url })
-  <span class="c-key">return</span> db.user.<span class="c-fn">update</span>(params.id, { avatar: url })
-}</code></pre>
+    <span class="c-key">return</span> ctx.db.<span class="c-fn">update</span>(users).<span class="c-fn">set</span>({ avatar: key }).<span class="c-fn">where</span>(<span class="c-fn">eq</span>(users.id, ctx.<span class="c-typ">user</span>.id))
+  },
+)</code></pre>
       </figure>
     </div>
 
-    <p class="caption reveal">
-      That route is validated, authenticated, typed, and documented at <code>/docs</code>.
-      There is nothing to wire and nothing to forget.
+    <div class="panel" id="panel-config" role="tabpanel" aria-labelledby="tab-config" hidden>
+      <figure class="code">
+        <figcaption class="code-head">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          src/app.ts
+        </figcaption>
+<pre><code><span class="c-key">import</span> { createApp, loadRoutes } <span class="c-key">from</span> <span class="c-str">'@theoven/core'</span>
+<span class="c-key">import</span> { auth } <span class="c-key">from</span> <span class="c-str">'@theoven/auth'</span>
+<span class="c-key">import</span> { basicAuth } <span class="c-key">from</span> <span class="c-str">'@theoven/auth-basic'</span>
+<span class="c-key">import</span> { db } <span class="c-key">from</span> <span class="c-str">'@theoven/db'</span>
+<span class="c-key">import</span> { drizzleSqlite } <span class="c-key">from</span> <span class="c-str">'@theoven/db-drizzle'</span>
+<span class="c-key">import</span> { mail, resendMail } <span class="c-key">from</span> <span class="c-str">'@theoven/mail'</span>
+<span class="c-key">import</span> { s3Storage, storage } <span class="c-key">from</span> <span class="c-str">'@theoven/storage'</span>
+<span class="c-key">import</span> { queue, redisQueue } <span class="c-key">from</span> <span class="c-str">'@theoven/queue'</span>
+
+<span class="c-key">export const</span> app = <span class="c-fn">createApp</span>()
+  .<span class="c-fn">use</span>(<span class="c-fn">db</span>(<span class="c-fn">drizzleSqlite</span>({ url: <span class="c-str">'./data.db'</span>, schema })))
+  .<span class="c-fn">use</span>(<span class="c-fn">storage</span>(<span class="c-fn">s3Storage</span>({ bucket: <span class="c-str">'uploads'</span> })))
+  .<span class="c-fn">use</span>(<span class="c-fn">queue</span>(<span class="c-fn">redisQueue</span>(), { jobs: [resizeAvatar] }))
+  .<span class="c-fn">use</span>(<span class="c-fn">mail</span>(<span class="c-fn">resendMail</span>({ apiKey, from })))
+  .<span class="c-fn">use</span>(<span class="c-fn">auth</span>(<span class="c-fn">basicAuth</span>({ db: client, secret })))
+
+<span class="c-com">// eight auth endpoints, an OpenAPI document and /docs — all mounted</span>
+<span class="c-key">await</span> <span class="c-fn">loadRoutes</span>(app, <span class="c-str">`</span>${import.meta.dir}<span class="c-str">/routes`</span>)</code></pre>
+      </figure>
+    </div>
+
+    <div class="panel" id="panel-brick" role="tabpanel" aria-labelledby="tab-brick" hidden>
+      <figure class="code">
+        <figcaption class="code-head">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          src/bricks/clock.ts
+        </figcaption>
+<pre><code><span class="c-key">import type</span> { <span class="c-typ">Brick</span> } <span class="c-key">from</span> <span class="c-str">'@theoven/core'</span>
+
+<span class="c-com">// A brick is a function returning a descriptor. That is the whole contract.</span>
+<span class="c-key">export function</span> <span class="c-fn">clock</span>(): <span class="c-typ">Brick</span>&lt;<span class="c-str">'clock'</span>, { <span class="c-fn">now</span>(): <span class="c-typ">Date</span> }&gt; {
+  <span class="c-key">return</span> {
+    name: <span class="c-str">'clock'</span>,
+    setup: () => ({ now: () => <span class="c-key">new</span> <span class="c-typ">Date</span>() }),
+  }
+}
+
+<span class="c-key">const</span> app = <span class="c-fn">createApp</span>().<span class="c-fn">use</span>(<span class="c-fn">clock</span>())
+
+app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => ({ now: ctx.clock.<span class="c-fn">now</span>() }))
+<span class="c-com">//                                    ^ typed, because setup's return flowed through .use()</span></code></pre>
+      </figure>
+    </div>
+
+    <p class="code-note">
+      Validated, authenticated, typed and documented at <code>/docs</code> — with nothing wired
+      by hand. Leave a brick out and touching it is a compile error, not a crash at 3am.
     </p>
   </div>
 </section>
 
-
-<!-- ────────────────────────────  BUILD STATUS  ─────────────────────────── -->
-<section class="section" id="status">
-  <div class="wrap">
-    <header class="section-head reveal">
-      <p class="eyebrow">Built in the open</p>
-      <h2>What is shipped</h2>
-      <p class="sub">
-        Fourteen packages on npm at 0.1.2. Pre-1.0, so APIs can still change between minor
-        versions &mdash; here is exactly where it stands.
-      </p>
-    </header>
-
-    <div class="status-grid reveal">
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Router</h3></header>
-        <p>Radix tree with backtracking, correct <code>405</code> with <code>Allow</code>, route conflicts caught at registration.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Server &amp; context</h3></header>
-        <p>Response coercion, RFC 9457 errors, graceful shutdown that drains in-flight requests. <code>HEAD</code> and <code>OPTIONS</code> answered per RFC 9110.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Always-on batteries</h3></header>
-        <p>Body, uploads, cookies, token capture, query parsing &mdash; nothing to install, and nothing parsed until read.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Middleware &amp; hooks</h3></header>
-        <p>Onion-model middleware, five lifecycle hooks, plus CORS, security headers, rate limiting, logging and compression in the box.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Bricks</h3></header>
-        <p>Typed <code>.use()</code> chaining. Register a brick and it appears on the context, typed; leave it out and touching it is a compile error.</p>
-        <p class="replaces"><a href="/docs/bricks/">browse the catalogue &rarr;</a></p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Validation</h3></header>
-        <p>Any <a href="https://standardschema.dev">Standard Schema</a> validator. One declaration validates the request and types the handler; failures are a <code>422</code> listing every problem at once.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>OpenAPI &amp; docs UI</h3></header>
-        <p>The same schemas generate an OpenAPI 3.1 document and a browsable reference at <code>/docs</code>. Checked against a real parser in CI.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>File-based routing</h3></header>
-        <p><code>src/routes/users/[id].post.ts</code> is the route table. <code>_middleware.ts</code> cascades, and errors name the file.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>The CLI</h3></header>
-        <p><code>oven create</code>, <code>dev</code>, <code>build</code>, <code>start</code>, <code>db</code>, <code>worker</code>, <code>routes</code>, <code>openapi</code>, <code>doctor</code>.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Auth</h3></header>
-        <p>Email and password on SQL or Mongo, plus Clerk and better-auth. Eight endpoints, argon2id, revocable sessions, rate limited by default.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Database</h3></header>
-        <p>Drizzle over <code>bun:sqlite</code>, Postgres or MySQL, and Mongoose. <code>ctx.db</code> is the native client &mdash; your queries stay yours.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Mail</h3></header>
-        <p>Console driver by default, so password reset works the moment you create an app. Resend, SES or SMTP when you are ready.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Storage</h3></header>
-        <p>S3, R2, MinIO and Spaces, with presigned direct uploads &mdash; and a local directory so uploads work before you have a bucket.</p>
-      </article>
-      <article class="status done">
-        <header><span class="tick">&check;</span><h3>Queue</h3></header>
-        <p>Typed jobs, retries with backoff, a dead letter and cron. In memory, in Redis, or in the Postgres you already run.</p>
-      </article>
-    </div>
-
-    <p class="caption reveal">
-      Every brick's page lists what it <strong>cannot</strong> do, not just what it can. A page
-      that only lists capabilities is an advertisement.
-      <a class="link-arrow" href="https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md">Full roadmap <span aria-hidden="true">&rarr;</span></a>
-    </p>
-  </div>
-</section>
-
-<!-- ─────────────────────────────  BATTERIES  ──────────────────────── -->
+<!-- ────────────────────────────  BATTERIES  ────────────────────────── -->
 <section class="section alt" id="batteries">
   <div class="wrap">
-    <header class="section-head reveal">
+    <header class="section-head">
       <p class="eyebrow">Always on</p>
       <h2>What you never install again</h2>
       <p class="sub">
-        Express made you assemble a working server from parts. That was never a real choice —
-        it was homework. If more than 80% of apps need it, Oven ships it in core; the rest ship
-        in the box, configured rather than installed.
+        Express made you assemble a working server from parts. That was never a real choice — it
+        was homework. If more than 80% of apps need it, Oven ships it in core; the rest ship in
+        the box, configured rather than installed.
       </p>
     </header>
 
@@ -259,56 +204,115 @@
       <article class="card">
         <h3>Body parsing</h3>
         <p>Content-type aware, size-limited, and lazy — a route that never reads <code>ctx.body</code> never parses it.</p>
-        <p class="replaces">replaces <code>body-parser</code></p>
+        <span class="replaces">replaces <b>body-parser</b></span>
       </article>
       <article class="card">
         <h3>File uploads</h3>
         <p>Uploads arrive as web <code>File</code> objects, streamed rather than buffered, with size and MIME limits.</p>
-        <p class="replaces">replaces <code>multer</code></p>
+        <span class="replaces">replaces <b>multer</b></span>
       </article>
       <article class="card">
         <h3>Cookies</h3>
         <p><code>ctx.cookies</code> with secure defaults and signing built in. No secret to remember to set.</p>
-        <p class="replaces">replaces <code>cookie-parser</code></p>
+        <span class="replaces">replaces <b>cookie-parser</b></span>
       </article>
       <article class="card">
         <h3>Token capture</h3>
-        <p><code>ctx.token</code> from the <code>Authorization</code> header, a cookie, or the query string — even with no auth brick.</p>
-        <p class="replaces">replaces the snippet everyone rewrites</p>
+        <p><code>ctx.token</code> from the Authorization header, a cookie, or the query string — even with no auth brick.</p>
+        <span class="replaces">replaces <b>the snippet everyone rewrites</b></span>
       </article>
       <article class="card">
         <h3>Async errors</h3>
         <p>A throw becomes an RFC 9457 response, whether it happened synchronously or three awaits deep.</p>
-        <p class="replaces">replaces <code>express-async-errors</code></p>
+        <span class="replaces">replaces <b>express-async-errors</b></span>
       </article>
       <article class="card">
         <h3>Environment variables</h3>
-        <p><code>env.port()</code>, <code>env.bool()</code>, <code>env.duration()</code> — parsing that throws instead of guessing, with secrets redacted from errors and dumps.</p>
-        <p class="replaces">replaces <code>dotenv</code> + <code>Boolean('false') === true</code></p>
+        <p><code>env.port()</code>, <code>env.bool()</code>, <code>env.duration()</code> — parsing that throws instead of guessing, with secrets redacted from errors.</p>
+        <span class="replaces">replaces <b>dotenv + Boolean('false') === true</b></span>
       </article>
       <article class="card">
         <h3>Graceful shutdown</h3>
         <p>SIGTERM drains in-flight requests. Mid-drain arrivals get <code>503</code> with <code>Retry-After</code>, not a dead socket.</p>
-        <p class="replaces">replaces a bug you find in production</p>
+        <span class="replaces">replaces <b>a bug you find in production</b></span>
       </article>
       <article class="card">
         <h3>CORS &amp; security headers</h3>
         <p>Correct preflights, <code>Vary: Origin</code>, and the headers every app should send. Configured, not installed.</p>
-        <p class="replaces">replaces <code>cors</code> + <code>helmet</code></p>
+        <span class="replaces">replaces <b>cors + helmet</b></span>
       </article>
       <article class="card">
-        <h3>Rate limiting &amp; logging</h3>
-        <p>Per-key limits with <code>RateLimit-*</code> headers, and one structured log line per request with the id already bound.</p>
-        <p class="replaces">replaces <code>express-rate-limit</code> + <code>morgan</code></p>
+        <h3>Request IDs &amp; logging</h3>
+        <p>Structured, request-scoped <code>ctx.log</code> with an id on every line — and on every error response.</p>
+        <span class="replaces">replaces <b>morgan + uuid</b></span>
       </article>
     </div>
+
+    <p class="caption">
+      All of it lazy: a route that returns a string parses no body, splits no cookie header and
+      generates no request id. That is asserted by tests, not promised.
+      <a class="link-arrow" href="/docs/start/batteries/">See what is always on &rarr;</a>
+    </p>
   </div>
 </section>
 
-<!-- ────────────────────────────  BENCHMARKS  ──────────────────────── -->
-<section class="section" id="benchmarks">
+<!-- ─────────────────────────────  BRICKS  ──────────────────────────── -->
+<section class="section" id="bricks">
   <div class="wrap">
-    <header class="section-head reveal">
+    <header class="section-head">
+      <p class="eyebrow">Add a brick, get a feature</p>
+      <h2>Fourteen packages, one contract</h2>
+      <p class="sub">
+        Every brick contributes a capability to the request context, fully typed. Each page lists
+        what it <strong>cannot</strong> do as plainly as what it can.
+      </p>
+    </header>
+
+    <div class="grid reveal">
+      <article class="card">
+        <h3><span class="tick">&check;</span>Database</h3>
+        <p>Drizzle over <code>bun:sqlite</code>, Postgres or MySQL, and Mongoose. <code>ctx.db</code> is the native client — your queries stay yours.</p>
+        <a class="link-arrow" href="/docs/bricks/db/">db, db-drizzle, db-mongoose &rarr;</a>
+      </article>
+      <article class="card">
+        <h3><span class="tick">&check;</span>Auth</h3>
+        <p>Email and password on SQL or Mongo, plus Clerk and better-auth. Eight endpoints, argon2id, revocable sessions, rate limited by default.</p>
+        <a class="link-arrow" href="/docs/bricks/auth/">four providers &rarr;</a>
+      </article>
+      <article class="card">
+        <h3><span class="tick">&check;</span>Storage</h3>
+        <p>S3, R2, MinIO and Spaces, with presigned direct uploads — and a local directory so uploads work before you have a bucket.</p>
+        <a class="link-arrow" href="/docs/bricks/storage/">storage &rarr;</a>
+      </article>
+      <article class="card">
+        <h3><span class="tick">&check;</span>Queue</h3>
+        <p>Typed jobs, retries with backoff, a dead letter and cron. In memory, in Redis, or in the Postgres you already run.</p>
+        <a class="link-arrow" href="/docs/bricks/queue/">queue &rarr;</a>
+      </article>
+      <article class="card">
+        <h3><span class="tick">&check;</span>Mail</h3>
+        <p>Console driver by default, so password reset works the moment you create an app. Resend, SES or SMTP when you are ready.</p>
+        <a class="link-arrow" href="/docs/bricks/mail/">mail &rarr;</a>
+      </article>
+      <article class="card">
+        <h3><span class="tick">&check;</span>OpenAPI &amp; docs UI</h3>
+        <p>The same schemas that validate generate an OpenAPI 3.1 document and a browsable reference. Checked against a real parser in CI.</p>
+        <a class="link-arrow" href="/docs/bricks/openapi/">openapi &rarr;</a>
+      </article>
+    </div>
+
+    <p class="caption">
+      <strong>Bricks are not middleware.</strong> CORS, rate limiting and compression wrap a
+      request; a brick puts something new on the context. Write your own in about fifty lines.
+      <a class="link-arrow" href="/docs/bricks/">Browse the catalogue &rarr;</a>
+    </p>
+  </div>
+</section>
+
+<!-- ────────────────────────────  BENCHMARKS  ───────────────────────── -->
+<section class="section alt" id="benchmarks">
+  <div class="wrap">
+    <header class="section-head">
       <p class="eyebrow">Measured, not claimed</p>
       <h2>Fast, and honest about it</h2>
       <p class="sub">
@@ -324,7 +328,7 @@
       <div class="bar-row" style="--pct:70"><span class="bar-name">Fastify <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">81,581</span></div>
       <div class="bar-row" style="--pct:16"><span class="bar-name">Express <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">18,331</span></div>
     </div>
-    <p class="bars-note reveal">requests/second — parameterised JSON route, higher is better</p>
+    <p class="bars-note">requests/second — parameterised JSON route, higher is better</p>
 
     <aside class="note reveal">
       <strong>Where we lose.</strong> On raw dispatch with no socket involved, Elysia is about
@@ -335,10 +339,10 @@
   </div>
 </section>
 
-<!-- ────────────────────────────  COMPARISON  ──────────────────────── -->
-<section class="section alt" id="compare">
+<!-- ────────────────────────────  COMPARISON  ───────────────────────── -->
+<section class="section" id="compare">
   <div class="wrap">
-    <header class="section-head reveal">
+    <header class="section-head">
       <p class="eyebrow">Where it sits</p>
       <h2>How Oven compares</h2>
     </header>
@@ -351,7 +355,7 @@
         <tbody>
           <tr><th scope="row">Runtime</th><td>Node</td><td>Node</td><td>Node</td><td>Python</td><td class="us">Bun</td></tr>
           <tr><th scope="row">Auth / DB / queue / mail / S3</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="part">partial</td><td class="part">partial</td><td class="us yes">&check;</td></tr>
-          <tr><th scope="row">Automatic OpenAPI</th><td class="no">&mdash;</td><td class="part">brick</td><td class="part">brick</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">Automatic OpenAPI</th><td class="no">&mdash;</td><td class="part">plugin</td><td class="part">plugin</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">Types inferred from schemas</th><td class="no">&mdash;</td><td class="part">partial</td><td class="part">partial</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">File-based routing</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">Body / cookies / uploads always on</th><td class="no">&mdash;</td><td class="part">partial</td><td class="yes">&check;</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
@@ -359,52 +363,55 @@
       </table>
     </div>
 
-    <p class="caption reveal">
+    <p class="caption">
       We are not competing on router microseconds — Bun makes everything fast. We compete on the
       time between <code>bun create</code> and an app shaped like production.
     </p>
   </div>
 </section>
 
-<!-- ────────────────────────────  PHILOSOPHY  ──────────────────────── -->
-<section class="section" id="philosophy">
-  <div class="wrap philo">
-    <div class="philo-art reveal" aria-hidden="true">
-      <img src="/assets/arch.webp" alt="" width="1000" height="1000" loading="lazy" decoding="async">
-    </div>
-    <div class="philo-text reveal">
+<!-- ────────────────────────────  PHILOSOPHY  ───────────────────────── -->
+<section class="section alt" id="philosophy">
+  <div class="wrap">
+    <div class="manifesto reveal">
       <p class="eyebrow">A deliberate break</p>
-      <h2>Built for 2026,<br>not 2014.</h2>
+      <blockquote>
+        Every framework that shipped an Express compatibility layer ended up
+        <em>shaped by Express</em> &mdash; inheriting its mistakes along with its users.
+      </blockquote>
       <p>
-        Oven has no Express compatibility layer and will never have one. No
-        <code>(req, res, next)</code>, no Connect middleware, no CommonJS build, no callbacks.
-        Web standards, ESM and async only.
-      </p>
-      <p>
-        Every framework that shipped an Express shim ended up shaped by Express, inheriting its
-        mistakes along with its users. We would rather be honest: if you want Express, Express
+        So Oven ships none. No <code>(req, res, next)</code>, no Connect middleware, no CommonJS
+        build, no callbacks. Web standards, ESM and async only. If you want Express, Express
         exists, and it is very good at being Express.
       </p>
-      <a class="link-arrow" href="/docs/start/philosophy/">Read the philosophy <span aria-hidden="true">&rarr;</span></a>
+      <a class="link-arrow" href="/docs/start/philosophy/">Read the philosophy &rarr;</a>
     </div>
   </div>
 </section>
 
-<!-- ───────────────────────────────  CTA  ──────────────────────────── -->
+<!-- ───────────────────────────────  CTA  ───────────────────────────── -->
 <section class="cta">
-  <div class="wrap reveal">
+  <div class="wrap">
     <h2>Bake something.</h2>
-    <p>The framework, its CLI, and the first bricks are done &mdash; scaffold a project and you
-       have a database, working auth and email before you provision anything.</p>
+    <p>
+      Scaffold a project and you have a database, working auth and email before you have
+      provisioned anything at all.
+    </p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="/docs/start/installation/">Read the docs</a>
-      <a class="btn btn-ghost" href="https://github.com/hiteshchoudhary/theoven">Star on GitHub</a>
+      <a class="btn btn-primary" href="/docs/start/installation/">Get started</a>
+      <a class="btn btn-secondary" href="https://github.com/hiteshchoudhary/theoven">Star on GitHub</a>
     </div>
+    <button class="install copy" data-copy="bun create theoven my-app" type="button" aria-label="Copy install command">
+      <span class="prompt">$</span> bun create theoven my-app
+      <svg class="ic-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+      <svg class="ic-done" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
   </div>
 </section>
 
 </main>
 
+<!-- ──────────────────────────────  FOOTER  ─────────────────────────── -->
 <footer class="footer">
   <div class="wrap footer-inner">
     <div>
@@ -419,22 +426,24 @@
       </a>
       <p class="foot-note">The batteries-included Bun framework.<br>MIT licensed.</p>
     </div>
-    <nav aria-label="Footer">
+    <nav aria-label="Docs">
       <h4>Docs</h4>
       <a href="/docs/start/installation/">Installation</a>
       <a href="/docs/tutorial/first-route/">Tutorial</a>
+      <a href="/docs/bricks/">Bricks</a>
       <a href="/docs/reference/app/">Reference</a>
     </nav>
     <nav aria-label="More">
       <h4>More</h4>
+      <a href="/docs/start/batteries/">Batteries included</a>
       <a href="/docs/guides/coming-from-express/">Coming from Express</a>
-      <a href="/docs/guides/benchmarks/">Benchmarks</a>
-      <a href="/docs/start/philosophy/">Philosophy</a>
+      <a href="/docs/guides/deployment/">Deployment</a>
       <a href="/llms.txt">llms.txt</a>
     </nav>
     <nav aria-label="Project">
       <h4>Project</h4>
       <a href="https://github.com/hiteshchoudhary/theoven">GitHub</a>
+      <a href="https://www.npmjs.com/org/theoven">npm</a>
       <a href="https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md">Roadmap</a>
       <a href="https://github.com/hiteshchoudhary/theoven/blob/main/CLAUDE.md">Architecture</a>
     </nav>

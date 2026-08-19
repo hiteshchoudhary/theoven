@@ -1,4 +1,9 @@
 /**
+ * Note: the hero glow and the arch render are no longer generated. The landing page dropped
+ * both — a radial glow behind the headline and a rendered oven arch read as decoration, and a
+ * page selling a backend framework cannot afford decoration. What replaced them is a ruled grid
+ * and a pull-quote, neither of which needs an image.
+ *
  * Generates landing-page imagery with Gemini.
  *
  * The API key is read from GEMINI_API_KEY and never written to disk or committed — pass it on
