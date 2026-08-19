@@ -52,7 +52,7 @@ Nothing to install, nothing to register, nothing to order.
 | **File uploads** | web `File` objects, size and MIME limits, temp-file spill for large ones | `multer` |
 | **Cookies** | `ctx.cookies.get/set/delete`, signed cookies, secure defaults | `cookie-parser` |
 | **Query parsing** | `ctx.query`, with arrays and nested keys | `qs` |
-| **Token capture** | `ctx.token` from `Authorization`, a cookie, or `?token=`, in that order | hand-rolled, every time |
+| **Token capture** | `ctx.token` from `Authorization`, the `token` cookie, or `?access_token=`, in that order | hand-rolled, every time |
 | **Request id + logging** | `ctx.id`, `ctx.log` — structured and request-scoped | `morgan` + `uuid` |
 | **Errors** | thrown errors become RFC 9457 problem+json; async errors caught | `express-async-errors` |
 | **Graceful shutdown** | SIGTERM drains in-flight requests, then closes brick resources | hand-rolled, every time |

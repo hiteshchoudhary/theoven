@@ -92,8 +92,9 @@ Two things worth noticing.
 `auth: true` is unreachable anonymously, and TypeScript **narrows `ctx.user` to non-null inside
 it**. Delete `auth: true` and that line stops compiling.
 
-The route says nothing about tokens. Where the credential came from — `Authorization`, a cookie,
-`?token=` — is core's business, and which provider validated it is the brick's.
+The route says nothing about tokens. Where the credential came from — an `Authorization` header,
+the `token` cookie, or `?access_token=`, in that order — is core's business, and which provider
+validated it is the brick's.
 
 ## More than "signed in"
 
