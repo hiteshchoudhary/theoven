@@ -682,13 +682,28 @@ development and production. Covered by tests now.
 - [x] Brand imagery generated with Gemini (`scripts/generate-assets.mjs`) and optimised to
       WebP (`scripts/optimize-assets.mjs`) — 1.8 MB of PNGs down to 152 KB. OG card text is
       composited as SVG so it stays crisp
-- [ ] **"Batteries included" page** — the always-on table from `CLAUDE.md` §2b as a headline feature
+- [x] **"Batteries included" page** at `/docs/start/batteries/` — the §2b table as a headline
+      feature rather than an API reference: opens with the five-dependency Express version of an
+      upload route, answers "why not middleware", and states that laziness is a test rather than
+      a promise. The reference page keeps the per-API detail.
 - [~] Tutorial, FastAPI-style and progressive. Written: first route, validation (marked
       Planned), errors. Remaining: db, auth, file upload, queue, mail, deploy
 - [~] How-to guides. Written: "Coming from Express" (translation, explicitly not a shim),
       benchmarks. Remaining: testing, deployment (Docker/Fly/Railway)
 - [~] API reference. Written: `App`, `Context`. Remaining: every other package
-- [ ] Docs code samples compiled and tested in CI
+- [x] Docs code samples checked in CI (`scripts/check-docs.mjs`), and in the site build. Two
+      checks, chosen because they catch real rot without demanding that every snippet be a
+      complete compilable module — most are fragments on purpose, and rewriting 135 of them into
+      standalone programs would make the pages worse to read in order to make them checkable:
+
+      1. **Every block parses**, as a program or as the fragment it plainly is (object literal,
+         bare property, function body), with `...` treated as the placeholder everyone reads it
+         as. Verified that genuine syntax errors are still rejected under every fallback.
+      2. **Every name imported from `@theoven/*` exists.** This is the rot that matters: renaming
+         an export and leaving a page describing the old one turns documentation into a trap.
+         Type-only names are read from source, since types are erased at runtime.
+
+      140 samples, 62 imported names. Both failure modes verified by breaking a page on purpose.
 - [x] `examples/minimal` + `examples/kitchen-sink` complete and CI-tested. The kitchen sink is
       the framework's **integration test**: every brick in one app, exercised through `fetch`,
       so a change that breaks how two of them compose fails there rather than in someone's

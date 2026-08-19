@@ -91,6 +91,10 @@ jobs:
           fi
       # Catches the failure that is silent and total: a `workspace:` range reaching a published
       # manifest makes every install fail with EUNSUPPORTEDPROTOCOL.
+      # Catches documentation rot: a sample that no longer parses, or one importing a name that
+      # was renamed out from under it.
+      - name: Check the documentation's code samples
+        run: bun scripts/check-docs.mjs
       - name: Check what would be published
         run: bun scripts/check-publish.mjs
       - name: Build site

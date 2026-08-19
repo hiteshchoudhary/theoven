@@ -1,0 +1,99 @@
+---
+title: Batteries included
+description: What you no longer install, wire, order, or forget — and what it costs when you do not use it.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+Here is a working Express app that parses JSON, reads cookies, accepts file uploads, logs
+requests, and does not crash on an async error:
+
+```js
+const express = require('express')
+const cookieParser = require('cookie-parser')
+const multer = require('multer')
+const morgan = require('morgan')
+require('express-async-errors')
+
+const app = express()
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser(process.env.COOKIE_SECRET))
+app.use(morgan('combined'))
+const upload = multer({ dest: '/tmp' })
+
+app.post('/avatar', upload.single('file'), async (req, res, next) => {
+  // …and you still have to remember `next(err)` in anything that predates the shim
+})
+```
+
+Five dependencies, six lines of registration, and an ordering you have to get right — `json()`
+before your routes, `cookieParser` before anything reading a cookie. None of that was ever a
+decision. It was homework.
+
+Here is the same thing in Oven:
+
+```ts
+export default defineRoute(
+  { body: z.object({ file: z.file().max(5_000_000) }) },
+  async (ctx) => ctx.storage.upload(`avatars/${ctx.user.id}`, ctx.body.file),
+)
+```
+
+## What is always on
+
+Nothing to install, nothing to register, nothing to order.
+
+| | You get | You no longer install |
+| --- | --- | --- |
+| **Body parsing** | `ctx.body`, content-type aware: JSON, urlencoded, multipart, text, raw | `body-parser`, `express.json()` |
+| **File uploads** | web `File` objects, size and MIME limits, temp-file spill for large ones | `multer` |
+| **Cookies** | `ctx.cookies.get/set/delete`, signed cookies, secure defaults | `cookie-parser` |
+| **Query parsing** | `ctx.query`, with arrays and nested keys | `qs` |
+| **Token capture** | `ctx.token` from `Authorization`, a cookie, or `?token=`, in that order | hand-rolled, every time |
+| **Request id + logging** | `ctx.id`, `ctx.log` — structured and request-scoped | `morgan` + `uuid` |
+| **Errors** | thrown errors become RFC 9457 problem+json; async errors caught | `express-async-errors` |
+| **Graceful shutdown** | SIGTERM drains in-flight requests, then closes brick resources | hand-rolled, every time |
+
+The rule: **if it appears in more than 80% of real apps, it goes in core with no switch.**
+
+Things that genuinely vary by app — CORS policy, rate limits, compression, security headers —
+still ship in the box, but as [middleware](/docs/reference/middleware/) you configure. Configured,
+not installed.
+
+## Always on, never paid for
+
+Batteries included is worthless if you pay for batteries you do not use.
+
+Nothing above is computed until you touch it. A route that returns a string parses no body,
+splits no cookie header, parses no query string, and generates no request id. `ctx.body` is a
+getter; so is `ctx.query`; so is `ctx.cookies`.
+
+<Aside type="tip" title="This is a test, not a promise">
+  Laziness is asserted by counting real reads of the underlying request in the test suite, and
+  the probes were checked to flip when a getter is touched. An optimisation nobody measures is an
+  optimisation that quietly stops being true.
+</Aside>
+
+## Why not middleware?
+
+Because `app.use(cookieParser())` is a bug in framework design, not a feature.
+
+It is a line every application writes, in the same place, for the same reason. Making it optional
+buys nobody anything: the framework still has to document it, every tutorial still has to include
+it, and the only outcomes are "you wrote it" and "you forgot and something broke oddly". A choice
+where one branch is always wrong is not a choice.
+
+The cost of getting this wrong compounds. Express's ordering rules exist because middleware is a
+list, and a list has an order someone must know. Oven has no such list for these behaviours —
+there is nothing to order because there is nothing to register.
+
+## Where to go next
+
+- [Always-on batteries](/docs/reference/batteries/) — the full API for each of the above
+- [Middleware & hooks](/docs/reference/middleware/) — the configurable half: CORS, rate limits,
+  compression, security headers
+- [Bricks](/docs/bricks/) — the other kind of feature: add one, get a capability on the context
+- [Coming from Express](/docs/guides/coming-from-express/) — a line-by-line translation

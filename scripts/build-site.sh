@@ -32,6 +32,9 @@ cp -R apps/landing/. "$OUT/"
 mkdir -p "$OUT/docs"
 cp -R apps/web/dist/. "$OUT/docs/"
 
+echo "==> Checking documentation code samples"
+bun scripts/check-docs.mjs
+
 echo "==> Generating llms.txt"
 bun scripts/generate-llms.mjs "$OUT"
 
