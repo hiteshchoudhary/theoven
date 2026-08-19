@@ -1,7 +1,7 @@
 {
   "name": "@theoven/mail",
   "version": "0.0.0",
-  "description": "Transactional email for Oven",
+  "description": "Transactional email for Oven \u2014 console and memory drivers included, Resend and SMTP when configured",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -18,6 +18,15 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
+    "@theoven/core": "workspace:*"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "email"
+  ],
+  "devDependencies": {
     "@theoven/core": "workspace:*"
   }
 }

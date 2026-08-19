@@ -1,0 +1,36 @@
+{
+  "name": "@theoven/db-drizzle",
+  "version": "0.0.0",
+  "description": "Drizzle ORM for Oven — SQLite via bun:sqlite, Postgres, MySQL",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "database",
+    "drizzle"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:*",
+    "@theoven/db": "workspace:*",
+    "drizzle-orm": ">=0.36.0"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:*",
+    "@theoven/db": "workspace:*"
+  }
+}

@@ -20,15 +20,11 @@ its page says so rather than omitting the section.
 | Brick | Adds | Endpoints |
 | --- | --- | --- |
 | [`openapi`](/docs/bricks/openapi/) | `ctx.openapi` | `/openapi.json`, `/docs` |
-
-## In progress
-
-| Brick | Adds | Notes |
-| --- | --- | --- |
-| `@theoven/db` | the contract | lifecycle only; queries stay native |
-| `@theoven/db-drizzle` | `ctx.db` | Drizzle over `bun:sqlite`, Postgres, MySQL |
-| `@theoven/auth` | the contract | identity, guards, named policies |
-| `@theoven/auth-basic` | `ctx.user` | signup, login, reset — Drizzle storage |
+| [`db`](/docs/bricks/db/) | `ctx.db` — the native client | optional health path |
+| [`db-drizzle`](/docs/bricks/db-drizzle/) | `ctx.db` — Drizzle, typed from your schema | none |
+| [`auth`](/docs/bricks/auth/) | `ctx.user`, `ctx.auth` | none itself |
+| [`auth-basic`](/docs/bricks/auth-basic/) | email and password auth | eight, at `/auth/*` |
+| [`mail`](/docs/bricks/mail/) | `ctx.mail` | none |
 
 ## Planned
 
@@ -39,7 +35,6 @@ its page says so rather than omitting the section.
 | `@theoven/auth-mongo` | the `auth-basic` flows over Mongoose |
 | `@theoven/db-prisma`, `@theoven/db-mongoose` | `ctx.db` |
 | `@theoven/storage` | `ctx.storage` — S3, R2, MinIO |
-| `@theoven/mail` | `ctx.mail` |
 | `@theoven/queue` | `ctx.queue` — jobs and cron |
 
 <Aside type="note" title="Bricks are not middleware">

@@ -1,0 +1,95 @@
+---
+title: db-drizzle
+description: Drizzle ORM over bun:sqlite, Postgres and MySQL — the default database for Oven.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/db-drizzle` |
+| **Adds to context** | `ctx.db` — the Drizzle instance, typed from your schema |
+| **Endpoints** | none |
+| **Creates files** | none directly; `oven db generate` writes migrations |
+| **Creates tables** | only what your own schema declares |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/db @theoven/db-drizzle drizzle-orm
+```
+
+```ts title="src/app.ts"
+import { db } from '@theoven/db'
+import { drizzleSqlite } from '@theoven/db-drizzle'
+import * as schema from './schema'
+
+export const app = createApp().use(db(drizzleSqlite({ url: './data.db', schema })))
+```
+
+## Why this is the default
+
+`bun:sqlite` and Drizzle are not alternatives — Drizzle **runs on** `bun:sqlite`, so this is
+Bun's own driver underneath.
+
+The reason the default is Drizzle rather than raw SQL is portability. Raw SQL strings are
+SQLite-dialect-bound, so a raw default means moving to Postgres rewrites every query. With
+Drizzle, moving is one line:
+
+```ts
+// before
+db(drizzleSqlite({ url: './data.db', schema }))
+// after — every query unchanged
+db(drizzlePostgres({ url: env.url('DATABASE_URL'), schema }))
+```
+
+## Configuration
+
+### SQLite
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `url` | `./data.db` | file path, or `:memory:` |
+| `schema` | — | your Drizzle schema, which is what types `ctx.db` |
+| `logger` | `false` | log every statement |
+| `tune` | `true` | apply the pragmas below |
+
+`tune` sets `journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout = 5000` and
+`foreign_keys = ON`. Without WAL, SQLite serialises readers behind a writer, and a web
+application meets this as sporadic `SQLITE_BUSY` under exactly the concurrency it was built for.
+
+### Postgres
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `url` | — | connection string; read it from the environment |
+| `schema` | — | your Drizzle schema |
+| `max` | `10` | pooled connections |
+
+The connection URL is deliberately kept out of the provider's name, because provider names reach
+logs and a connection string carries a password.
+
+## Transactions
+
+<Aside type="caution" title="Drizzle's own SQLite transaction does not roll back async failures">
+  `bun:sqlite` is synchronous, so Drizzle's `bun-sqlite` transaction commits before an async
+  rejection ever arrives. Work that throws after an `await` is committed anyway.
+
+  This provider issues `begin`/`commit`/`rollback` itself so the boundaries sit where the awaits
+  are, and serialises transactions — SQLite allows one writer regardless, and two overlapping
+  transactions on one connection would interleave their statements.
+
+  Use `transaction(ctx.db, ...)` from `@theoven/db` for correct rollback. The behaviour of
+  Drizzle's own method is covered by a test, so the difference stays visible rather than
+  becoming folklore.
+</Aside>
+
+## Limitations
+
+- **MySQL is untested.** Drizzle supports it; this provider has no MySQL entry point yet.
+- **`oven db generate` is not wired up.** The CLI reports that the command needs this package;
+  migrations are run with `drizzle-kit` directly for now.
+- **One connection per app.** Read replicas and multiple databases are not yet supported.

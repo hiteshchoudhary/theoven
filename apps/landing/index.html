@@ -100,7 +100,7 @@
     <dl class="stats">
       <div><dt>110k</dt><dd>req/s on Bun</dd></div>
       <div><dt>6&times;</dt><dd>faster than Express</dd></div>
-      <div><dt>850</dt><dd>tests, all green</dd></div>
+      <div><dt>1023</dt><dd>tests, all green</dd></div>
     </dl>
   </div>
 </section>
@@ -216,9 +216,13 @@
         <header><span class="tick">&rarr;</span><h3>Auth &amp; database</h3></header>
         <p><code>@theoven/auth</code> on better-auth and <code>@theoven/db</code> on Drizzle. Next up &mdash; they land on the brick system above.</p>
       </article>
+      <article class="status done">
+        <header><span class="tick">&check;</span><h3>Mail</h3></header>
+        <p>Console driver by default, so password reset works the moment you create an app. Resend when you add an API key.</p>
+      </article>
       <article class="status todo">
-        <header><span class="tick">&middot;</span><h3>Storage, mail, queue</h3></header>
-        <p>S3 uploads and presigned URLs, transactional email, background jobs and cron.</p>
+        <header><span class="tick">&middot;</span><h3>Storage &amp; queue</h3></header>
+        <p>S3 uploads and presigned URLs; background jobs and cron.</p>
       </article>
     </div>
 
@@ -382,8 +386,8 @@
 <section class="cta">
   <div class="wrap reveal">
     <h2>Bake something.</h2>
-    <p>The framework and its CLI are done &mdash; scaffold a project, run it, build it, and get
-       an API reference for free. Auth, database, storage, mail and queues are next.</p>
+    <p>The framework, its CLI, and the first bricks are done &mdash; scaffold a project and you
+       have a database, working auth and email before you provision anything.</p>
     <div class="hero-cta">
       <a class="btn btn-primary" href="/docs/start/installation/">Read the docs</a>
       <a class="btn btn-ghost" href="https://github.com/hiteshchoudhary/theoven">Star on GitHub</a>

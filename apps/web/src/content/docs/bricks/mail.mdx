@@ -1,0 +1,96 @@
+---
+title: mail
+description: Transactional email — console and memory drivers included, a real provider when you configure one.
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/mail` |
+| **Adds to context** | `ctx.mail` |
+| **Endpoints** | none |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/mail
+```
+
+```ts title="src/app.ts"
+import { consoleMail, mail, resendMail } from '@theoven/mail'
+
+export const app = createApp().use(
+  mail(
+    env.has('RESEND_API_KEY')
+      ? resendMail({ apiKey: env.string('RESEND_API_KEY'), from: env.string('MAIL_FROM') })
+      : consoleMail(),
+  ),
+)
+```
+
+## Sending
+
+```ts
+await ctx.mail.send({
+  to: user.email,
+  subject: 'Welcome',
+  text: 'Thanks for signing up.',
+  html: '<p>Thanks for signing up.</p>',
+})
+```
+
+## Drivers
+
+| Driver | Sends | Use for |
+| --- | --- | --- |
+| `consoleMail()` | prints to the terminal | development, the default |
+| `memoryMail()` | collects in `.sent` | tests |
+| `resendMail({ apiKey, from })` | Resend's HTTP API | production |
+
+The console driver is the default so that a freshly created app has a working password-reset
+flow: the link appears in your terminal, with no provider account and no API key. Laravel and
+Rails both ship the equivalent.
+
+<Aside type="caution" title="The console driver is refused in production">
+  A service that prints reset links to a log instead of emailing them looks perfectly healthy
+  while nobody can reset their password. Booting with `NODE_ENV=production` and the console
+  driver throws. Pass `allowConsoleInProduction` if you genuinely mean it.
+</Aside>
+
+## Testing
+
+```ts
+const driver = memoryMail()
+const app = createApp().use(mail(driver))
+
+await request('/signup')
+expect(driver.sent[0]?.to).toBe('ada@example.com')
+```
+
+## Configuration
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `from` | — | default sender, used when a message sets none |
+| `allowConsoleInProduction` | `false` | permit the console driver outside development |
+
+## What gets logged
+
+A send logs the driver and subject. A failure logs the same plus the cause — **never the body**.
+A failed password-reset email would otherwise put a working reset token into your log
+aggregator.
+
+## Limitations
+
+- **No templating.** Messages take `text` and `html` strings. React Email support is planned.
+- **No queueing or retries.** A send is a single attempt; wrap it yourself, or wait for
+  `@theoven/queue`.
+- **No attachments yet.**
+- **SMTP is not implemented.** Resend, console and memory only.
+- **No dev preview inbox.** Planned for §3.2.

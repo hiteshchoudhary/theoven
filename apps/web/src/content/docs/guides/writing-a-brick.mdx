@@ -1,0 +1,221 @@
+---
+title: Writing your own brick
+description: Add a capability to the request context, fully typed, in about fifty lines.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+A brick is a normal npm package that exports a factory function. Nothing about the first-party
+bricks is privileged — `@theoven/db` and `@theoven/mail` use exactly the interface below.
+
+## The smallest brick
+
+```ts
+import type { Brick } from '@theoven/core'
+
+export function clock(): Brick<'clock', { now(): Date }> {
+  return {
+    name: 'clock',
+    setup: () => ({ now: () => new Date() }),
+  }
+}
+```
+
+```ts
+const app = createApp().use(clock())
+
+app.get('/time', (ctx) => ({ now: ctx.clock.now() }))
+//                            ^ typed, because setup's return type flowed through .use()
+```
+
+Leave the brick out and `ctx.clock` is a **compile error**, not a crash at 3am. That is the
+whole point of the system.
+
+## The two contributions
+
+This is the distinction that matters most, and the one worth getting right first:
+
+| | Runs | Contributes | Cost per request |
+| --- | --- | --- | --- |
+| `setup()` | once, at boot | a **shared** service | none — it lives on the prototype |
+| `request()` | every request | **per-request** state | only what you compute |
+
+A database connection is shared. A signed-in user is not.
+
+```ts
+export function tenant(): Brick<'tenants', TenantIndex, { tenant: Tenant | null }> {
+  return {
+    name: 'tenants',
+    setup: async () => loadTenantIndex(),                    // shared, once
+    request: (ctx) => ({ tenant: lookup(ctx.header('host')) }), // per request
+  }
+}
+
+app.get('/', (ctx) => ({
+  known: ctx.tenants.size,   // shared, typed
+  current: ctx.tenant?.name, // per-request, typed
+}))
+```
+
+<Aside type="note" title="Annotate the return type">
+  Writing `Brick<Name, Value, Request>` on your factory is what gives `onShutdown(value)` its
+  real type and documents the contract where someone reads it. Inference works without it, but
+  the annotation is worth the twelve characters.
+</Aside>
+
+## The full interface
+
+```ts
+interface Brick<Name, Value, Request> {
+  name: Name                      // the context property
+  dependsOn?: string[]            // bricks that must be set up first
+  setup(context): Value           // the shared service; runs once
+  request?(ctx, route): Request   // per-request state
+  onShutdown?(value): void        // release pools, workers, connections
+}
+```
+
+### `setup(context)`
+
+The `context` gives you four things:
+
+```ts
+setup: (context) => {
+  context.resolved.db          // values from bricks you declared in dependsOn
+  context.route('GET', '/x', handler)  // register your own endpoints
+  context.development          // pick safe defaults
+  context.app.contributeOpenApi({ securitySchemes })
+  context.app.logger
+}
+```
+
+### `request(ctx, route)`
+
+Runs **after routing** — so `ctx.params` is available — and **before** middleware, validation
+and the handler. Throwing rejects the request, which is how an auth brick turns a bad token into
+a `401` without a handler ever seeing it.
+
+It also receives the matched route, including keys core does not interpret:
+
+```ts
+request: (ctx, route) => {
+  if (route.schema?.auth) requireSignedIn(ctx)
+}
+```
+
+Core carries `auth: 'admin'` and never reads it. Your brick decides what it means — which is what
+keeps every route-level feature out of core.
+
+## Depending on another brick
+
+```ts
+export function cache(): Brick<'cache', CacheClient> {
+  return {
+    name: 'cache',
+    dependsOn: ['db'],
+    setup: (context) => createCache(context.resolved.db as Database),
+  }
+}
+```
+
+Declaring the dependency rather than relying on registration order means your brick works
+however the user wrote their config. A missing dependency or a cycle throws **at boot**, naming
+the bricks involved.
+
+## Registering endpoints
+
+```ts
+setup: (context) => {
+  context.route('GET', '/_metrics', () => collectMetrics())
+  return service
+}
+```
+
+Make it opt-in. A brick that silently adds routes is one that shows up unexplained in
+`oven routes` — every first-party brick that mounts anything takes a path option and defaults to
+off, or mounts under a prefix the user chose.
+
+## Cleaning up
+
+```ts
+onShutdown: async (client) => {
+  await client.close()
+}
+```
+
+Runs during `app.close()`, before the socket is released, with the value `setup()` produced.
+
+## Errors that help
+
+Two rules, both learned from things that bite people:
+
+```ts
+// Name what failed and what to do about it
+throw new Error(
+  `Could not connect using the "${provider.name}" provider. ` +
+    'Check DATABASE_URL is reachable from this host.',
+)
+
+// Fail at boot, not at request time
+if (options.capabilities?.routes && !options.mount) {
+  throw new Error(`"${name}" declares the "routes" capability but has no mount() method.`)
+}
+```
+
+A configuration mistake found at boot costs one restart. The same mistake found on the first
+request costs a deploy that looked green.
+
+## Contracts and adapters
+
+When your brick wraps something with several implementations — a database, an auth provider, a
+mail service — split it:
+
+<Steps>
+
+1. **A contract package** defining the smallest interface genuinely common across
+   implementations, with a `raw` escape hatch for the rest.
+
+2. **Adapter packages** implementing it.
+
+3. **Declared capabilities** for anything not universal, checked at boot rather than at request
+   time.
+
+</Steps>
+
+The test of a contract is whether a second, structurally different implementation fits without
+changing it. One adapter proves nothing.
+
+And a contract must never invent. If two providers genuinely disagree — one hosts its sign-in
+page, another mounts routes — expose the difference rather than papering over it with a method
+one of them has to fake.
+
+## Publishing
+
+```json title="package.json"
+{
+  "name": "oven-brick-cache",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "peerDependencies": { "@theoven/core": "*" }
+}
+```
+
+`@theoven/core` is a **peer** dependency, not a regular one. Two copies of core in one app means
+two `Context` classes, and `instanceof` checks that mysteriously fail.
+
+Name third-party bricks `oven-brick-*` so they are findable. The `@theoven/*` scope is reserved
+for first-party ones.
+
+## Write the page too
+
+Every first-party brick ships a documentation page in the same commit as its code, following a
+[fixed shape](/docs/bricks/): what it installs, what it adds to the context, what endpoints it
+mounts, what files and tables it creates, what it cannot do.
+
+The consistency is the feature — a reader who has seen one page knows where to look on the next,
+and a coding agent can find "what endpoints does this add" without inferring it from prose. Two
+rules make those pages useful rather than promotional:
+
+- **State what it cannot do.** A page that only lists capabilities is an advertisement.
+- **List by path every file it writes** into a user's repository, so nothing is discovered in
+  `git status`.

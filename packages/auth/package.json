@@ -1,7 +1,7 @@
 {
   "name": "@theoven/auth",
   "version": "0.0.0",
-  "description": "Authentication for Oven, powered by better-auth",
+  "description": "The auth contract for Oven \u2014 identity, guards, policies, and the flows every storage brick shares",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -18,6 +18,16 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
+    "@theoven/core": "workspace:*"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "auth",
+    "jwt"
+  ],
+  "devDependencies": {
     "@theoven/core": "workspace:*"
   }
 }

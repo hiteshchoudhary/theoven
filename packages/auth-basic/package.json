@@ -1,0 +1,39 @@
+{
+  "name": "@theoven/auth-basic",
+  "version": "0.0.0",
+  "description": "Email and password auth for Oven — signup, login, refresh, reset — stored with Drizzle",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "auth",
+    "jwt",
+    "drizzle"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*",
+    "drizzle-orm": ">=0.36.0"
+  },
+  "devDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*",
+    "@theoven/db": "workspace:*",
+    "@theoven/db-drizzle": "workspace:*"
+  }
+}

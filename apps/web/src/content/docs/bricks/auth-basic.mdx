@@ -1,0 +1,153 @@
+---
+title: auth-basic
+description: Email and password auth that works out of the box — signup, login, refresh, logout, password change and reset.
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/auth-basic` |
+| **Adds to context** | `ctx.user`, via `@theoven/auth` |
+| **Endpoints** | eight, mounted at `/auth/*` |
+| **Creates files** | none directly; its schema feeds your migrations |
+| **Creates tables** | `auth_users`, `auth_refresh_tokens`, `auth_reset_tokens` |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/auth @theoven/auth-basic @theoven/db @theoven/db-drizzle
+```
+
+```ts title="src/app.ts"
+import { auth } from '@theoven/auth'
+import { basicAuth } from '@theoven/auth-basic'
+
+export const app = createApp()
+  .use(db(drizzleSqlite({ url: './data.db', schema })))
+  .use(auth(basicAuth({ db: client, secret: env.string('AUTH_SECRET') })))
+```
+
+That is the Laravel/Rails property: a working signup, login and password reset before you have
+provisioned anything. SQLite is a file, and reset emails print to your terminal until you
+configure a provider.
+
+## Endpoints
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `POST` | `/auth/signup` | create an account | none |
+| `POST` | `/auth/login` | sign in | none |
+| `POST` | `/auth/refresh` | new access token from the refresh cookie | cookie |
+| `POST` | `/auth/logout` | revoke the session | cookie |
+| `POST` | `/auth/forgot-password` | email a reset link | none |
+| `POST` | `/auth/reset-password` | redeem a reset token | token |
+| `POST` | `/auth/change-password` | change while signed in | bearer |
+| `GET` | `/auth/me` | the current user | bearer |
+
+The prefix is configurable: `auth(basicAuth(...), { prefix: '/identity' })`.
+
+## What it creates
+
+Three tables, which your migrations must include:
+
+```ts title="src/schema.ts"
+export { users, refreshTokens, resetTokens } from '@theoven/auth-basic'
+```
+
+| Table | Holds |
+| --- | --- |
+| `auth_users` | id, email (unique), name, argon2id hash, timestamps |
+| `auth_refresh_tokens` | hashed refresh tokens, per user, with expiry |
+| `auth_reset_tokens` | hashed single-use reset tokens, with expiry |
+
+Refresh and reset tokens are stored **hashed**, so a leaked database does not hand over working
+credentials. Both cascade on user delete, so removing a user cannot leave sessions that outlive
+them.
+
+## How sessions work
+
+A **15-minute access JWT** plus a **revocable refresh token**:
+
+```
+POST /auth/login     → access JWT (body) + refresh token (httpOnly cookie)
+POST /auth/refresh   → new pair; the old refresh token stops working
+POST /auth/logout    → refresh row deleted
+```
+
+Identifying a request is a signature check with **no database read**. Revocation lives with the
+refresh token, which is what makes logout real: delete the row and the access token expires
+within its window.
+
+The refresh token is an httpOnly cookie so a cross-site script cannot read it; the short-lived
+access token goes in the body, where a client attaches it to `Authorization`.
+
+<Aside type="note" title="Why not a plain JWT">
+  "JWT" and "logout" pull against each other. A stateless token cannot be revoked, so logout
+  would only clear the client's copy — the token keeps working until it expires. This is the
+  design Laravel Sanctum and devise-jwt both arrived at.
+</Aside>
+
+## Configuration
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `db` | — | your Drizzle client |
+| `secret` | — | **required**; signs access tokens |
+| `accessTtl` | `900` | access-token seconds |
+| `refreshTtl` | `2592000` | refresh-token seconds (30 days) |
+| `resetTtl` | `3600` | reset-link seconds |
+| `minPasswordLength` | `8` | minimum password length |
+| `sendResetEmail` | — | how reset links are delivered |
+| `refreshCookie` | `oven_refresh` | cookie name |
+
+There is no default `secret`, and the brick refuses to construct without one. A framework that
+invents a signing secret has invented a secret every deployment shares.
+
+## Sending reset emails
+
+```ts
+basicAuth({
+  db: client,
+  secret: env.string('AUTH_SECRET'),
+  sendResetEmail: async (to, token) => {
+    await mailer.send({
+      to,
+      subject: 'Reset your password',
+      text: `Open ${env.string('APP_URL')}/reset?token=${token}`,
+    })
+  },
+})
+```
+
+Omit it and reset tokens are simply not delivered — the flow still works end to end in tests
+and in development, where you can read the token from the store.
+
+## Security decisions
+
+These are the ones worth knowing about, because they shape what the endpoints return:
+
+- **Login does not reveal which emails exist.** A wrong password and an unknown address get an
+  identical body, an identical status, and comparable timing — an unknown email still pays an
+  argon2 verification against a decoy hash.
+- **Forgot-password always succeeds.** Reporting "no such account" would make it an enumeration
+  endpoint. The person who owns the address finds out by email.
+- **Refresh tokens rotate.** Using one invalidates it. A refresh token that survives its own use
+  is one a thief keeps using alongside the real client.
+- **Reset tokens are single-use and expiring**, and redeeming one signs every session out.
+- **Changing a password signs every other session out.** Someone changing a password usually
+  believes an account is compromised.
+
+Each of these has a test, including the enumeration and token-reuse cases.
+
+## Limitations
+
+- **SQLite schema only.** The tables are declared with `drizzle-orm/sqlite-core`. Postgres works
+  as a database, but you would restate the schema with `pg-core` today.
+- **No email verification.** `auth_users.email_verified_at` exists and is never set.
+- **No rate limiting built in.** Login, signup and reset are the endpoints that get attacked;
+  add [`rateLimit`](/docs/reference/middleware/) in front of `/auth/*` yourself.
+- **No OAuth.** Use `auth-clerk` or `auth-better` when they land.

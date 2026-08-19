@@ -1,7 +1,7 @@
 {
   "name": "@theoven/db",
   "version": "0.0.0",
-  "description": "Database and migrations for Oven, powered by Drizzle",
+  "description": "The database contract for Oven \u2014 lifecycle, not queries",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -18,6 +18,15 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
+    "@theoven/core": "workspace:*"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "database"
+  ],
+  "devDependencies": {
     "@theoven/core": "workspace:*"
   }
 }

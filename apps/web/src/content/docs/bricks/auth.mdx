@@ -1,0 +1,137 @@
+---
+title: auth
+description: The auth contract — identity, route guards, named policies, and the flows every storage brick shares.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/auth` |
+| **Adds to context** | `ctx.user` (`Identity \| null`), `ctx.auth` (the provider) |
+| **Endpoints** | none itself; a provider may mount its own |
+| **Creates files** | none |
+| **Creates tables** | none; storage bricks own their tables |
+| **Status** | shipped |
+
+## Install
+
+Pair it with a provider — `auth-basic` for email and password, or a hosted one.
+
+```bash
+bun add @theoven/auth @theoven/auth-basic
+```
+
+```ts title="src/app.ts"
+import { auth } from '@theoven/auth'
+import { basicAuth } from '@theoven/auth-basic'
+import { policies } from './policies'
+
+export const app = createApp()
+  .use(db(drizzleSqlite({ url: './data.db', schema })))
+  .use(auth(basicAuth({ db: client, secret: env.string('AUTH_SECRET') }), { policies }))
+```
+
+## Guarding a route
+
+```ts
+app.get('/me', { auth: true }, (ctx) => ctx.user)          // 401 when anonymous
+app.get('/admin', { auth: 'admin' }, (ctx) => ...)          // 403 unless the policy passes
+app.get('/public', (ctx) => ctx.user?.id ?? 'anonymous')    // open, user may still be present
+```
+
+The guard runs **before** the handler, so a guarded route is unreachable rather than merely
+inconvenient to reach. A `401` carries `WWW-Authenticate: Bearer`, which is what tells a client
+*how* to authenticate.
+
+## Identity
+
+```ts
+interface Identity<Raw> {
+  id: string
+  email?: string
+  name?: string
+  image?: string
+  raw: Raw        // everything the provider returned, typed per brick
+}
+```
+
+Only what every provider genuinely has. Roles, organisations and metadata are **not** normalised:
+several providers have no such concept, and a field that is permanently `[]` misleads worse than
+one that is absent. Reach for `ctx.user.raw` when you want provider specifics.
+
+## Policies
+
+Since roles are not normalised, authorization is a named function you write:
+
+```ts title="src/policies.ts"
+export const policies = {
+  admin: (user) => user.raw.role === 'admin',
+  owner: (user, ctx) => user.id === ctx.params.userId,
+}
+```
+
+```ts
+app.get('/users/:userId/billing', { auth: 'owner' }, handler)
+app.delete('/posts/:id', { auth: ['admin', 'owner'] }, handler)   // all must pass
+```
+
+A policy works on any provider, is unit-testable on its own, is greppable, and can be named in
+the generated OpenAPI document.
+
+<Aside type="caution" title="An unknown policy name fails closed">
+  Referencing a policy that is not registered returns a `500` naming the policies that *are*
+  registered. A typo must never mean "allowed", and failing closed is the only safe reading of a
+  rule that does not exist.
+</Aside>
+
+## Capabilities
+
+`identify()` is the only method a provider must implement. Everything else is declared, and a
+mismatch fails **at boot** rather than at 3am:
+
+| Capability | Meaning |
+| --- | --- |
+| `routes` | mounts its own endpoints, e.g. `/auth/*` |
+| `signOut` | can end a session server-side |
+| `refresh` | can exchange a refresh token |
+
+Providers genuinely differ: Clerk cannot sign a user in from a server, and better-auth cannot
+not-mount routes. Requiring both to pretend produces adapters that throw in production.
+
+## Writing a provider
+
+```ts
+import type { AuthProvider } from '@theoven/auth'
+
+export function myAuth(options): AuthProvider<MyUser> {
+  return {
+    name: 'my-auth',
+    identify: async (ctx) => {
+      const claims = await verify(ctx.token)
+      return claims ? { id: claims.sub, email: claims.email, raw: claims } : null
+    },
+  }
+}
+```
+
+`identify` must **not** throw for an absent or invalid credential — a public route on the same
+app still has to work. Return `null`.
+
+## Flows, for storage bricks
+
+`@theoven/auth` also ships the security-critical half — argon2id hashing, JWT signing,
+single-use reset tokens, refresh rotation — behind a seven-method `AuthStore`. A storage brick
+implements those seven methods and gets every flow.
+
+That is why `auth-basic` (Drizzle) and `auth-mongo` (Mongoose) can exist without duplicating
+password handling: a security fix landing in one and not the other is the bug nobody finds.
+
+## Limitations
+
+- **No roles or permissions in `Identity`.** Deliberate; use policies.
+- **`ctx.user` is `Identity | null` even inside a guarded route.** The guard makes it present at
+  runtime, but the type is not yet narrowed by the `auth` key. Use `requireUser(ctx.user)` where
+  you want a non-null type.

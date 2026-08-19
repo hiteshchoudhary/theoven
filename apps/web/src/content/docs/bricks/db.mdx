@@ -1,0 +1,122 @@
+---
+title: db
+description: The database contract — connect, health, close, transactions. Your queries stay native.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/db` |
+| **Adds to context** | `ctx.db` — the native client |
+| **Endpoints** | none, unless you ask for a health path |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/db @theoven/db-drizzle
+```
+
+```ts title="src/app.ts"
+import { createApp } from '@theoven/core'
+import { db } from '@theoven/db'
+import { drizzleSqlite } from '@theoven/db-drizzle'
+import * as schema from './schema'
+
+export const app = createApp().use(db(drizzleSqlite({ url: './data.db', schema })))
+```
+
+## What it does
+
+Connects once at boot, verifies the connection, and closes it cleanly on shutdown. That is the
+whole job.
+
+**`ctx.db` is the native client** — the Drizzle instance, the `PrismaClient` — with nothing of
+ours wrapped around it:
+
+```ts
+app.get('/users', (ctx) => ctx.db.select().from(users).where(eq(users.active, true)))
+```
+
+<Aside type="note" title="Why there is no query API">
+  A unified `ctx.db.users.find()` would be permanently behind every ORM and worse than all of
+  them. It would also throw away what makes this pleasant with a coding agent: a model knows
+  Drizzle and Prisma cold and would know an invented Oven API not at all.
+
+  The contract covers what every app needs and every ORM does differently. Queries are not that.
+</Aside>
+
+## Endpoints
+
+None by default. A health endpoint is opt-in:
+
+```ts
+db(provider, { healthPath: '/_health/db' })
+```
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `GET` | whatever you set | `200` healthy, `503` not | none |
+
+It answers `503` rather than a `200` carrying `{ healthy: false }`, because a load balancer
+reads the status line. It is off by default because a brick that silently adds routes is one
+that shows up unexplained in `oven routes`.
+
+## Configuration
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `healthPath` | `false` | mount a health endpoint |
+| `checkOnBoot` | `true` | verify the connection at boot rather than on the first query |
+
+`checkOnBoot` is on because a misconfigured database that fails at boot costs one restart, while
+the same mistake found on the first request costs a deploy that looked green.
+
+## Transactions
+
+```ts
+import { transaction } from '@theoven/db'
+
+await transaction(ctx.db, async (tx) => {
+  await tx.insert(orders).values(order)
+  await tx.update(inventory).set({ count: remaining })
+})
+```
+
+Portable across providers. You can equally use the ORM's own form — `ctx.db.transaction(...)`,
+`ctx.db.$transaction(...)` — and should, when you want that ORM's options.
+
+A provider without transaction support **refuses** rather than running the work unwrapped. Work
+that silently escapes its transaction is the failure nobody notices until the data is wrong.
+
+## Writing a provider
+
+Four methods:
+
+```ts
+import type { DatabaseProvider } from '@theoven/db'
+
+export function myProvider(options): DatabaseProvider<MyClient> {
+  return {
+    name: 'my-orm:postgres',
+    connect: () => createClient(options),
+    health: async (client) => { await client.query('select 1'); return true },
+    close: (client) => client.end(),
+    transaction: (client, work) => client.transaction(work),   // optional
+  }
+}
+```
+
+`health` should issue a real query rather than reporting whether a pool object exists. A health
+check that cannot fail is not a health check.
+
+## Limitations
+
+- **Switching ORMs still means rewriting queries.** The contract makes lifecycle portable, not
+  query syntax — deliberately (D16).
+- **One database per app today.** Multiple named connections are not yet supported.

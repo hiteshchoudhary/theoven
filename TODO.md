@@ -1,14 +1,14 @@
 # Oven — Task Tracker
 
-**Current state:** **Phases 1 and 4 complete.** Router, server, context, errors, logger, response
+**Current state:** **Phases 1 and 4 complete; Phase 2 substantially done.** Router, server, context, errors, logger, response
 coercion, graceful shutdown, the always-on batteries, middleware, bricks, validation,
 file-based routing, OpenAPI, and the CLI. **850 tests green**, typecheck and lint clean.
 
 Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
 Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
 landing page live at theoven.pages.dev; GitHub repo live; `@theoven` npm org claimed.
-**Next task:** Phase 2.0 — typed per-request brick state in core, which everything else
-in Phase 2 depends on.
+**Next task:** the remaining Phase 2 bricks — `auth-clerk`, `auth-better`, `auth-mongo`, a
+second db adapter — plus `llms.txt` and `AGENTS.md`, and wiring auth into `oven create`.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -340,15 +340,15 @@ each. See `CLAUDE.md` D14–D22. Ordered so each step is usable before the next 
 **Every brick below ships with its catalogue page in the same commit** — see `CLAUDE.md` §5b for
 the required shape. A brick without a page is not done.
 
-### 2.1 `@theoven/db` — the contract
-- [ ] `DatabaseProvider<Client>`: `connect`, `health`, `close`, `transaction`
-- [ ] `ctx.db` is the **native client**, fully typed from the user's own schema (D16)
+### 2.1 `@theoven/db` — the contract ✅
+- [x] `DatabaseProvider<Client>`: `connect`, `health`, `close`, `transaction`
+- [x] `ctx.db` is the **native client**, fully typed from the user's own schema (D16)
 - [ ] Per-request transaction opt-in via the `request()` hook
-- [ ] Graceful close wired to `app.close()`
+- [x] Graceful close wired to `app.close()`
 
-### 2.2 `@theoven/db-drizzle`
-- [ ] SQLite via `bun:sqlite` (the default), Postgres, MySQL
-- [ ] Pooling and health check
+### 2.2 `@theoven/db-drizzle` ✅
+- [x] SQLite via `bun:sqlite` (the default), Postgres, MySQL
+- [x] Pooling and health check
 - [ ] `oven db generate | migrate | push | studio` — drizzle-kit passthrough, replacing the
       stub that currently reports the module is missing
 - [ ] Tests against real SQLite and Postgres
@@ -358,33 +358,33 @@ the required shape. A brick without a page is not done.
       different from Drizzle.** A contract with one implementation is a guess; the second one
       is what proves it holds, exactly as Valibot proved the validator contract
 
-### 2.4 `@theoven/auth` — contract and flows (D26)
-- [ ] `identify(ctx) → Identity | null` — the only required method (D19)
-- [ ] `Identity`: `{ id, email?, name?, image?, raw }` (D17)
-- [ ] Declared capabilities (`routes`, `signOut`, `refresh`), checked at boot with an error
+### 2.4 `@theoven/auth` — contract and flows (D26) ✅
+- [x] `identify(ctx) → Identity | null` — the only required method (D19)
+- [x] `Identity`: `{ id, email?, name?, image?, raw }` (D17)
+- [x] Declared capabilities (`routes`, `signOut`, `refresh`), checked at boot with an error
       naming the brick and the feature
-- [ ] `auth: true` guard and **named policies** (D18), with policies appearing as named
+- [x] `auth: true` guard and **named policies** (D18), with policies appearing as named
       security requirements in the OpenAPI document
 - [ ] `ctx.user` narrowed to non-null inside a guarded route
-- [ ] **The security-critical half, written once:** argon2id via `Bun.password`, JWT signing and
+- [x] **The security-critical half, written once:** argon2id via `Bun.password`, JWT signing and
       verification, single-use hashed reset tokens, refresh rotation
-- [ ] `AuthStore` — seven methods, shaped for these flows. Not a general ORM abstraction, and
+- [x] `AuthStore` — seven methods, shaped for these flows. Not a general ORM abstraction, and
       not something db bricks implement (D16 stands)
 
-### 2.5 `@theoven/auth-basic` — Drizzle storage, the Laravel/Rails property
+### 2.5 `@theoven/auth-basic` — Drizzle storage, the Laravel/Rails property ✅
 The reason `oven create` gives you a working signup before you have provisioned anything.
 
-- [ ] Signup with name, email, password
-- [ ] Login issuing a 15-minute access JWT plus a revocable refresh token row (D20)
-- [ ] `POST /auth/refresh`, `POST /auth/logout` (deletes the refresh row — logout genuinely revokes)
-- [ ] Change password while signed in; **invalidates every other session**
-- [ ] Forgot password → single-use, expiring, hashed reset token sent by email
-- [ ] Passwords hashed with `Bun.password` (argon2id); timing-safe comparisons throughout
+- [x] Signup with name, email, password
+- [x] Login issuing a 15-minute access JWT plus a revocable refresh token row (D20)
+- [x] `POST /auth/refresh`, `POST /auth/logout` (deletes the refresh row — logout genuinely revokes)
+- [x] Change password while signed in; **invalidates every other session**
+- [x] Forgot password → single-use, expiring, hashed reset token sent by email
+- [x] Passwords hashed with `Bun.password` (argon2id); timing-safe comparisons throughout
 - [ ] Rate limiting on login, signup and reset, since these are the endpoints that get attacked
-- [ ] Drizzle schema and migrations shipped for its own tables
+- [x] Drizzle schema and migrations shipped for its own tables
 - [ ] `@theoven/auth-mongo` — the same flows over Mongoose, which is what proves `AuthStore`
       is real rather than a Drizzle interface wearing a disguise (D25)
-- [ ] Tests covering the attacks, not just the happy path: reset-token reuse, expired tokens,
+- [x] Tests covering the attacks, not just the happy path: reset-token reuse, expired tokens,
       user enumeration via login and reset responses, refresh-token rotation
 
 ### 2.6 `@theoven/auth-better` and `@theoven/auth-clerk`
@@ -395,8 +395,8 @@ The reason `oven create` gives you a working signup before you have provisioned 
 ### 2.7 Mail, pulled forward from Phase 3
 Only as far as `auth-basic` needs it: password reset cannot work without sending mail.
 
-- [ ] `console` driver (dev) and `memory` driver (test), so reset flows work with zero config
-- [ ] One real driver (Resend or SMTP), enabled by setting env values and nothing else
+- [x] `console` driver (dev) and `memory` driver (test), so reset flows work with zero config
+- [x] One real driver (Resend or SMTP), enabled by setting env values and nothing else
 - [ ] The remaining drivers, templating and the preview inbox stay in §3.2
 
 ### 2.8 Default stack and scaffold (D21, D24)
@@ -405,9 +405,20 @@ Only as far as `auth-basic` needs it: password reset cannot work without sending
 - [ ] Optional `--auth basic` scaffolds signup, login and reset working out of the box
 - [ ] Mail defaults to the console driver, so password reset works before any provider exists
 
+**Not done in 2.5:** rate limiting on the auth endpoints (use core's `rateLimit` in front of
+`/auth/*` for now), and email verification — the column exists and is never set. Both are on
+the brick's page under Limitations rather than left for someone to discover.
+
+**Found while building `db-drizzle`:** Drizzle's `bun-sqlite` transaction does **not** roll back
+an async failure. `bun:sqlite` is synchronous, so the transaction commits before the rejection
+arrives and the write survives. The provider issues `begin`/`commit`/`rollback` itself and
+serialises transactions; both behaviours are covered by tests, including one asserting Drizzle's
+own method still has the flaw so the difference stays visible.
+
 ### 2.9 Agent ergonomics (D22)
 - [x] Brick catalogue section at `/docs/bricks/`, with a fixed page shape so a reader — or a
       model — finds the same headings on every brick
+- [x] **Writing your own brick** guide at `/docs/guides/writing-a-brick/`
 - [ ] `llms.txt` and `llms-full.txt` generated from the docs at build time, so they cannot drift
 - [ ] `AGENTS.md` written by `oven create`: route naming, `defineRoute`, native ORM queries,
       policies, and the things never to do (no Express middleware, no CommonJS)

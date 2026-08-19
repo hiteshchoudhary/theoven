@@ -41,8 +41,26 @@
     "packages/auth": {
       "name": "@theoven/auth",
       "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/core": "workspace:*",
+      },
       "peerDependencies": {
         "@theoven/core": "workspace:*",
+      },
+    },
+    "packages/auth-basic": {
+      "name": "@theoven/auth-basic",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/auth": "workspace:*",
+        "@theoven/core": "workspace:*",
+        "@theoven/db": "workspace:*",
+        "@theoven/db-drizzle": "workspace:*",
+      },
+      "peerDependencies": {
+        "@theoven/auth": "workspace:*",
+        "@theoven/core": "workspace:*",
+        "drizzle-orm": ">=0.36.0",
       },
     },
     "packages/cli": {
@@ -65,13 +83,32 @@
     "packages/db": {
       "name": "@theoven/db",
       "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/core": "workspace:*",
+      },
       "peerDependencies": {
         "@theoven/core": "workspace:*",
+      },
+    },
+    "packages/db-drizzle": {
+      "name": "@theoven/db-drizzle",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/core": "workspace:*",
+        "@theoven/db": "workspace:*",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:*",
+        "@theoven/db": "workspace:*",
+        "drizzle-orm": ">=0.36.0",
       },
     },
     "packages/mail": {
       "name": "@theoven/mail",
       "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/core": "workspace:*",
+      },
       "peerDependencies": {
         "@theoven/core": "workspace:*",
       },
@@ -452,11 +489,15 @@
 
     "@theoven/auth": ["@theoven/auth@workspace:packages/auth"],
 
+    "@theoven/auth-basic": ["@theoven/auth-basic@workspace:packages/auth-basic"],
+
     "@theoven/cli": ["@theoven/cli@workspace:packages/cli"],
 
     "@theoven/core": ["@theoven/core@workspace:packages/core"],
 
     "@theoven/db": ["@theoven/db@workspace:packages/db"],
+
+    "@theoven/db-drizzle": ["@theoven/db-drizzle@workspace:packages/db-drizzle"],
 
     "@theoven/example-minimal": ["@theoven/example-minimal@workspace:examples/minimal"],
 
