@@ -228,8 +228,12 @@ The Context object is the single argument every handler receives. It is assemble
 brick contributions and is **typed by what is registered** — if the storage brick is not
 in use, `ctx.storage` does not exist at the type level.
 
-Core always provides: `req`, `params`, `query`, `body`, `headers`, `cookies`, `set`, `log`,
-`redirect`, `status`.
+Core always provides: `req`, `params`, `query`, `body`, `header(name)`, `cookies`, `set`, `log`,
+`redirect`, `status`, `id`, `token`, `ip`, `path`, `routePattern`, `files()`.
+
+There is deliberately **no** `ctx.headers`: request and response headers are different things, and
+one property covering both is a coin flip at every read. Request headers are `ctx.header(name)` (or
+`ctx.req.headers`); response headers are `ctx.set(name, value)` and `ctx.responseHeaders`.
 
 ### Brick contract
 

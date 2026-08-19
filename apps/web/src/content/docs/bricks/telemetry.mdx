@@ -119,7 +119,7 @@ export const app = createApp().use(
     name: 'checkout-api',
     version: '2.1.0',
     ignore: ['/health', '/metrics'],
-    attributes: (ctx) => ({ 'app.tenant': ctx.headers.get('x-tenant-id') ?? 'none' }),
+    attributes: (ctx) => ({ 'app.tenant': ctx.header('x-tenant-id') ?? 'none' }),
   }),
 )
 ```

@@ -50,17 +50,70 @@ app.use('/admin', requireAdmin)
 Prefixes respect segment boundaries: `/admin` matches `/admin` and `/admin/users`, but never
 `/administrators`.
 
+### Order is registration order
+
+Middleware runs in the order you register it, outermost first. On the way out, the order
+reverses — the first registered is the last to see the result:
+
+```ts
+app.use(securityHeaders())   // 1 in, 4 out
+app.use(cors({ origin }))    // 2 in, 3 out
+app.use(requestLogger())     // 3 in, 2 out
+app.use(rateLimit({ limit: 100 }))  // 4 in, 1 out
+```
+
+The order that usually matters:
+
+1. **`securityHeaders`** first, so even a `404` or a rejected preflight carries them.
+2. **`cors`** early, because a preflight it answers should not travel further.
+3. **`requestLogger`** before anything that can reject, so rejections are logged too.
+4. **`rateLimit`** before expensive work, but after logging — otherwise the requests you most
+   want to see are the ones you never record.
+5. **Your own auth or tenant middleware** last, closest to the handler.
+
+Brick `request()` hooks run **after** all middleware and before the handler, so `ctx.user` is not
+yet populated in a middleware. That is deliberate: a middleware that needed the user would be a
+guard, and guards belong on the route (`auth: true`), where they are visible and documented.
+
 ### Middleware wraps routing, not just the handler
 
 Middleware runs for **every** request, including ones that match no route. A CORS preflight, a
 404 that still needs security headers, a request log that should include misses — none of those
 work if middleware only runs once a route has matched.
 
+## The order everything runs in
+
+```
+Bun.serve fetch
+  │
+  ├─ build Context
+  ├─ onRequest hooks            ← before middleware; returning a value ends it here
+  │
+  ├─ middleware chain           ← in registration order, wrapping everything below
+  │    │
+  │    ├─ route match           ← 404 from here is still inside your middleware
+  │    ├─ brick request() hooks ← ctx.user and other typed per-request state appear
+  │    ├─ beforeHandle hooks
+  │    ├─ validate params, query, body
+  │    ├─ handler
+  │    └─ afterHandle hooks
+  │
+  ├─ build the Response
+  └─ onResponse hooks           ← onError instead, if anything above threw
+```
+
+Two consequences worth internalising:
+
+- **`ctx.user` is not available in middleware.** Bricks contribute per-request state after the
+  middleware chain has been entered. Guard routes with `auth: true`, not with a middleware.
+- **A 404 runs your whole middleware chain.** That is what makes CORS and security headers work
+  on requests that match nothing.
+
 ## Lifecycle hooks
 
 | Hook | When | Returning a value |
 | --- | --- | --- |
-| `onRequest` | before routing | short-circuits the request |
+| `onRequest` | before **middleware** and routing | short-circuits the request |
 | `beforeHandle` | after routing, params available | skips the handler |
 | `afterHandle` | after the handler | replaces the result |
 | `onResponse` | after the `Response` is built | replaces the response |
@@ -77,6 +130,75 @@ app.onError((error) => ({ ok: false, code: error.status }))
 Returning `undefined` from any hook means "carry on unchanged", which is why a hook that only
 observes needs no return at all.
 
+### Hooks or middleware?
+
+They overlap; the difference is what you can see and what you can wrap.
+
+| | Middleware | Hooks |
+| --- | --- | --- |
+| Wraps the whole request | ✓ — code before *and* after `await next()` | ✗ — one point each |
+| Can be scoped to a path | ✓ `app.use('/admin', …)` | ✗ — always global |
+| Sees the matched route | only after `next()` | `beforeHandle` onward |
+| Can replace the `Response` object itself | ✓ | `onResponse` only |
+| Runs when nothing matched | ✓ | `onRequest`, `onResponse`, `onError` |
+
+Reach for middleware when you need something on both sides of the handler — timing, a
+transaction, a wrapper. Reach for a hook when you need exactly one point and want it to read as
+one line.
+
+## Writing one
+
+A middleware is a function. There is nothing to extend and nothing to register with:
+
+```ts
+import type { Middleware } from '@theoven/core'
+
+export function timing(header = 'server-timing'): Middleware {
+  return async (ctx, next) => {
+    const start = Bun.nanoseconds()
+    try {
+      return await next()
+    } finally {
+      // `finally`, so a thrown error is still timed — those are the slow ones.
+      ctx.set(header, `total;dur=${(Bun.nanoseconds() - start) / 1e6}`)
+    }
+  }
+}
+
+app.use(timing())
+```
+
+Two things worth knowing:
+
+- **Return what `next()` gave you**, or your own value. Returning nothing means the response is
+  `undefined`, which is a `204` and almost never what was meant.
+- **Do not catch errors just to log them.** Errors already become RFC 9457 responses and are
+  already logged; a middleware that swallows one turns a `500` into a silent success. Use
+  `finally`, or `onError` if you want to change the body.
+
+**A middleware has nowhere to put per-request state.** There is no `ctx.state` bag, deliberately:
+an untyped bucket on the context is invisible to autocomplete, and anything in it is `unknown` at
+the point you read it — which is the opposite of [types are the
+documentation](/docs/start/philosophy/).
+
+When a middleware wants to hand something to the handler, what you want is a
+[brick](/docs/guides/writing-a-brick/) with a `request()` hook. It contributes a **typed** property
+under its own key:
+
+```ts
+const tenancy = {
+  name: 'tenant',
+  setup: () => ({ resolve }),
+  request: async (ctx) => ({ tenant: await resolve(ctx.header('host')) }),
+} satisfies Brick<'tenant', TenantService, { tenant: Tenant }>
+
+app.use(tenancy)
+// `ctx.tenant` now exists, typed — and only in apps that registered this brick.
+```
+
+That is the same mechanism `auth` uses for `ctx.user` (D15). Use a plain middleware for behaviour
+that wraps a request; use a brick when the request needs to carry something new.
+
 ## Built-ins
 
 These ship in the box but stay configurable — the cases where behaviour genuinely varies
@@ -87,6 +209,15 @@ between apps, unlike body parsing where it does not. **Configured, not installed
 ```ts
 app.use(cors({ origin: ['https://app.example'], credentials: true }))
 ```
+
+| Option | Default | |
+| --- | --- | --- |
+| `origin` | `'*'` | a string, a list, `'*'`, or `(origin) => boolean` |
+| `methods` | the usual verbs | methods to allow |
+| `allowedHeaders` | reflects the request's | `Access-Control-Allow-Headers` |
+| `exposedHeaders` | none | headers the browser may read from the response |
+| `credentials` | `false` | allow cookies and `Authorization` |
+| `maxAge` | `86400` | seconds a preflight result may be cached |
 
 Preflights are answered with `204`, and a reflected origin always sets `Vary: Origin` so a
 shared cache cannot serve one origin's response to another.
@@ -102,6 +233,18 @@ shared cache cannot serve one origin's response to another.
 app.use(securityHeaders({ contentSecurityPolicy: "default-src 'self'" }))
 ```
 
+| Option | Default | |
+| --- | --- | --- |
+| `contentSecurityPolicy` | off | a CSP string, or `false` |
+| `hsts` | 1 year | `Strict-Transport-Security` max-age in seconds, or `false` |
+| `frameOptions` | `DENY` | `'DENY'`, `'SAMEORIGIN'` or `false` |
+| `referrerPolicy` | `strict-origin-when-cross-origin` | any policy string, or `false` |
+| `permissionsPolicy` | denies high-risk features | a policy string, or `false` |
+
+CSP is **off by default** deliberately: a policy strict enough to be worth having breaks a page
+that was not built for it, and one loose enough never to break anything is decoration. Write it
+for your app.
+
 Sets `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`.
 HSTS is only sent over HTTPS — sending it on plain HTTP would pin `localhost` to https in your
 browser for a year.
@@ -112,8 +255,18 @@ browser for a year.
 app.use(rateLimit({ limit: 100, window: 60_000, key: (ctx) => ctx.token ?? ctx.ip }))
 ```
 
+| Option | Default | |
+| --- | --- | --- |
+| `limit` | — | **required**; requests allowed per window |
+| `window` | `60000` | window length in ms |
+| `key` | client IP | `(ctx) => string \| undefined` — key on a user or API key instead |
+| `skip` | — | `(ctx) => boolean`, to exempt internal traffic |
+
+Keying on `ctx.token ?? ctx.ip` is usually what you want: signed-in users get their own budget
+rather than sharing one with everyone behind the same NAT.
+
 Sets `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`; a rejection carries
-`Retry-After`.
+`Retry-After` and a `429`.
 
 <Aside type="caution" title="In memory means per process">
   Behind a load balancer each instance counts separately, so the effective limit is
@@ -124,8 +277,13 @@ Sets `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`; a rejection
 ### Request logging
 
 ```ts
-app.use(requestLogger({ ignore: ['/health'] }))
+app.use(requestLogger({ ignore: ['/health'], slowThreshold: 500 }))
 ```
+
+| Option | Default | |
+| --- | --- | --- |
+| `ignore` | none | paths to skip — health checks otherwise dominate the log |
+| `slowThreshold` | `1000` | log at `warn` above this many ms |
 
 One structured line per request with the request id already bound. Slow requests log at `warn`,
 failures at `error`.
@@ -135,6 +293,11 @@ failures at `error`.
 ```ts
 app.use(compression({ threshold: 1024 }))
 ```
+
+| Option | Default | |
+| --- | --- | --- |
+| `threshold` | `1024` | smallest response worth compressing, in bytes |
+| `types` | text, JSON, JS, XML, SVG | content types to compress; prefixes allowed |
 
 Compresses text-shaped payloads above a threshold. Streaming responses — a returned `Response`,
 `ReadableStream` or `Blob` — are passed through untouched: buffering them to compress would stop

@@ -320,6 +320,10 @@ const SCHEMA_KEYS = [
   'summary',
   'description',
   'tags',
+  // `auth` is read off the schema by the auth brick (`requirementOf`). Leaving it out meant
+  // `export const auth = true` was collected into nothing and the route served anonymously —
+  // a guard that silently does not guard, which is worse than no guard at all.
+  'auth',
 ] as const
 
 /**

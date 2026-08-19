@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { type App, type AppOptions, createApp } from './app'
+import { Unauthorized } from './errors'
 import {
   clearRouteManifest,
   defineRoute,
@@ -236,6 +237,27 @@ describe('readRouteModule', () => {
 
   test('leaves the schema undefined when nothing is declared', () => {
     expect(readRouteModule({ default: () => 'ok' }, 'f.ts').schema).toBeUndefined()
+  })
+
+  /**
+   * `export const auth = true` must reach the schema.
+   *
+   * It did not: `auth` was missing from the collected keys, so a file-routed guard was gathered
+   * into nothing and the route answered anonymously with a 200. A guard that silently does not
+   * guard is worse than no guard, because the page and the code both say it is protected.
+   */
+  test('auth is carried onto the schema, so a file-routed guard is real', () => {
+    const result = readRouteModule({ default: () => 'ok', auth: true }, 'f.ts')
+    expect(result.schema).toEqual({ auth: true })
+  })
+
+  test('a policy name and a policy list are carried too', () => {
+    expect(readRouteModule({ default: () => 'ok', auth: 'admin' }, 'f.ts').schema).toEqual({
+      auth: 'admin',
+    })
+    expect(
+      readRouteModule({ default: () => 'ok', auth: ['admin', 'owner'] }, 'f.ts').schema,
+    ).toEqual({ auth: ['admin', 'owner'] })
   })
 
   test('a missing default export names the file', () => {
@@ -553,5 +575,55 @@ describe('route manifest', () => {
     expect(hasRouteManifest()).toBe(true)
     clearRouteManifest()
     expect(hasRouteManifest()).toBe(false)
+  })
+})
+
+/**
+ * The seam between a route file and a brick that guards it.
+ *
+ * `readRouteModule` extracting `auth` and the auth brick reading `schema.auth` were both already
+ * covered, and the guard still did not work: `auth` was absent from the keys collected off a
+ * module, so nothing was carried between them. Each side was right and the join was broken —
+ * which is exactly the shape a unit test on either side cannot see.
+ */
+describe('a file-routed guard reaches the brick that enforces it', () => {
+  /** Stands in for the auth brick: refuses whenever the route declares `auth`. */
+  const guard = {
+    name: 'guard' as const,
+    setup: () => ({}),
+    request: (_ctx: unknown, route: { schema?: { auth?: unknown } }) => {
+      if (route.schema?.auth !== undefined && route.schema.auth !== false) {
+        throw new Unauthorized('Guarded.')
+      }
+      return undefined
+    },
+  }
+
+  test('export const auth = true is enforced, not silently dropped', async () => {
+    const app = make().use(guard as never)
+    await loadRoutes(
+      app,
+      await tree({
+        'secret.get.ts': 'export const auth = true\nexport default () => "secret"',
+        'open.get.ts': 'export default () => "open"',
+      }),
+    )
+
+    expect((await send(app, '/secret')).status).toBe(401)
+    expect((await send(app, '/open')).status).toBe(200)
+  })
+
+  test('the defineRoute form is enforced the same way', async () => {
+    const app = make().use(guard as never)
+    await loadRoutes(
+      app,
+      await tree({
+        'secret.get.ts':
+          'import { defineRoute } from "../../packages/core/src/index"\n' +
+          'export default defineRoute({ auth: true }, () => "secret")',
+      }),
+    )
+
+    expect((await send(app, '/secret')).status).toBe(401)
   })
 })
