@@ -84,17 +84,22 @@ a default.
 
 ## Production refuses development defaults
 
-Three bricks deliberately fail to boot outside development rather than working badly:
+Four bricks deliberately fail to boot outside development rather than working badly:
 
-| Brick | Refused | Because |
-| --- | --- | --- |
-| [`mail`](/docs/bricks/mail/) | the `console` driver | reset links printed to a log look healthy while nobody can reset their password |
-| [`storage`](/docs/bricks/storage/) | the `disk` driver | uploads on a container filesystem vanish on the next deploy |
-| [`queue`](/docs/bricks/queue/) | the `memory` driver | a deploy silently drops every queued email |
+| Brick | Refused | Escape hatch | Because |
+| --- | --- | --- | --- |
+| [`mail`](/docs/bricks/mail/) | the `console` driver | `allowConsoleInProduction` | reset links printed to a log look healthy while nobody can reset their password |
+| [`storage`](/docs/bricks/storage/) | the `disk` driver | `allowDiskInProduction` | uploads on a container filesystem vanish on the next deploy |
+| [`queue`](/docs/bricks/queue/) | the `memory` driver | `allowMemoryInProduction` | a deploy silently drops every queued email |
+| [`cache`](/docs/bricks/cache/) | the `memory` driver | `allowMemoryInProduction` | each instance keeps its own copy, so a user refreshes and sees a different answer |
 
-Each takes an explicit `allow…InProduction` escape hatch. Each failure names itself and says what
-to configure. This is the shape of bug that is invisible until it is expensive, so it is a boot
-error instead.
+The common shape: each one **works perfectly on a laptop** and fails only under conditions you
+cannot reproduce there — more than one instance, or a restart. That is the bug class worth a boot
+error, because no amount of local testing finds it.
+
+Each failure names itself and says what to configure. The escape hatches are real, not
+discouragement: a per-instance cache for a hot lookup table is a legitimate choice, and
+`allowMemoryInProduction` is how you say so deliberately rather than by accident.
 
 Oven is in production mode when `NODE_ENV=production`, or when you pass
 `createApp({ development: false })`.

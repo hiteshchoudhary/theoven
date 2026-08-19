@@ -64,13 +64,27 @@ Express needed `express-async-errors` for this, or every async handler needed it
 
 ## Adding detail and headers
 
-Extra members are merged into the problem document — this is how validation reports fields:
+`detail` is a bag of **extra members merged into the problem document**, not the RFC's `detail`
+string — that one comes from the message. This is exactly how validation reports fields:
 
 ```ts
 throw new UnprocessableContent('Validation failed', {
   detail: { errors: [{ path: 'email', message: 'Invalid email address' }] },
 })
 ```
+
+```json title="422 response"
+{
+  "type": "about:blank",
+  "title": "Unprocessable Content",
+  "status": 422,
+  "detail": "Validation failed",
+  "errors": [{ "path": "email", "message": "Invalid email address" }]
+}
+```
+
+Note where `errors` landed: at the top level, beside `status`. RFC 9457 allows extension members
+there, and putting them one level down would mean every client digging through a wrapper.
 
 Headers travel with the error, which is how a `429` carries `Retry-After`:
 
@@ -115,8 +129,55 @@ Return `undefined` to fall back to the default rendering. If your handler itself
 logs that and still renders the original error — a broken error handler must not hide the
 problem it was meant to describe.
 
+## Catching them in tests
+
+An `OvenError` is an ordinary error until it reaches the response, so a unit test can assert on
+it directly:
+
+```ts
+expect(() => parseRange('2020-2050')).toThrow(BadRequest)
+
+const response = await app.fetch(new Request('http://x/users/99'))
+expect(response.status).toBe(404)
+expect(await response.json()).toMatchObject({ status: 404, title: 'Not Found' })
+```
+
+## Defining your own
+
+Subclass `OvenError`. It takes a status, a title, an optional message and an options object:
+
+```ts
+import { OvenError } from '@theoven/core'
+
+export class PaymentRequired extends OvenError {
+  constructor(message = 'Payment required.') {
+    super(402, 'Payment Required', message, {
+      // A resolvable URI documenting this specific failure. RFC 9457's `type` is the field
+      // clients are meant to branch on — unlike a status, it can be specific to your API.
+      type: 'https://acme.dev/problems/payment-required',
+      detail: { upgradeUrl: '/billing' },
+    })
+  }
+}
+```
+
+```json title="402 response"
+{
+  "type": "https://acme.dev/problems/payment-required",
+  "title": "Payment Required",
+  "status": 402,
+  "detail": "Payment required.",
+  "upgradeUrl": "/billing"
+}
+```
+
+The built-in classes are made the same way. `Unauthorized` also carries a default
+`WWW-Authenticate: Bearer` header, because RFC 9110 says a 401 must say *how* to authenticate and
+leaving that to each throw site means most of them forget.
+
 ## Next
 
-That is everything Oven does today. [Validation](/docs/tutorial/validation/), auth, database,
-storage, mail and queues are on the way — see
-[`TODO.md`](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md).
+[Database →](/docs/tutorial/database/)
+
+Or jump to the full [error reference](/docs/reference/errors/), or build something end to end in
+[Build a todo API](/docs/build/).

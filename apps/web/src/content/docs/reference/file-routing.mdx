@@ -41,6 +41,38 @@ The method lives in the filename rather than in named exports, so a route's meth
 a directory listing and in `git log --stat`. One file is one endpoint, and grepping for
 `users/[id].patch` finds it.
 
+## Two ways to write a route
+
+Both work. They differ in how much typing you get:
+
+```ts title="separate exports — simple, untyped ctx"
+export const auth = true
+export const body = z.object({ name: z.string() })
+
+export default async (ctx) => ({ hello: ctx.body.name })
+```
+
+```ts title="defineRoute — one call, ctx typed from the schema"
+export default defineRoute(
+  { auth: true, body: z.object({ name: z.string() }) },
+  async (ctx) => ({ hello: ctx.body.name }),
+  //                        ^ typed: string
+)
+```
+
+The exports Oven reads are `params`, `query`, `body`, `headers`, `response`, `auth`, `summary`,
+`description` and `tags` — the same keys `defineRoute` takes. Anything else exported is ignored.
+
+Use the separate-export form when a route is small and you do not mind an untyped `ctx`; use
+`defineRoute` — or [`routesFor`](#typing-ctx-with-your-bricks) — when you want the schema to type
+the handler.
+
+<Aside type="caution" title="`auth` was ignored in 0.1.2">
+  In the published `0.1.2`, `export const auth` was collected into nothing and the route answered
+  **anonymously with a 200**. `defineRoute({ auth: true }, …)` was unaffected. Fixed after 0.1.2;
+  if you are pinned to it, use `defineRoute` or upgrade.
+</Aside>
+
 ## A route file
 
 ```ts title="src/routes/users/[id].patch.ts"

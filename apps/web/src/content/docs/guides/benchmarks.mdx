@@ -9,7 +9,7 @@ Every number here comes from a script in the repo. Run them yourself — numbers
 reproduce are marketing, not measurement.
 
 ```bash
-bun benchmarks/http.bench.ts       # real sockets, all five frameworks
+bun benchmarks/http.bench.ts       # real sockets, all four frameworks
 bun benchmarks/dispatch.bench.ts   # Request -> Response, no socket
 bun benchmarks/router.bench.ts     # router lookup alone
 ```
@@ -60,6 +60,32 @@ syscalls and TCP dominate and a few hundred nanoseconds of framework overhead va
 The dispatch table is a useful signal about where our own overhead lives, and a bad basis for
 choosing a framework. We publish both, because publishing only the flattering one would be
 dishonest — and publishing only the microbenchmark would mislead in the other direction.
+
+## Reproducing them
+
+```bash
+git clone https://github.com/hiteshchoudhary/theoven.git
+cd theoven && bun install
+bun benchmarks/http.bench.ts
+```
+
+The harness starts each server as a **separate process**, waits for it to answer, runs
+`autocannon` against it, and shuts it down before the next — so no framework is measured while
+another holds memory or a JIT-warm CPU. Node contenders run under `node`, Bun contenders under
+`bun`, because comparing a framework on a runtime nobody deploys it to measures nothing.
+
+Every server implements the same two routes and returns the same bytes:
+
+```ts title="benchmarks/servers/oven.server.ts"
+const app = createApp({ logger: silentLogger })
+app.get('/', () => 'ok')
+app.get('/users/:id', (ctx) => ({ id: ctx.params.id }))
+app.listen(Number(Bun.env.PORT))
+```
+
+Numbers will differ on your machine — laptops thermally throttle, and the load generator shares
+a CPU with the server. What should hold is the **ordering** and the rough ratios. If it does not,
+that is worth an issue.
 
 ## What none of this measures
 

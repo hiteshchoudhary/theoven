@@ -57,7 +57,7 @@ Run them as a release step, not from every replica at boot:
 bunx oven db migrate
 ```
 
-## Three things that will refuse to start
+## Four things that will refuse to start
 
 This is the part worth reading before you deploy rather than after.
 
@@ -66,9 +66,11 @@ This is the part worth reading before you deploy rather than after.
 | `mail` | the `console` driver | reset links printed to a log look healthy while nobody can reset their password |
 | `storage` | the `disk` driver | uploads on a container filesystem vanish on the next deploy |
 | `queue` | the `memory` driver | a deploy silently drops every queued job |
+| `cache` | the `memory` driver | each instance keeps its own copy, so a refresh gives a different answer |
 
-Your todo app uses the console mail driver, so it will not boot with `NODE_ENV=production` until
-you configure a real one:
+Your todo app registers none of the last three, so `mail` is the only one you have to deal with.
+It uses the console driver, so it will not boot with `NODE_ENV=production` until you configure a
+real one:
 
 ```ts title="src/mail.ts"
 import { resendMail } from '@theoven/mail'

@@ -18,15 +18,45 @@ The rule we apply: **if it appears in more than 80% of real apps, it goes in cor
 switch.** Things that genuinely vary — CORS policy, rate limits, compression — stay
 configurable, but they still ship in the box. Configured, not installed.
 
+```ts
+// Express
+app.use(express.json())
+app.use(cookieParser())
+app.use(multer().single('file'))
+
+// Oven — this is the whole file
+export default async (ctx) => {
+  const { name } = await ctx.body        // JSON, form or multipart, whichever arrived
+  const files = await ctx.files()        // uploads, as web File objects
+  ctx.cookies.set('seen', '1', { httpOnly: true })
+  return { name, uploaded: Object.keys(files) }
+}
+```
+
+What you lose is the ability to *not* have those. In eleven years of Express nobody wanted that.
+What you gain is that they cannot be forgotten, cannot be ordered wrongly, and cannot be a
+different version in two services.
+
 ## 2. Always-on must be lazy
 
 Batteries included is worthless if you pay for batteries you never use.
 
 Nothing in Oven is computed until it is read. A route that returns a string never parses a
 body, never parses the query string, never touches cookies, never generates a request id, and
-never derives a logger. This is enforced by tests, not by good intentions — the test suite
-asserts that reading the URL does not materialise a request id, and that setting a header does
-not either.
+never derives a logger.
+
+```ts
+app.get('/ping', () => 'pong')
+// no URL parsed, no query parsed, no cookies read, no request id generated, no logger built
+```
+
+Every one of those is a getter that caches on first touch. `ctx.path` does not even construct a
+`URL` — it scans the string, because `new URL()` on every request costs more than the routing does.
+
+This is enforced by tests rather than good intentions: the suite asserts that reading the URL does
+not materialise a request id, and that setting a header does not either. Those tests exist because
+the property is invisible — nothing about a passing request tells you what it *didn't* do, so the
+only way to keep it true is to assert it.
 
 ## 3. Fresh start. We owe the past nothing.
 
@@ -50,15 +80,62 @@ What this means in practice:
 If you need to read docs to discover that a property exists, we failed. Autocomplete on `ctx`
 should teach you the framework.
 
-This is why modules contribute their types through the config: add storage and `ctx.storage`
+This is why bricks contribute their types through registration: add storage and `ctx.storage`
 appears, fully typed. Leave it out and touching `ctx.storage` is a compile error, not a
 runtime crash at 3am.
+
+```ts
+const app = createApp().use(db(drizzleSqlite({ schema })))
+
+app.get('/users', (ctx) => ctx.db.select().from(users))   // ✓ typed from your schema
+app.get('/files', (ctx) => ctx.storage.list())            // ✗ compile error: no storage brick
+```
+
+It is also why `ctx.db` is the Drizzle client rather than something of ours wrapped around it. An
+invented query API would be permanently behind every ORM, worse than all of them, and unknown to
+every coding model — which knows Drizzle and Prisma cold.
+
+The same rule explains an absence: there is no `ctx.state` bag for middleware to stash things in.
+An untyped bucket is invisible to autocomplete and `unknown` at the point you read it. State that
+belongs on the context belongs to a [brick](/docs/guides/writing-a-brick/), where it arrives
+typed.
 
 ## 5. Errors are values, not accidents
 
 A handler either returns a value or throws. Throwing `NotFound` produces a correct RFC 9457
 `application/problem+json` response, whether the throw was synchronous or not.
 
+```ts
+export default async (ctx) => {
+  const user = await find(ctx.params.id)
+  if (!user) throw new NotFound(`No user ${ctx.params.id}.`)
+  return user
+}
+```
+
+```json
+{ "type": "about:blank", "title": "Not Found", "status": 404, "detail": "No user 8f14.", "instance": "/users/8f14" }
+```
+
 Errors we did not plan for are treated as bugs: they become a 500, and their message and stack
 are withheld in production. An unplanned error message is exactly where connection strings and
 internal hostnames leak.
+
+There is no `next(err)`, and no `express-async-errors` to remember. A rejected promise from a
+handler, a middleware, or a hook is caught the same way a synchronous throw is.
+
+## 6. Two implementations, or it is not a contract
+
+Anywhere Oven meets something outside itself — a database, an auth provider, a mail service — the
+shape is a small contract package plus many adapters, with a `raw` escape hatch and capabilities
+declared at boot rather than discovered at runtime.
+
+The test of a contract is whether a **second, structurally different** implementation fits it
+without changes. `db-drizzle` alone proves nothing; `db-drizzle` plus `db-mongoose` proves it —
+and it was Mongoose that showed `transaction` could not be portable, so it became optional and
+declared rather than faked. The same reason the validator contract is exercised with Valibot and
+not only Zod.
+
+A contract must never invent. Where two providers genuinely disagree — Clerk hosts its sign-in
+page, better-auth mounts routes — the contract exposes the difference instead of giving one of
+them a method to fake.

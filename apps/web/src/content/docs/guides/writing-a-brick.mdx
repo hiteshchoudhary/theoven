@@ -91,9 +91,16 @@ setup: (context) => {
 
 ### `request(ctx, route)`
 
-Runs **after routing** — so `ctx.params` is available — and **before** middleware, validation
-and the handler. Throwing rejects the request, which is how an auth brick turns a bad token into
-a `401` without a handler ever seeing it.
+Runs **after routing** — so `ctx.params` and the matched route are available — and **after** the
+middleware chain has been entered, but **before** validation and the handler. Throwing rejects the
+request, which is how an auth brick turns a bad token into a `401` without a handler ever seeing
+it.
+
+The full order is on the [middleware page](/docs/reference/middleware/#the-order-everything-runs-in).
+The consequence worth knowing: because this runs inside the middleware chain, a plain middleware
+cannot see what your brick contributed — `ctx.user` does not exist yet at that point. That is
+deliberate, and it is why route guards are declared on the route rather than written as
+middleware.
 
 It also receives the matched route, including keys core does not interpret:
 
@@ -109,11 +116,11 @@ keeps every route-level feature out of core.
 ## Depending on another brick
 
 ```ts
-export function cache(): Brick<'cache', CacheClient> {
+export function audit(): Brick<'audit', AuditLog> {
   return {
-    name: 'cache',
+    name: 'audit',
     dependsOn: ['db'],
-    setup: (context) => createCache(context.resolved.db as Database),
+    setup: (context) => createAuditLog(context.resolved.db as Database),
   }
 }
 ```
