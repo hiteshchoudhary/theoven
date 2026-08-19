@@ -11,7 +11,7 @@ import { Aside } from '@astrojs/starlight/components'
 | --- | --- |
 | **Package** | `@theoven/mail` |
 | **Adds to context** | `ctx.mail` |
-| **Endpoints** | none |
+| **Endpoints** | `/_oven/mail` — the preview inbox, development only |
 | **Creates files** | none |
 | **Creates tables** | none |
 | **Status** | shipped |
@@ -45,6 +45,83 @@ await ctx.mail.send({
 })
 ```
 
+## Templates
+
+A template is a **function**, not a file format:
+
+```ts title="src/emails/welcome.ts"
+import { defineTemplate, escapeHtml } from '@theoven/mail'
+
+export const welcome = defineTemplate<{ name: string; link: string }>((props) => ({
+  subject: `Welcome, ${props.name}`,
+  html: `<h1>Hi ${escapeHtml(props.name)}</h1>
+         <a href="${escapeHtml(props.link)}">Confirm your address</a>`,
+}))
+```
+
+```ts
+await ctx.mail.sendTemplate({
+  to: user.email,
+  template: welcome,
+  props: { name: user.name, link },
+})
+```
+
+Miss a prop and it is a **compile error**, not an email that says `Welcome, undefined`. That is
+the whole feature. A template engine here would be a second templating system to learn, a build
+step to configure, and a class of runtime error that a function signature already prevents.
+
+`sendTemplate` is separate from `send` rather than an overload, because a templated message must
+not carry its own `subject` — a union would let one through and then quietly ignore it.
+
+Use `escapeHtml` for anything a user typed. If you want JSX, render it yourself: React Email and
+`Bun.renderToString` both produce a string, and a template takes whatever you return.
+
+### A text part is derived for you
+
+Give only `html` and the text alternative is generated from it — links kept as
+`text (url)`, scripts and styles dropped. A message with no text part scores worse with spam
+filters and is unreadable in a client that refuses HTML, so deriving one is strictly better than
+sending none. Pass your own `text` and it is left alone.
+
+## Attachments
+
+```ts
+await ctx.mail.send({
+  to: customer.email,
+  subject: 'Your invoice',
+  text: 'Attached.',
+  attachments: [
+    { filename: 'invoice.pdf', content: pdfBlob },
+    { filename: 'logo.png', content: logoBlob, cid: 'logo' },   // <img src="cid:logo">
+  ],
+})
+```
+
+`content` is a `Blob`, bytes, or a string — not base64. An attachment usually starts life as an
+upload or a generated PDF, both of which are already one of those, and asking every caller to
+encode is asking them to hold the whole thing in memory as a string. Encoding happens at send
+time, so an attachment built from `Bun.file()` is not read until the message goes out.
+
+## The preview inbox
+
+```
+http://localhost:3000/_oven/mail
+```
+
+Every message the app sends is held in memory and rendered there — headers, both bodies, and any
+attachments. It is how you check what a reset email actually looks like without sending one to
+yourself.
+
+Mounted **in development only**. It serves message bodies, and those contain working
+password-reset links; an unauthenticated page serving them in production would be a way to take
+over accounts. Set `preview: '/somewhere'` to move it, `preview: false` to turn it off, or
+`preview: true` to force it on — which logs a warning outside development, because you should
+see that decision in your logs.
+
+The HTML body renders inside a sandboxed `iframe`, and everything else is escaped. A preview
+shows whatever an email contains, and some of that comes from users.
+
 ## Drivers
 
 | Driver | Sends | Use for |
@@ -52,6 +129,48 @@ await ctx.mail.send({
 | `consoleMail()` | prints to the terminal | development, the default |
 | `memoryMail()` | collects in `.sent` | tests |
 | `resendMail({ apiKey, from })` | Resend's HTTP API | production |
+| `sesMail({ from, region })` | Amazon SES v2 HTTP API | production on AWS |
+| `smtpMail({ host, port, user, pass, from })` | SMTP over a socket | anything else |
+
+### SES
+
+```ts
+mail(sesMail({ from: env.string('MAIL_FROM'), region: env.string('AWS_REGION', 'us-east-1') }))
+```
+
+Credentials fall back to `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, which an instance role or
+a secrets mount already sets.
+
+No AWS SDK. Requests are signed with SigV4 in about eighty lines — verified against AWS's own
+published test vectors, not against itself. Acquiring the SDK's dependency tree in order to send
+an email is a poor trade.
+
+Attachments switch the request from SES's `Simple` content to raw MIME, because `Simple` has
+nowhere to put a file. Without them, SES builds the MIME itself and does it better than we would.
+
+### SMTP
+
+```ts
+mail(smtpMail({
+  host: env.string('SMTP_HOST'),
+  port: env.port('SMTP_PORT', 587),
+  user: env.string('SMTP_USER'),
+  pass: env.string('SMTP_PASS'),
+  from: env.string('MAIL_FROM'),
+}))
+```
+
+Spoken directly over `Bun.connect` — EHLO, STARTTLS, AUTH, MAIL FROM, RCPT TO, DATA. No mailbox
+management, no pipelining, no connection pool.
+
+Prefer an HTTP driver where you have one. SMTP means a long-lived TCP connection, a port that
+hosting providers block, and errors that arrive as three-digit codes.
+
+<Aside type="caution" title="A password is never sent in the clear">
+  STARTTLS is negotiated before AUTH, always. If the server does not offer it and you configured
+  a password, the send **fails** rather than handing the credential to the network. For a local
+  mail catcher — Mailpit or MailHog on `127.0.0.1` — pass `allowInsecureAuth`.
+</Aside>
 
 The console driver is the default so that a freshly created app has a working password-reset
 flow: the link appears in your terminal, with no provider account and no API key. Laravel and
@@ -79,6 +198,8 @@ expect(driver.sent[0]?.to).toBe('ada@example.com')
 | --- | --- | --- |
 | `from` | — | default sender, used when a message sets none |
 | `allowConsoleInProduction` | `false` | permit the console driver outside development |
+| `preview` | on in development | mount the inbox; a string moves it, `false` turns it off |
+| `previewLimit` | `50` | how many messages the inbox keeps |
 
 ## What gets logged
 
@@ -88,9 +209,24 @@ aggregator.
 
 ## Limitations
 
-- **No templating.** Messages take `text` and `html` strings. React Email support is planned.
-- **No queueing or retries.** A send is a single attempt; wrap it yourself, or wait for
-  `@theoven/queue`.
-- **No attachments yet.**
-- **SMTP is not implemented.** Resend, console and memory only.
-- **No dev preview inbox.** Planned for §3.2.
+- **No queueing or retries.** A send is a single attempt. Once `@theoven/queue` lands this will
+  dispatch through it; today, wrap the call yourself if a failure matters.
+- **No bounce or complaint handling.** Webhooks from Resend and SES are yours to receive.
+- **No JSX renderer bundled.** Templates return strings; render JSX yourself if you want it.
+- **SMTP has no connection pool.** One connection per message, which is fine for transactional
+  volume and wrong for bulk.
+- **The preview inbox is per process and in memory.** It empties on restart and shows nothing
+  from other instances.
+
+## How it is verified
+
+SigV4 is checked against AWS's published test vectors rather than against itself — a signature
+implementation that only agrees with its own tests agrees with nothing.
+
+The SMTP driver is tested against a **real SMTP server running in the test process**, so the
+actual conversation is exercised: EHLO parsing, envelope addresses, dot-stuffing, and the refusal
+to authenticate over an unencrypted connection.
+
+MIME assembly is checked for encoded-word subjects, 76-character base64 wrapping, inline
+`Content-ID` attachments, and that **bcc never appears in the message** — the whole meaning of
+blind.

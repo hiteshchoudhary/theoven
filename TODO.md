@@ -531,13 +531,27 @@ recorded in `CLAUDE.md`.
       command) and fails if the suite skips.
 
 ### 3.2 `@theoven/mail`
-- [ ] Drivers: Resend, SES, SMTP, `console` (dev), `memory` (test)
-- [ ] `mail.send({ to, subject, html | text | template })`
-- [ ] Typed templates (React Email / JSX → HTML)
-- [ ] Dev preview inbox at `/_oven/mail`
-- [ ] Attachments, cc/bcc, reply-to
-- [ ] Auto-queues when `@theoven/queue` is present
-- [ ] Tests
+- [x] Drivers: Resend, **SES** (v2 HTTP, SigV4 signed in ~80 lines, verified against AWS's own
+      published test vectors), **SMTP** (spoken over `Bun.connect`), `console` (dev), `memory` (test)
+- [x] `mail.send({ to, subject, html | text })` and `mail.sendTemplate({ template, props })`.
+      Separate methods rather than an overload: a templated message must not carry its own
+      subject, and a union would let one through and quietly ignore it.
+- [x] Typed templates — `defineTemplate<Props>()`, a **function** rather than a file format.
+      A missing prop is a compile error, not `Welcome, undefined`. JSX is supported by rendering
+      it yourself: React Email and `Bun.renderToString` both return a string and a template takes
+      whatever you return. Bundling a renderer would be a build step and a second templating
+      system to learn.
+- [x] Dev preview inbox at `/_oven/mail`, bounded ring buffer, development-only by default —
+      it serves working password-reset links, so an unauthenticated page in production would be a
+      way to take over accounts. HTML bodies render in a sandboxed iframe; everything else is
+      escaped, because a preview shows content that came from users.
+- [x] Attachments (Blob, bytes or string — never base64 from the caller; encoded at send time so
+      a `Bun.file()` attachment is not read until it goes out), inline `cid:` images, cc/bcc,
+      reply-to, and arbitrary headers
+- [ ] Auto-queues when `@theoven/queue` is present — waiting on §3.3
+- [x] Tests, including a **real SMTP server in the test process** so the driver's actual
+      conversation is exercised: EHLO parsing, envelope addresses, dot-stuffing, and the refusal
+      to send a password over an unencrypted connection
 
 ### 3.3 `@theoven/queue`
 - [ ] Drivers: Redis, Postgres, in-memory (dev/test)
