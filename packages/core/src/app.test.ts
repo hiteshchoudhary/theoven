@@ -507,3 +507,48 @@ describe('configuration', () => {
     expect(() => app.get('/dup', () => 'b')).toThrow()
   })
 })
+
+/**
+ * A brick's service, outside a request.
+ *
+ * `ctx.db` is where an application wants it. A migration script, a seed, and `oven worker` all
+ * want the same configured value with no request in sight — and re-constructing the brick would
+ * give them a second connection pool.
+ */
+describe('app.service', () => {
+  test('it returns what the brick contributed, not a new one', async () => {
+    let built = 0
+    const counter = {
+      name: 'counter' as const,
+      setup: () => ({ id: ++built }),
+    }
+
+    const app = createApp({ logger: silentLogger }).use(counter)
+    await app.ready()
+
+    expect(app.service('counter')).toEqual({ id: 1 })
+    // The same object a request would see, not a second construction.
+    expect(app.service('counter')).toBe(app.service('counter'))
+    expect(built).toBe(1)
+  })
+
+  test('an unregistered brick throws, naming what is registered', async () => {
+    const app = createApp({ logger: silentLogger }).use({
+      name: 'clock' as const,
+      setup: () => ({ now: () => 0 }),
+    })
+    await app.ready()
+
+    // @ts-expect-error — the type only permits names that were registered.
+    expect(() => app.service('storage')).toThrow(/Registered: clock/)
+  })
+
+  // Bricks are set up at boot, so asking before that is a mistake worth naming.
+  test('asking before ready() says to call ready()', () => {
+    const app = createApp({ logger: silentLogger }).use({
+      name: 'clock' as const,
+      setup: () => ({ now: () => 0 }),
+    })
+    expect(() => app.service('clock')).toThrow(/await app\.ready\(\)/)
+  })
+})

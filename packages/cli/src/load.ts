@@ -1,3 +1,4 @@
+import type { Logger } from '@theoven/core'
 import { fail } from './ui'
 
 /**
@@ -11,6 +12,14 @@ export interface LoadedApp {
   routeTable(): ReadonlyArray<{ method: string; pattern: string; schema: unknown }>
   ready(): Promise<void>
   close(options?: { timeout?: number }): Promise<void>
+  /**
+   * A brick's contributed service.
+   *
+   * Untyped here on purpose: the CLI loads an app it knows nothing about at compile time, so
+   * the real typing lives on `App` and this is the runtime shape.
+   */
+  service(name: string): unknown
+  logger: Logger
 }
 
 export function looksLikeApp(value: unknown): value is LoadedApp {

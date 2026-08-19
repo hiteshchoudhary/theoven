@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createApp, silentLogger } from '@theoven/core'
+import { createWorker, memoryQueue, queue } from '@theoven/queue'
 import { mail } from './brick'
 import { memoryMail } from './drivers'
 import { createInbox, renderInbox, renderMessage } from './preview'
@@ -724,5 +725,110 @@ describe('SMTP driver', () => {
   test('an unreachable host fails with a message rather than hanging', async () => {
     const driver = smtpMail({ host: '127.0.0.1', port: 1, from: 'hello@acme.com', timeout: 2 })
     expect(driver.send({ to: 'a@b.com', subject: 'Hi', text: 'x' })).rejects.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------------------
+// Queueing, when the queue brick is present
+// ---------------------------------------------------------------------------------------
+
+/**
+ * A provider being slow or briefly down should delay an email, not fail the request that
+ * triggered it — and a transient failure should be retried rather than lost, which for a
+ * password reset is the difference between a delay and a support ticket.
+ */
+describe('sending through the queue', () => {
+  async function withQueue(mailOptions = {}) {
+    const driver = memoryMail()
+    const app = createApp({ logger: silentLogger, development: true })
+      .use(queue(memoryQueue(), { jobs: [], logger: silentLogger, worker: false }))
+      .use(mail(driver, mailOptions))
+    opened.push(app)
+    app.post('/send', (ctx) => ctx.mail.send({ to: 'ada@example.com', subject: 'Hi', text: 'x' }))
+    await app.ready()
+    return { app, driver }
+  }
+
+  test('a send is queued rather than delivered inline', async () => {
+    const { app, driver } = await withQueue()
+
+    await app.fetch(new Request('https://theoven.app/send', { method: 'POST' }))
+
+    // Nothing sent yet — it is on the queue.
+    expect(driver.sent).toHaveLength(0)
+    expect((await app.service('queue').stats()).ready).toBe(1)
+  })
+
+  test('the worker delivers it', async () => {
+    const { app, driver } = await withQueue()
+    await app.fetch(new Request('https://theoven.app/send', { method: 'POST' }))
+
+    const worker = createWorker(
+      app.service('queue').raw as never,
+      app.service('queue').jobs as never,
+      { logger: silentLogger },
+    )
+    await worker.drain()
+
+    expect(driver.sent).toHaveLength(1)
+    expect(driver.sent[0]?.to).toBe('ada@example.com')
+  })
+
+  test('it can be turned off, and then sends inline', async () => {
+    const { app, driver } = await withQueue({ queue: false })
+    await app.fetch(new Request('https://theoven.app/send', { method: 'POST' }))
+
+    expect(driver.sent).toHaveLength(1)
+    expect((await app.service('queue').stats()).ready).toBe(0)
+  })
+
+  // The optional dependency is the whole mechanism: no queue brick, no queueing, no error.
+  test('with no queue brick registered, mail sends inline as before', async () => {
+    const driver = memoryMail()
+    const app = createApp({ logger: silentLogger, development: true }).use(mail(driver))
+    opened.push(app)
+    app.post('/send', (ctx) => ctx.mail.send({ to: 'a@b.com', subject: 'Hi', text: 'x' }))
+    await app.ready()
+
+    await app.fetch(new Request('https://theoven.app/send', { method: 'POST' }))
+    expect(driver.sent).toHaveLength(1)
+  })
+
+  /**
+   * A Blob does not survive being stored, and a `Bun.file()` handle is a path the worker may
+   * not be able to read. The message the worker receives has to be the message the caller built.
+   */
+  test('attachments are resolved to bytes before queueing', async () => {
+    const driver = memoryMail()
+    const app = createApp({ logger: silentLogger, development: true })
+      .use(queue(memoryQueue(), { jobs: [], logger: silentLogger, worker: false }))
+      .use(mail(driver))
+    opened.push(app)
+    app.post('/send', (ctx) =>
+      ctx.mail.send({
+        to: 'a@b.com',
+        subject: 'Invoice',
+        text: 'Attached.',
+        attachments: [
+          { filename: 'x.pdf', content: new Blob(['PDF'], { type: 'application/pdf' }) },
+        ],
+      }),
+    )
+    await app.ready()
+
+    await app.fetch(new Request('https://theoven.app/send', { method: 'POST' }))
+
+    const worker = createWorker(
+      app.service('queue').raw as never,
+      app.service('queue').jobs as never,
+      { logger: silentLogger },
+    )
+    await worker.drain()
+
+    const attachment = driver.sent[0]?.attachments?.[0]
+    expect(attachment?.filename).toBe('x.pdf')
+    expect(attachment?.type).toContain('application/pdf')
+    // Bytes, not a Blob that would have been lost.
+    expect(Buffer.from(attachment?.content as Uint8Array).toString()).toBe('PDF')
   })
 })

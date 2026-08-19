@@ -29,14 +29,14 @@ its page says so rather than omitting the section.
 | [`auth-clerk`](/docs/bricks/auth-clerk/) | `ctx.user` from Clerk, hosted sign-in | **none** |
 | [`auth-better`](/docs/bricks/auth-better/) | `ctx.user` from better-auth | **all of its own** |
 | [`storage`](/docs/bricks/storage/) | `ctx.storage` — S3, R2, MinIO, or a local directory | none |
-| [`mail`](/docs/bricks/mail/) | `ctx.mail` | none |
+| [`mail`](/docs/bricks/mail/) | `ctx.mail` | `/_oven/mail` in development |
+| [`queue`](/docs/bricks/queue/) | `ctx.queue` — jobs, retries, cron | `/_oven/queue` in development |
 
 ## Planned
 
 | Brick | Adds |
 | --- | --- |
 | `@theoven/db-prisma` | `ctx.db` — a `PrismaClient` |
-| `@theoven/queue` | `ctx.queue` — jobs and cron |
 
 <Aside type="note" title="Bricks are not middleware">
   CORS, rate limiting, compression and security headers ship **in core** as

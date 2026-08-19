@@ -79,3 +79,23 @@ Registers a teardown hook. Bricks use this to close database pools and drain wor
 ## `app.routes()`
 
 Every registered route in registration order. Backs `oven routes` and the boot banner.
+
+## `app.service(name)`
+
+A brick's contributed service, outside a request.
+
+```ts
+await app.ready()
+
+const db = app.service('db')       // the Drizzle client, typed
+const queue = app.service('queue')
+```
+
+`ctx.db` and `ctx.queue` exist on the context because that is where an application wants them. A
+migration script, a seed, and `oven worker` all want the same configured value with no request in
+sight — and re-constructing the brick would give them a *second* connection pool and a second set
+of job definitions.
+
+Typed from what `.use()` contributed, so `app.service('storage')` on an app without the storage
+brick is a compile error. Call it after `await app.ready()`; bricks are set up at boot, and asking
+earlier throws saying so.

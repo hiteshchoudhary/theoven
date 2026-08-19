@@ -1,0 +1,228 @@
+---
+title: queue
+description: Background jobs with retries, backoff, a dead letter and cron — in memory, in Redis, or in the Postgres you already run.
+sidebar:
+  order: 12
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/queue` |
+| **Adds to context** | `ctx.queue` |
+| **Endpoints** | `/_oven/queue` — the dashboard, development only |
+| **Creates files** | none |
+| **Creates tables** | `oven_jobs`, on the Postgres driver only |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/queue
+```
+
+```ts title="src/jobs.ts"
+import { defineJob } from '@theoven/queue'
+
+export const resizeAvatar = defineJob<{ userId: string; url: string }>({
+  name: 'resize-avatar',
+  retries: 5,
+  handler: async ({ payload, signal, log }) => {
+    const source = await fetch(payload.url, { signal })
+    log.info('resized', { userId: payload.userId })
+  },
+})
+```
+
+```ts title="src/app.ts"
+import { memoryQueue, queue } from '@theoven/queue'
+import { resizeAvatar } from './jobs'
+
+export const app = createApp().use(queue(memoryQueue(), { jobs: [resizeAvatar] }))
+```
+
+```ts title="src/routes/avatar.post.ts"
+export default defineRoute({ auth: true }, async (ctx) => {
+  await ctx.queue.dispatch(resizeAvatar, { userId: ctx.user.id, url })
+  return { queued: true }
+})
+```
+
+Miss a field in that payload and it is a **compile error**. The type is declared once on the
+definition and enforced at both ends — `dispatch` will not take the wrong shape, and the handler
+receives the right one without a cast.
+
+## Running jobs
+
+In development the worker runs **in your app process**, so `bun run dev` and a dispatch is all it
+takes to watch a job run. In production it does not, because that is where workers should scale
+separately from web servers:
+
+```bash
+oven worker                    # long-running, ctrl-c drains
+oven worker --concurrency 20
+oven worker --once             # drain what is queued and exit — for a cron container
+```
+
+`oven worker` imports your **app module**, so it gets the same database, the same mail driver and
+the same job definitions. A worker configured separately from its app is a worker that drifts
+from it — and the symptom is jobs dead-lettering as "no handler registered" after a deploy.
+
+Override the default with `worker: true` or `worker: false`.
+
+## Drivers
+
+| Driver | Stores jobs in | Use for |
+| --- | --- | --- |
+| `memoryQueue()` | this process | development and tests, the default |
+| `redisQueue({ url })` | Redis | production, high throughput |
+| `sqlQueue({ url })` | Postgres | production, when you already run Postgres |
+
+<Aside type="caution" title="The memory driver is refused in production">
+  Jobs live in one process, so a deploy silently drops every queued email while the service looks
+  perfectly healthy. Booting with `NODE_ENV=production` and the memory driver throws. Pass
+  `allowMemoryInProduction` if losing queued work on restart is genuinely acceptable.
+</Aside>
+
+`sqlQueue` is worth taking seriously: most applications already run Postgres, and one fewer
+service to operate usually beats the throughput a dedicated broker adds. It reserves with
+`FOR UPDATE SKIP LOCKED`, so several workers take different rows rather than queueing behind each
+other. Reach for Redis when you are enqueueing tens of thousands of jobs a second.
+
+## Retries, backoff and the dead letter
+
+```ts
+defineJob({ name: 'send-invoice', retries: 5, backoff: 2000, timeout: 60_000, handler })
+```
+
+| | Default | |
+| --- | --- | --- |
+| `retries` | `3` | attempts after the first |
+| `backoff` | `1000` | ms before the first retry, doubling each time |
+| `timeout` | `30000` | ms one attempt may take |
+
+Backoff is exponential so a dependency that is down is not hammered while it recovers. A job that
+exhausts its retries is **dead-lettered** — kept, with the error that killed it, until someone
+looks:
+
+```ts
+const failures = await ctx.queue.dead()
+await ctx.queue.revive(failures[0].id)   // back on the queue, attempts reset
+```
+
+Reviving resets the attempt count: someone looked at it and decided it should run, so it gets a
+full budget rather than dying on its one remaining try.
+
+### Timeouts need a signal
+
+```ts
+handler: async ({ payload, signal }) => {
+  await fetch(payload.url, { signal })
+}
+```
+
+A timeout stops the **worker waiting**. It does not stop the work — for that, the handler has to
+pass `signal` through. The same signal aborts when the worker is shutting down.
+
+<Aside type="note" title="visibility must exceed the longest timeout">
+  A reserved job is invisible to other workers for `visibility` ms; if that lapses while the job
+  is still running, another worker picks it up and it runs **twice**. The default is twice the
+  timeout, so raising one is enough. A hand-set pair that is unsafe — including a single job
+  declaring a long `timeout` — fails at boot, naming the job.
+</Aside>
+
+## Scheduling
+
+```ts
+await ctx.queue.dispatch(sendDigest, payload, { delay: 60_000 })
+await ctx.queue.dispatch(sendDigest, payload, { runAt: tomorrowAt9 })
+```
+
+### Deduplication
+
+```ts
+await ctx.queue.dispatch(rebuildIndex, {}, { key: 'rebuild-index' })
+```
+
+A second job with the same key, while the first is still pending, is dropped — so fifty writes
+that each want the search index rebuilt rebuild it once. `dispatch` returns `null` when that
+happens, so you can tell "queued" from "already queued".
+
+### Cron
+
+```ts
+queue(redisQueue(), {
+  jobs: [cleanUp, sendDigests],
+  cron: {
+    nightly: { schedule: '0 3 * * *', job: cleanUp },
+    hourly: { schedule: '@hourly', job: sendDigests, payload: { batch: 100 } },
+  },
+})
+```
+
+Standard five-field expressions plus `@daily`, `@hourly` and friends. Lists (`1,15`), ranges
+(`9-17`), steps (`*/15`) and names (`mon-fri`, `jan`) all work. A bad expression, or one naming a
+job you did not register, **fails at boot** rather than silently never running.
+
+Each firing is deduplicated on the minute, so several instances all ticking enqueue the job once.
+
+## The dashboard
+
+```
+http://localhost:3000/_oven/queue
+```
+
+Counts by state, the dead letter with the error that killed each job, upcoming cron runs and
+every registered job name. Development only by default; `dashboard: '/somewhere'` moves it,
+`false` turns it off.
+
+## Configuration
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `jobs` | `[]` | every job this app can run |
+| `cron` | — | scheduled jobs |
+| `worker` | dev only | run jobs in this process |
+| `concurrency` | `5` | jobs at once |
+| `pollInterval` | `500` | ms between polls when idle |
+| `visibility` | 2× timeout | ms a reserved job is invisible to other workers |
+| `retries`, `backoff`, `timeout` | `3`, `1000`, `30000` | defaults for jobs that do not say |
+| `dashboard` | dev only | mount the dashboard; a string moves it |
+| `allowMemoryInProduction` | `false` | permit the memory driver outside development |
+
+## Shutdown
+
+`app.close()` stops taking new jobs, waits for the ones in flight, and only then releases the
+driver. A handler gets its `signal` aborted after the grace period so it can stop early rather
+than being abandoned mid-write.
+
+## Mail goes through it automatically
+
+Register both bricks and [`ctx.mail.send()`](/docs/bricks/mail/) enqueues instead of sending
+inline — so a slow provider delays an email rather than failing the request that triggered it,
+and a transient failure is retried rather than lost. Set `queue: false` on the mail brick to keep
+sends inline.
+
+## Limitations
+
+- **No priorities.** Jobs run in `runAt` order. A separate queue instance per priority is the
+  workaround.
+- **No job chaining or batches.** A job that needs to run after another dispatches it itself.
+- **No result storage.** A handler's return value is discarded; write what you need somewhere.
+- **The dashboard is read-only** — no retry or delete buttons, and it is per process.
+- **Cron resolution is one minute**, and schedules are evaluated in the server's local timezone.
+- **The memory driver is per process**, so a dispatch in a web server is invisible to a separate
+  `oven worker`. That is what the Redis and Postgres drivers are for.
+
+## How it is verified
+
+All three drivers run the **same conformance suite**, exported from `@theoven/queue/testing` —
+because a queue whose semantics change with its backend is a queue you can only trust in the
+environment you tested it in. It covers the behaviours the worker depends on: that concurrent
+reserves never hand out the same job, that an expired visibility window reclaims work from a
+worker that died, that dedupe holds while a job is pending, and that a dead job keeps the error
+that killed it.
+
+Redis and Postgres are gated on `REDIS_URL` / `POSTGRES_URL` and run in CI. CI fails if either
+suite skips.

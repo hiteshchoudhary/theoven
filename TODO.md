@@ -1,24 +1,23 @@
 # Oven — Task Tracker
 
-**Current state:** **Phases 0, 1, 2 and 4 complete**, except two items that are yours (buy the
-domain, rotate the npm token) and one genuinely blocked on Phase 3 (direct file handoff to
-`@theoven/storage`).
+**Current state:** **Phases 0–4 complete**, except two items that are yours: buy the domain and
+rotate the npm token.
 
 Shipped: router, server, context, errors, logger, response coercion, graceful shutdown, the
 always-on batteries, middleware, bricks, validation, file-based routing, OpenAPI, the CLI, and
-eleven packages — `db`, `db-drizzle`, `db-mongoose`, `auth`, `auth-basic`, `auth-mongo`,
-`auth-clerk`, `auth-better`, `mail`, plus core and cli.
+thirteen packages — `db`, `db-drizzle`, `db-mongoose`, `auth`, `auth-basic`, `auth-mongo`,
+`auth-clerk`, `auth-better`, `mail`, `storage`, `queue`, plus core and cli.
 
-**1142 tests green**, typecheck and lint clean. Postgres and MongoDB suites are gated on
-`POSTGRES_URL` / `MONGO_URL` and run in CI against service containers; CI fails if either
-*skips*, so a typo in an env name cannot turn a green run into a false one.
+**1293 tests green**, typecheck and lint clean. Postgres, MongoDB, Redis and MinIO suites are
+gated on env vars and run in CI against service containers; CI fails if any of them *skips*, so
+a typo in an env name cannot turn a green run into a false one.
 
 Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
 Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
 landing page live at theoven.pages.dev; GitHub repo live; `@theoven` npm org claimed.
 
-**Next task:** Phase 3 — `@theoven/storage` (which also unblocks the last Phase 1 item),
-`@theoven/queue`, and the rest of mail (§3.2).
+**Next task:** Phase 5 — release. `create-oven` so `bun create oven` works, the two `examples/`
+apps, docs samples compiled in CI, and moving the Cloudflare deploy into GitHub Actions.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -548,21 +547,42 @@ recorded in `CLAUDE.md`.
 - [x] Attachments (Blob, bytes or string — never base64 from the caller; encoded at send time so
       a `Bun.file()` attachment is not read until it goes out), inline `cid:` images, cc/bcc,
       reply-to, and arbitrary headers
-- [ ] Auto-queues when `@theoven/queue` is present — waiting on §3.3
+- [x] Auto-queues when `@theoven/queue` is present. Implemented with a new **optional**
+      `dependsOn` form (`'queue?'`) in core, so the decision is made once at boot and is visible
+      in the logs, rather than varying by whichever request ran first. Attachments are resolved
+      to bytes before queueing — a Blob does not survive being stored, and a `Bun.file()` handle
+      is a path the worker may not be able to read.
 - [x] Tests, including a **real SMTP server in the test process** so the driver's actual
       conversation is exercised: EHLO parsing, envelope addresses, dot-stuffing, and the refusal
       to send a password over an unencrypted connection
 
 ### 3.3 `@theoven/queue`
-- [ ] Drivers: Redis, Postgres, in-memory (dev/test)
-- [ ] `defineJob()` with typed payload; `queue.dispatch(name, payload)`
-- [ ] `oven worker` with concurrency control
-- [ ] Retries with backoff, DLQ, job timeouts
-- [ ] Delayed / scheduled jobs
-- [ ] Cron tasks in config
-- [ ] Dev dashboard at `/_oven/queue`
-- [ ] Graceful shutdown drains in-flight jobs
-- [ ] Tests
+- [x] Drivers: Redis (sorted sets + a Lua reserve script), Postgres (`FOR UPDATE SKIP LOCKED`),
+      in-memory (dev/test, and refused in production)
+- [x] `defineJob<Payload>()`; `queue.dispatch(job, payload)` — the definition is passed rather
+      than a name, so the payload type is enforced at both ends and a typo is a compile error
+- [x] `oven worker --concurrency N --once`. Imports the **app module**, so the worker has the
+      same bricks and the same job definitions — a worker configured separately drifts, and the
+      symptom is jobs dead-lettering as "no handler registered" after a deploy.
+
+      Needed a new core API: `app.service(name)`, a typed accessor for a brick's contributed
+      service outside a request. The gap had already come up once while testing the Postgres
+      adapter, and it is what a migration script or a seed needs too.
+- [x] Retries with exponential backoff, dead letter with the error that killed the job and a
+      `revive()` that resets attempts, and per-job timeouts that abort an `AbortSignal` the
+      handler can pass to `fetch`
+- [x] Delayed and scheduled jobs (`delay`, `runAt`), plus dedupe keys so fifty writes that each
+      want the index rebuilt rebuild it once
+- [x] Cron tasks in config — a cron parser written here rather than depended on (~150 lines),
+      with the day-of-month/day-of-week OR rule everybody gets wrong. A bad expression, or one
+      naming an unregistered job, fails at boot.
+- [x] Dev dashboard at `/_oven/queue` — counts, dead letter with causes, upcoming cron runs.
+      Everything escaped: a dead job's error message is whatever the failure produced, and some
+      of that started as user input.
+- [x] Graceful shutdown drains in-flight jobs, then aborts their signal after a grace period
+- [x] Tests — all three drivers run the **same** conformance suite from `@theoven/queue/testing`,
+      because a queue whose semantics change with its backend is one you can only trust in the
+      environment you tested it in. Redis and Postgres are gated on env vars and run in CI.
 
 ---
 

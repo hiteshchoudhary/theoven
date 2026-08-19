@@ -6,6 +6,7 @@ import { dbCommand } from './commands/db'
 import { doctor } from './commands/doctor'
 import { openapiCommand, routes } from './commands/inspect'
 import { dev, start } from './commands/run'
+import { worker } from './commands/worker'
 import { BANNER, fail, info, style } from './ui'
 
 const VERSION = '0.0.0'
@@ -23,6 +24,7 @@ ${style.bold('Commands')}
   ${style.cyan('db')} <command>    generate | migrate | push | studio
   ${style.cyan('routes')}           print the route table
   ${style.cyan('openapi')}          emit the OpenAPI document
+  ${style.cyan('worker')}           run background jobs
   ${style.cyan('doctor')}           check the project for common problems
 
 ${style.bold('Options')}
@@ -33,6 +35,8 @@ ${style.bold('Options')}
   --outdir <path>    build output        ${style.dim('(build, default: dist)')}
   --no-minify        skip minification   ${style.dim('(build)')}
   --out <path>       write to a file     ${style.dim('(openapi)')}
+  --concurrency <n>  jobs at once        ${style.dim('(worker)')}
+  --once             drain and exit      ${style.dim('(worker)')}
   --template <name>  minimal | api       ${style.dim('(create)')}
   --db <name>        sqlite | postgres | none  ${style.dim('(create)')}
   --auth <name>      basic | none        ${style.dim('(create)')}
@@ -44,9 +48,7 @@ ${style.dim('Docs: https://theoven.app/docs')}
 `
 
 /** Commands that need a module the modules themselves have not shipped yet. */
-const PLANNED: Record<string, string> = {
-  worker: '@theoven/queue',
-}
+const PLANNED: Record<string, string> = {}
 
 export async function run(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv)
@@ -88,6 +90,8 @@ export async function run(argv: readonly string[]): Promise<number> {
       return routes(args)
     case 'openapi':
       return openapiCommand(args)
+    case 'worker':
+      return worker(args)
     case 'doctor':
       return doctor(args)
     default:

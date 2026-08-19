@@ -29,6 +29,18 @@ export interface MailOptions {
   preview?: boolean | string
   /** How many messages the preview inbox keeps. Default 50. */
   previewLimit?: number
+  /**
+   * Send through the queue brick instead of inline, when one is registered.
+   *
+   * On by default. A provider being slow or briefly down then delays an email rather than
+   * failing the request that triggered it — and a transient failure is retried instead of lost,
+   * which is what you want for a password reset.
+   *
+   * Set `false` to keep sends inline. Nothing changes in a route: `ctx.mail.send()` still
+   * returns when the message is *accepted*, and with queueing on that means accepted for
+   * delivery rather than delivered.
+   */
+  queue?: boolean
 }
 
 /** What `ctx.mail` exposes. */
@@ -48,6 +60,47 @@ export interface MailService {
 }
 
 const PREVIEW_PATH = '/_oven/mail'
+
+/** The job the queue runs. Named stably, because a queued message stores the name. */
+const SEND_JOB = {
+  name: 'oven:mail:send',
+  retries: 3,
+  backoff: 5000,
+  timeout: 30_000,
+  handler: () => {},
+} as const
+
+interface QueueLike {
+  jobs: Map<string, unknown>
+  dispatch(job: { name: string }, payload: unknown): Promise<{ id?: string } | null>
+}
+
+/**
+ * Reads every attachment into bytes.
+ *
+ * A queued message is stored, and a `Blob` does not survive that — nor does a `Bun.file()`
+ * handle, which is a path the worker may not be able to read. Resolving here means the message
+ * the worker receives is the message the caller built.
+ */
+async function settle(message: Message): Promise<Message> {
+  if (!message.attachments || message.attachments.length === 0) return message
+
+  return {
+    ...message,
+    attachments: await Promise.all(
+      message.attachments.map(async (attachment) => ({
+        ...attachment,
+        content:
+          attachment.content instanceof Blob
+            ? new Uint8Array(await attachment.content.arrayBuffer())
+            : attachment.content,
+        type:
+          attachment.type ??
+          (attachment.content instanceof Blob ? attachment.content.type : undefined),
+      })),
+    ),
+  }
+}
 
 /**
  * The mail brick.
@@ -70,6 +123,14 @@ export function mail(
 ): Brick<'mail', MailService> {
   return {
     name: 'mail',
+
+    /**
+     * Optional: the queue brick is used when present and not required when absent.
+     *
+     * Core resolves a declared dependency before this brick's setup runs, which is what lets
+     * the decision be made once at boot rather than per send.
+     */
+    dependsOn: options.queue === false ? [] : ['queue?'],
 
     setup: (context) => {
       if (!context.development && driver.name === 'console' && !options.allowConsoleInProduction) {
@@ -107,8 +168,38 @@ export function mail(
         })
       }
 
+      /**
+       * Registered when the queue brick is present, so mail goes through it.
+       *
+       * Declared as a dependency rather than looked up lazily per send: whether mail is queued
+       * should be decided once, at boot, and be visible in the logs — not vary by whichever
+       * request happened to run first.
+       */
+      const queueService =
+        options.queue === false ? undefined : (context.resolved.queue as QueueLike | undefined)
+
+      if (queueService) {
+        queueService.jobs.set(SEND_JOB.name, {
+          ...SEND_JOB,
+          handler: async ({ payload }: { payload: Message }) => {
+            const result = await send(driver, payload, context.app.logger)
+            inbox?.record(payload, result.driver)
+          },
+        } as never)
+        context.app.logger.info('mail: sending through the queue', { driver: driver.name })
+      }
+
       async function dispatch(message: Message): Promise<SentMessage> {
         const prepared = prepare(message, options.from)
+
+        if (queueService) {
+          // Attachments are resolved before queueing: a `Bun.file()` handle in a stored payload
+          // would be a path the worker might not be able to read, and a Blob does not survive
+          // JSON at all.
+          const queued = await queueService.dispatch(SEND_JOB, await settle(prepared))
+          return { driver: driver.name, ...(queued?.id ? { id: queued.id } : {}) }
+        }
+
         const result = await send(driver, prepared, context.app.logger)
         inbox?.record(prepared, result.driver)
         return result

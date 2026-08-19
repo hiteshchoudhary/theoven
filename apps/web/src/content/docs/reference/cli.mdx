@@ -11,6 +11,7 @@ oven dev               # run with a watcher
 oven build             # bundle and write a route manifest
 oven start             # run the build
 oven db migrate        # run schema and migration commands
+oven worker            # run background jobs
 oven routes            # print the route table
 oven openapi           # emit the OpenAPI document
 oven doctor            # check the project for common problems
@@ -151,6 +152,22 @@ oven db generate -- --name add_orders_table
   want against a development database and not what you want in a deploy — `oven db push` warns
   when `NODE_ENV=production`.
 </Aside>
+
+## `oven worker`
+
+```bash
+oven worker                    # long-running; ctrl-c drains in-flight jobs
+oven worker --concurrency 20
+oven worker --once             # drain what is queued and exit
+```
+
+Imports your **app module**, so the worker gets the same database, the same mail driver and the
+same job definitions the app has. A worker configured separately from its app is a worker that
+drifts from it — and the symptom is jobs dead-lettering as "no handler registered" after a
+deploy.
+
+`--once` is for a cron container or a CI step: it drains what is queued and exits rather than
+idling. See [`queue`](/docs/bricks/queue/).
 
 ## `oven doctor`
 

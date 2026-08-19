@@ -443,6 +443,34 @@ export class App<Ext = unknown> implements BrickHost {
     return this.router.routes()
   }
 
+  /**
+   * A brick's contributed service, outside a request.
+   *
+   * `ctx.db` and `ctx.queue` exist on the context because that is where an application wants
+   * them. A migration script, a seed, and `oven worker` all want the same configured value with
+   * no request in sight — and reaching it by re-constructing the brick would give them a
+   * *second* connection pool and a second set of job definitions.
+   *
+   * ```ts
+   * await app.ready()
+   * const db = app.service('db')
+   * ```
+   *
+   * Typed from what `.use()` contributed, so `app.service('storage')` on an app without the
+   * storage brick is a compile error rather than `undefined` at runtime.
+   */
+  service<Name extends keyof Ext & string>(name: Name): Ext[Name]
+  service(name: string): unknown {
+    if (!(name in this.resolved)) {
+      const registered = Object.keys(this.resolved)
+      throw new Error(
+        `No brick named "${name}" is registered${registered.length > 0 ? `. Registered: ${registered.join(', ')}` : ''}.` +
+          (this.readyPromise ? '' : ' Call await app.ready() first — bricks are set up at boot.'),
+      )
+    }
+    return this.resolved[name]
+  }
+
   /** Every registered route with its schemas. Read lazily; see `BrickHost`. */
   routeTable(): ReadonlyArray<{
     method: HttpMethod

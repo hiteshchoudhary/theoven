@@ -165,6 +165,7 @@
       "version": "0.0.0",
       "devDependencies": {
         "@theoven/core": "workspace:*",
+        "@theoven/queue": "workspace:*",
       },
       "peerDependencies": {
         "@theoven/core": "workspace:*",
@@ -173,6 +174,9 @@
     "packages/queue": {
       "name": "@theoven/queue",
       "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/core": "workspace:*",
+      },
       "peerDependencies": {
         "@theoven/core": "workspace:*",
       },

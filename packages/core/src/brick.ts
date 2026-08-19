@@ -64,6 +64,11 @@ export interface Brick<
    *
    * Declaring the dependency rather than relying on registration order means the auth brick
    * can find the database brick however the user chose to write their config.
+   *
+   * A trailing `?` makes it **optional**: `dependsOn: ['queue?']` means "if a queue brick is
+   * registered, set it up before me" and is not an error when none is. That is what lets the
+   * mail brick send through the queue when there is one without requiring one — decided once,
+   * at boot, rather than looked up per send.
    */
   dependsOn?: readonly string[]
 
@@ -178,9 +183,14 @@ export function orderBricks(bricks: readonly Brick[]): Brick[] {
 
     state.set(brick.name, 'visiting')
 
-    for (const dependency of brick.dependsOn ?? []) {
+    for (const declared of brick.dependsOn ?? []) {
+      const optional = declared.endsWith('?')
+      const dependency = optional ? declared.slice(0, -1) : declared
       const target = byName.get(dependency)
+
       if (!target) {
+        // An optional dependency that is absent is the normal case, not a failure.
+        if (optional) continue
         throw new Error(
           `Brick "${brick.name}" depends on "${dependency}", which is not registered. ` +
             `Add it with .use() before starting the app.`,
