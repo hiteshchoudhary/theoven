@@ -60,17 +60,40 @@ export class OvenError extends Error {
   }
 }
 
-function defineError(status: number, name: string, title: string) {
+function defineError(
+  status: number,
+  name: string,
+  title: string,
+  defaultHeaders?: Record<string, string>,
+) {
   return class extends OvenError {
     override name = name
     constructor(message?: string, options?: ConstructorParameters<typeof OvenError>[3]) {
-      super(status, title, message, options)
+      super(
+        status,
+        title,
+        message,
+        defaultHeaders
+          ? { ...options, headers: { ...defaultHeaders, ...options?.headers } }
+          : options,
+      )
     }
   }
 }
 
 export const BadRequest = defineError(400, 'BadRequest', 'Bad Request')
-export const Unauthorized = defineError(401, 'Unauthorized', 'Unauthorized')
+/**
+ * RFC 9110 is explicit: a 401 **MUST** carry a `WWW-Authenticate` challenge. Without one the
+ * client is told it was refused but not how to authenticate, and some HTTP clients treat the
+ * response as malformed rather than retrying.
+ *
+ * `Bearer` is the default because it is what the framework's own token capture expects, and
+ * unlike `Basic` it does not make a browser throw up a login dialog. An auth provider that uses
+ * something else passes its own `headers` and that wins.
+ */
+export const Unauthorized = defineError(401, 'Unauthorized', 'Unauthorized', {
+  'www-authenticate': 'Bearer',
+})
 export const Forbidden = defineError(403, 'Forbidden', 'Forbidden')
 export const NotFound = defineError(404, 'NotFound', 'Not Found')
 export const MethodNotAllowed = defineError(405, 'MethodNotAllowed', 'Method Not Allowed')

@@ -3,7 +3,7 @@ title: Coming from Express
 description: A translation guide — deliberately not a compatibility layer.
 ---
 
-import { Aside } from '@astrojs/starlight/components'
+import { Aside, Steps } from '@astrojs/starlight/components'
 
 <Aside type="caution" title="This is a translation, not a shim">
   Oven has no Express compatibility layer and will not get one. Every framework that shipped an
@@ -39,6 +39,92 @@ returning an object means.
 | `morgan` | `ctx.log`, request-scoped and structured |
 | hand-rolled bearer-token parsing | `ctx.token` |
 | hand-rolled graceful shutdown | built into `close()` |
+
+## Middleware
+
+The signature is the biggest change, and the one to learn first.
+
+```js title="Express"
+app.use((req, res, next) => {
+  const started = Date.now()
+  res.on('finish', () => console.log(Date.now() - started))
+  next()
+})
+```
+
+```ts title="Oven"
+app.use(async (ctx, next) => {
+  const started = performance.now()
+  const result = await next()
+  ctx.log.info('handled', { ms: performance.now() - started })
+  return result
+})
+```
+
+Express middleware is a **list** you call `next()` to advance. Oven middleware is an **onion**:
+`next()` returns, so the code after it runs on the way back out. That is why timing, logging and
+header-stamping need no `res.on('finish')` — there is an "after" to write code in.
+
+What `next()` gives you is the **result**, not necessarily a `Response`: a handler returning an
+object hands you that object, and coercion happens once at the end. Framework refusals — `404`,
+`405` — do arrive as a `Response`, which is what lets your headers land on them too. Pass it
+through unchanged unless you mean to replace it, and use `ctx.set()` for headers rather than
+rebuilding the response.
+
+Scoping works the same way:
+
+```ts
+app.use('/admin', requireAdmin())   // this prefix and below
+```
+
+Middleware runs for requests that match **no** route, which Express users often expect and do not
+get — so CORS preflights and 404s still pass through your logging and security headers.
+
+## Routers
+
+```js title="Express"
+const users = express.Router()
+users.get('/', list)
+users.get('/:id', show)
+app.use('/users', users)
+```
+
+```ts title="Oven"
+// src/routes/users/index.get.ts   → GET /users
+// src/routes/users/[id].get.ts    → GET /users/:id
+```
+
+The filesystem is the route table. A `_middleware.ts` in a directory applies to that directory and
+everything under it, which is what `router.use()` was for. See
+[file-based routing](/docs/reference/file-routing/).
+
+Programmatic registration still exists — `app.get(...)` — if you would rather keep a router file.
+
+## Validation
+
+```js title="Express"
+const { body, validationResult } = require('express-validator')
+
+app.post('/users',
+  body('email').isEmail(),
+  body('age').isInt({ min: 0 }),
+  (req, res) => {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() })
+    // req.body is still `any`
+  },
+)
+```
+
+```ts title="Oven"
+export default route(
+  { body: z.object({ email: z.email(), age: z.number().int().min(0) }) },
+  (ctx) => ctx.body.email,   // typed, already validated
+)
+```
+
+One declaration replaces the chain, types the handler, **and** becomes the endpoint's OpenAPI
+description. See [Validation](/docs/reference/validation/).
 
 ## Errors
 
@@ -87,6 +173,25 @@ res.sendFile('/path/to/report.pdf')
 return Bun.file('/path/to/report.pdf')   // streamed, content type detected
 ```
 
+## CORS, helmet, rate limiting
+
+```js title="Express"
+app.use(cors({ origin: 'https://app.example.com' }))
+app.use(helmet())
+app.use(rateLimit({ windowMs: 60_000, max: 100 }))
+```
+
+```ts title="Oven"
+import { cors, rateLimit, securityHeaders } from '@theoven/core'
+
+app.use(cors({ origin: 'https://app.example.com' }))
+app.use(securityHeaders())
+app.use(rateLimit({ limit: 100, window: 60_000 }))
+```
+
+Nothing to install — these ship in core. They stay explicit rather than always-on because their
+*policy* genuinely varies by app, unlike body parsing.
+
 ## Things that genuinely do not translate
 
 - **Connect middleware.** The `(req, res, next)` signature does not exist. Anything from the
@@ -94,6 +199,34 @@ return Bun.file('/path/to/report.pdf')   // streamed, content type detected
 - **`res.write()` streaming.** Return a `ReadableStream` instead.
 - **CommonJS.** Oven is ESM only.
 - **Running on Node.** Oven is Bun-only. This is a deliberate, permanent choice.
+- **`express.static()`.** There is no static-file middleware. Return `Bun.file(path)` from a
+  route, or — better for anything public — put a CDN or your platform's static hosting in front.
+- **View engines.** No `res.render`, no Pug or EJS integration. Return HTML from a template
+  literal, or a `Response` you built yourself.
+- **`req.session`.** No session middleware. The [`auth`](/docs/bricks/auth/) brick issues tokens
+  rather than server-side sessions; `ctx.cookies` is there if you want to build your own.
+
+## Porting an app, in order
+
+<Steps>
+
+1. **Start a new project** with `bun create theoven my-app` rather than converting in place. The
+   directory layout is the router, so a half-converted tree is harder to reason about than two
+   whole ones.
+
+2. **Move routes first**, one file per endpoint. Handlers usually port by deleting things: the
+   `try/catch`, the `next(err)`, the `res.json`.
+
+3. **Delete middleware rather than porting it.** Check the table above first — most of what an
+   Express app registers is already on.
+
+4. **Add schemas as you go.** Each one you write buys typing and a documented endpoint, so this
+   is the step that pays for itself fastest.
+
+5. **Swap the infrastructure last** — database, auth, uploads, jobs. Each is one `bun add` and one
+   `.use()`; see the [brick catalogue](/docs/bricks/).
+
+</Steps>
 
 ## What you gain
 

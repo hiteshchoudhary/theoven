@@ -1,0 +1,175 @@
+---
+title: Errors
+description: Throw an error, get a correct HTTP response — as RFC 9457 problem+json, synchronously or not.
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```ts
+import { NotFound } from '@theoven/core'
+
+export default route({ params: z.object({ id: z.uuid() }) }, async (ctx) => {
+  const [note] = await ctx.db.select().from(notes).where(eq(notes.id, ctx.params.id))
+  if (!note) throw new NotFound(`No note with id ${ctx.params.id}.`)
+  return note
+})
+```
+
+There is no `next(err)`. Throw, and the error handler turns it into the right response —
+whether it happened synchronously or three `await`s deep. Express needs a shim for that half;
+here it is the only behaviour.
+
+## The classes
+
+| | Status | |
+| --- | ---: | --- |
+| `BadRequest` | 400 | malformed input the schema did not cover |
+| `Unauthorized` | 401 | no credential, or one that did not verify |
+| `Forbidden` | 403 | a credential that is not allowed to do this |
+| `NotFound` | 404 | |
+| `MethodNotAllowed` | 405 | raised for you when a path exists under other methods |
+| `Conflict` | 409 | duplicate key, version mismatch |
+| `PayloadTooLarge` | 413 | raised for you when a body exceeds its limit |
+| `UnsupportedMediaType` | 415 | raised for you when a file's MIME is not allowed |
+| `UnprocessableContent` | 422 | raised for you when validation fails |
+| `TooManyRequests` | 429 | |
+| `InternalServerError` | 500 | |
+| `ServiceUnavailable` | 503 | raised for you when shutting down |
+
+All extend `OvenError`. Anything else you throw becomes a `500`.
+
+## The response
+
+Every error becomes [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`
+— a standard shape, so clients can handle failures generically instead of parsing your prose.
+
+```json
+{
+  "type": "about:blank",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "No note with id 8f14e45f.",
+  "requestId": "3b9f8c5d-5c9e-497f-8be1-d0d54bd52035"
+}
+```
+
+`requestId` appears once anything has read `ctx.id` — which the request logger does, so it is on
+every error response in a normally configured app. It is lazy rather than unconditional because an
+app that never logs should not pay for a UUID per request. A user's screenshot is then enough to
+find the log line.
+
+### Extra members
+
+```ts
+throw new Conflict('That email is taken.', {
+  detail: { field: 'email', existingId },
+})
+```
+
+`detail` is merged into the document, so per-field information travels with the error rather than
+being flattened into a sentence.
+
+### Headers
+
+```ts
+throw new TooManyRequests('Slow down.', { headers: { 'retry-after': '60' } })
+```
+
+Some statuses are only useful with a header: `429` without `Retry-After` leaves the client
+guessing how long to wait.
+
+`Unauthorized` carries `WWW-Authenticate: Bearer` by default, because RFC 9110 says a `401`
+**must** include a challenge — a client told it was refused, but not how to authenticate, cannot
+do anything useful. Pass your own `headers` to use a different scheme and yours wins.
+
+## Validation failures
+
+A failed schema is a `422` naming every field at once, rather than the first one:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Unprocessable Content",
+  "status": 422,
+  "detail": "Request validation failed.",
+  "errors": [
+    { "location": "body", "path": "email", "message": "Invalid email address" },
+    { "location": "query", "path": "page", "message": "Expected number" }
+  ],
+  "requestId": "…"
+}
+```
+
+`location` is `params`, `query`, `body` or `headers`. Assert on `path` in tests, not on
+`message` — messages get reworded, and a test that breaks when prose changes gets deleted.
+
+## What reaches the client
+
+<Aside type="caution" title="`development` decides this">
+  In development, a `500` carries the original message and stack, because you are the one reading
+  it. In production it does not: the response is a generic `Internal Server Error` with a request
+  id, while the real error — message, stack, cause — goes to your log.
+
+  This follows `NODE_ENV`, so a production deploy is safe without you remembering. An error
+  message is a fine place for a connection string to leak.
+</Aside>
+
+Errors you raised deliberately (`4xx`) always keep their message. It is only the ones you did not
+expect that get redacted.
+
+## Your own errors
+
+```ts
+import { OvenError } from '@theoven/core'
+
+export class PaymentRequired extends OvenError {
+  constructor(detail: string, invoiceId: string) {
+    super(402, 'Payment Required', detail, {
+      type: 'https://example.com/problems/payment-required',
+      detail: { invoiceId },
+    })
+  }
+}
+```
+
+Setting `type` to a URL you control is what RFC 9457 intends: a stable identifier a client can
+branch on, and a page a human can read. It stays `about:blank` otherwise.
+
+## Handling them centrally
+
+```ts
+createApp({
+  onError: (error, ctx) => {
+    if (error.status >= 500) reportToSentry(error, { requestId: ctx.id })
+    // Return nothing and the default problem+json response is used.
+  },
+})
+```
+
+Return a value to replace the response; return nothing to keep the default. The handler sees
+every error, already normalised to an `OvenError` with a status.
+
+<Aside type="note" title="A throwing error handler does not take the server down">
+  If `onError` itself throws, the framework falls back to the default response and logs both. An
+  error path that can fail closed is not an error path.
+</Aside>
+
+## In middleware
+
+Middleware sees errors as thrown exceptions on the way out, so a `try`/`finally` works normally:
+
+```ts
+app.use(async (ctx, next) => {
+  const started = performance.now()
+  try {
+    return await next()
+  } finally {
+    ctx.log.info('handled', { ms: performance.now() - started })
+  }
+})
+```
+
+Refusals the framework generates itself — `404`, `405`, `501` — are returned rather than thrown,
+so middleware still sees them as responses and can add its headers.

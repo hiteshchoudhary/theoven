@@ -61,7 +61,7 @@ Read `CLAUDE.md` §2b before working. The short version:
 - [x] GitHub Actions: CI (typecheck, lint, `bun test`) + release (changesets publish)
 - [x] GitHub repo created and pushed: `hiteshchoudhary/theoven`
 - [x] `@theoven` npm org claimed (owner: hiteshchoudhary); local `npm login` working
-- [ ] **You:** buy `theoven.app` and point it at the Cloudflare Pages project
+- [x] **You:** buy `theoven.app` and point it at the Cloudflare Pages project — done, live
 - [ ] **You:** rotate the npm token that was pasted into chat — now more urgent, since it can
       publish to `@theoven/*` and those names are live — then add the new one as the
       `NPM_TOKEN` GitHub Actions secret so releases can publish
@@ -681,7 +681,7 @@ development and production. Covered by tests now.
 - [x] Internal link checking wired into `scripts/build-site.sh` and CI. Mounting the docs under
       `/docs` produced three separate classes of broken link that all passed review; the crawl
       catches every one and fails the build
-- [ ] Point theoven.app at the Pages project
+- [x] Point theoven.app at the Pages project — live, serving the landing page, docs and llms.txt
 - [~] Moved to GitHub Actions + Wrangler in `.github/workflows/deploy.yml`: builds on a runner,
       publishes with `wrangler pages deploy`, and only runs when the site or its build scripts
       change. **Needs two secrets from you** — `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
@@ -704,9 +704,15 @@ development and production. Covered by tests now.
       the memory mail driver and `worker.drain()`), and **deployment** (verified: `oven build`
       emits one `dist/index.js` that runs with no `node_modules` at all, which is what makes the
       two-stage Dockerfile in the guide honest).
-- [x] API reference: `App`, `Context`, file-based routing, middleware, batteries, env, bricks,
-      CLI — plus a page per brick under `/docs/bricks/`, each following the fixed §5b shape. A
-      second reference section per package would duplicate those and drift from them.
+- [x] API reference, audited against the actual export surface rather than written from memory:
+      `App`, `Context`, file-based routing, **validation**, **errors**, middleware, batteries, env,
+      bricks, CLI — plus a page per brick under `/docs/bricks/`.
+
+      `Context` was 280 words for the object every handler receives, and ended with a "Coming in
+      Phase 1.3" section listing `ctx.body`, `ctx.query`, `ctx.cookies` and `ctx.token` — all of
+      which shipped long ago. It is now 1290 words covering every member. `App` went 499 → 960
+      with the full options table. `validation` and `errors` are new. Every claim on those pages
+      was executed against the real framework before publishing; four were wrong and are fixed.
 - [x] Docs code samples checked in CI (`scripts/check-docs.mjs`), and in the site build. Two
       checks, chosen because they catch real rot without demanding that every snippet be a
       complete compilable module — most are fragments on purpose, and rewriting 135 of them into

@@ -1,86 +1,168 @@
 ---
 title: App
-description: createApp, route registration, and the server lifecycle.
+description: createApp, route registration, configuration, and the server lifecycle.
+sidebar:
+  order: 1
 ---
 
-## `createApp(options?)`
+import { Aside } from '@astrojs/starlight/components'
 
-```ts
-import { createApp } from '@theoven/core'
+```ts title="src/app.ts"
+import { createApp, loadRoutes } from '@theoven/core'
 
-const app = createApp({
-  port: 3000,
-  logLevel: 'info',
-})
+export const app = createApp()
+await loadRoutes(app, `${import.meta.dir}/routes`)
+
+export default app
 ```
 
-| Option | Default | What it does |
-| --- | --- | --- |
-| `port` | `PORT` env, then `3000` | Port for `listen()`. |
-| `hostname` | — | Interface to bind. |
-| `logger` | built-in `ConsoleLogger` | Any object matching `Logger` — swap in pino. |
-| `logLevel` | `'info'` | `debug` / `info` / `warn` / `error` / `silent`. |
-| `requestIdHeader` | `'x-request-id'` | Header consulted for an inbound request id. |
-| `echoRequestId` | `true` | Echo the id on responses that used it. |
-| `development` | `NODE_ENV !== 'production'` | Whether internal error detail reaches the client. |
-| `shutdownTimeout` | `10000` | How long `close()` waits for in-flight requests. |
-| `onError` | — | Replace the default problem+json rendering. |
+```ts title="src/index.ts"
+import app from './app'
+
+await app.listen(3000)
+```
+
+<Aside type="note" title="Keep `listen()` out of `app.ts`">
+  That split is what lets `oven routes`, `oven openapi`, `oven worker` and your tests import the
+  app without binding a port. The scaffold does it for you.
+</Aside>
 
 ## Registering routes
 
 ```ts
 app.get('/users', handler)
-app.post('/users', handler)
+app.post('/users', { body: schema }, handler)
 app.put('/users/:id', handler)
 app.patch('/users/:id', handler)
 app.delete('/users/:id', handler)
-app.head('/users', handler)
 app.options('/users', handler)
+app.head('/users', handler)
 
-app.route('GET', '/users', handler)   // the primitive the others call
+app.route('GET', '/users', handler)          // any method by name
 ```
 
-Patterns use `:name` for one segment and `*name` for a trailing catch-all.
-
-Conflicts — a duplicate route, a wildcard that is not the final segment, or two names claiming
-the same parameter position — throw **at registration**, not at request time. You find out at
-boot, not from a support ticket.
-
-## `app.fetch(request)`
-
-Dispatches a `Request` through the full pipeline and returns a `Response`. This is what
-`Bun.serve` calls, and it is how the test suite exercises the framework without binding a port:
+Each takes an optional schema between the path and the handler. With one, `ctx.params`,
+`ctx.query` and `ctx.body` are typed and validated:
 
 ```ts
-const response = await app.fetch(new Request('https://x/users/1'))
-expect(await response.json()).toEqual({ id: '1' })
+app.get('/users/:id', { params: z.object({ id: z.uuid() }) }, (ctx) => ctx.params.id)
 ```
 
-## `app.listen(port?)`
+Most applications use [file-based routing](/docs/reference/file-routing/) instead and never call
+these directly.
 
-Starts the server and installs `SIGTERM`/`SIGINT` handlers that shut down gracefully. Returns
-Bun's `Server`.
+`HEAD` is served from the matching `GET` route, and `OPTIONS` is answered from the methods a path
+actually has — neither needs registering. Registering the same method and path twice throws at
+registration rather than silently letting the last one win.
 
-## `app.close(options?)`
+## Middleware and bricks
 
-Shuts down gracefully:
+```ts
+app.use(requestLogger())              // middleware, everywhere
+app.use('/admin', requireAdmin())     // middleware, scoped to a prefix
+app.use(db(drizzleSqlite({ url })))   // a brick
+```
 
-1. Stops accepting new requests — anything arriving now gets `503` with `Retry-After`.
-2. Waits for in-flight requests to finish, up to `shutdownTimeout`.
-3. Runs shutdown hooks in registration order. A failing hook does not stop the others.
-4. Releases the socket.
+`.use()` takes both. A brick contributes to the context and its type flows through the chain — so
+`ctx.db` exists after the line above, and is a compile error before it. See
+[Middleware & hooks](/docs/reference/middleware/) and [Bricks](/docs/reference/bricks/).
 
-This is the difference between a clean rolling deploy and a burst of client-side errors.
+## Configuration
 
-## `app.onShutdown(hook)`
+```ts
+createApp({
+  port: 3000,
+  development: process.env.NODE_ENV !== 'production',
+  trustProxy: true,
+})
+```
 
-Registers a teardown hook. Bricks use this to close database pools and drain workers.
+| Option | Default | |
+| --- | --- | --- |
+| `port` | `PORT`, then `3000` | port for `listen()` |
+| `hostname` | Bun's default | interface to bind |
+| `logger` | built-in | swap in pino, winston, anything satisfying `Logger` |
+| `logLevel` | `info` | level for the built-in logger |
+| `development` | `NODE_ENV !== 'production'` | controls what reaches the client on an error |
+| `onError` | — | your error handler; see below |
+| `shutdownTimeout` | `10000` | ms `close()` waits for in-flight requests |
+| `requestIdHeader` | `x-request-id` | header consulted for an inbound id |
+| `echoRequestId` | `true` | echo the id on responses |
+| `body` | — | total size, per-file size, file count, MIME allowlist |
+| `query` | depth 5, 1000 keys | query parsing limits |
+| `cookies` | — | cookie settings, notably the signing secret |
+| `token` | cookie `token`, query `access_token` | where `ctx.token` is looked for |
+| `trustProxy` | `false` | whether `X-Forwarded-For` may set `ctx.ip` |
+| `validateResponses` | `development` | check results against declared response schemas |
 
-## `app.routes()`
+Two of those are security settings rather than conveniences, and both default to the safe side:
 
-Every registered route in registration order. Backs `oven routes` and the boot banner.
+<Aside type="caution" title="`development` and `trustProxy`">
+  `development` decides whether internal error messages and stacks reach the client. It follows
+  `NODE_ENV`, so a production deploy is safe without you remembering.
 
-## `app.service(name)`
+  `trustProxy` is off because `X-Forwarded-For` is client-supplied. Turning it on without a proxy
+  you control lets callers choose their own IP — and walk past any rate limit or audit log keyed
+  on `ctx.ip`. Pass a number to say how many hops to skip.
+</Aside>
+
+`validateResponses` defaults to on in development and off in production deliberately: it checks
+*your* code rather than untrusted input, so the bug it catches is one local development should
+have caught — and unlike request validation, the cost lands on every successful response.
+
+## Errors
+
+```ts
+createApp({
+  onError: (error, ctx) => {
+    if (error.status >= 500) reportToSentry(error, { requestId: ctx.id })
+    // Return nothing and the default problem+json response is used.
+  },
+})
+```
+
+Without a handler, thrown errors become [RFC 9457](/docs/tutorial/errors/) `problem+json`. Return
+a value from `onError` to replace that response; return nothing to keep it.
+
+## Lifecycle
+
+### `app.ready()`
+
+Runs every brick's `setup()` — connecting the database, compiling models, mounting auth routes.
+`listen()` calls it for you; call it directly when dispatching requests in tests.
+
+### `app.listen(port?)`
+
+Starts the server and returns Bun's `Server`. Installs signal handlers so `SIGTERM` drains
+rather than kills.
+
+### `app.close(options?)`
+
+Stops accepting connections, waits for in-flight requests, then releases every brick's resources
+in reverse order. Requests arriving mid-drain get `503` with `Retry-After` rather than a dead
+socket.
+
+```ts
+await app.close({ timeout: 5000 })
+```
+
+### `app.fetch(request)`
+
+Runs the whole pipeline — routing, middleware, brick hooks, validation, guards, the handler,
+serialisation — and returns a `Response`. No port is bound. This is how you
+[test](/docs/guides/testing/) an Oven app.
+
+```ts
+const response = await app.fetch(new Request('http://localhost/users/1'))
+```
+
+## Inspection
+
+### `app.routes()`
+
+Every registered route as `{ method, pattern }`. Backs `oven routes` and the boot banner.
+
+### `app.service(name)`
 
 A brick's contributed service, outside a request.
 
@@ -91,11 +173,24 @@ const db = app.service('db')       // the Drizzle client, typed
 const queue = app.service('queue')
 ```
 
-`ctx.db` and `ctx.queue` exist on the context because that is where an application wants them. A
-migration script, a seed, and `oven worker` all want the same configured value with no request in
-sight — and re-constructing the brick would give them a *second* connection pool and a second set
-of job definitions.
+`ctx.db` is where an application wants it. A migration script, a seed and `oven worker` all want
+the same configured value with no request in sight — and re-constructing the brick would give
+them a *second* connection pool. Typed from what `.use()` contributed, so a name you never
+registered is a compile error.
 
-Typed from what `.use()` contributed, so `app.service('storage')` on an app without the storage
-brick is a compile error. Call it after `await app.ready()`; bricks are set up at boot, and asking
-earlier throws saying so.
+### `app.logger` · `app.url`
+
+The base logger, and the URL the server is listening on (`undefined` before `listen()`).
+
+## Hooks
+
+```ts
+app.onRequest((ctx) => { /* before routing */ })
+app.beforeHandle((ctx) => { /* after validation, before the handler */ })
+app.afterHandle((ctx, result) => { /* transform the result */ })
+app.onResponse((ctx, response) => { /* the finished Response */ })
+app.onError((error, ctx) => { /* every thrown error */ })
+```
+
+Returning a value from `onRequest` or `beforeHandle` short-circuits the request. See
+[Middleware & hooks](/docs/reference/middleware/) for the ordering and what each is for.

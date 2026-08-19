@@ -9,12 +9,64 @@ TypeScript-native end to end.
 The promise: **you should never wire infrastructure by hand again.** Auth, a database, file
 storage, email and background jobs are configuration, not a week of plumbing.
 
+```bash
+bun create theoven my-app --db sqlite --auth basic
+```
+
+That gives you a working app with a database, signup, login and password reset before you have
+provisioned anything at all.
+
 ## Where to start
 
-- **[Installation](/docs/start/installation/)** — get it running.
-- **[Philosophy](/docs/start/philosophy/)** — why Oven makes the choices it makes.
-- **[Tutorial](/docs/tutorial/first-route/)** — build up from your first route.
-- **[Coming from Express](/docs/guides/coming-from-express/)** — a translation guide.
+Pick the one that matches why you are here.
+
+| | |
+| --- | --- |
+| **New to Oven** | [Installation](/docs/start/installation/) → [Tutorial](/docs/tutorial/first-route/) — five chapters, from one route to a database and auth |
+| **Coming from Express** | [The translation guide](/docs/guides/coming-from-express/) — what to delete, what to rewrite, in what order |
+| **Deciding whether to use it** | [Batteries included](/docs/start/batteries/) · [Philosophy](/docs/start/philosophy/) · [Benchmarks](/docs/guides/benchmarks/) |
+| **Adding a capability** | [The brick catalogue](/docs/bricks/) — database, auth, storage, mail, queues |
+| **Looking something up** | [Context](/docs/reference/context/) · [App](/docs/reference/app/) · [CLI](/docs/reference/cli/) |
+
+## The shape of an app
+
+```ts title="src/app.ts"
+export const app = createApp()
+  .use(db(drizzleSqlite({ url: './data.db', schema })))
+  .use(storage(s3Storage({ bucket: 'uploads' })))
+  .use(queue(redisQueue(), { jobs: [resizeAvatar] }))
+  .use(auth(basicAuth({ db: client, secret })))
+```
+
+```ts title="src/routes/users/[id]/avatar.post.ts"
+export default route(
+  { auth: true, body: z.object({ file: z.file().max(5_000_000) }) },
+  async (ctx) => {
+    const { key } = await ctx.storage.upload(`avatars/${ctx.params.id}`, ctx.body.file)
+    await ctx.queue.dispatch(resizeAvatar, { key })
+    return ctx.db.update(users).set({ avatar: key })
+  },
+)
+```
+
+That route is validated, authenticated, typed and documented at `/docs` — and nothing in it was
+wired by hand. Leave a brick out of `app.ts` and touching it is a compile error rather than a
+crash at 3am.
+
+## Reference
+
+| | |
+| --- | --- |
+| [Context](/docs/reference/context/) | everything on `ctx`, the argument every handler receives |
+| [App](/docs/reference/app/) | `createApp`, routing, configuration, lifecycle |
+| [File-based routing](/docs/reference/file-routing/) | the filesystem is the route table |
+| [Validation](/docs/reference/validation/) | Standard Schema, uploads, response schemas |
+| [Errors](/docs/reference/errors/) | the classes, and the RFC 9457 shape they become |
+| [Middleware & hooks](/docs/reference/middleware/) | the onion model, five hooks, built-ins |
+| [Always-on batteries](/docs/reference/batteries/) | body, cookies, uploads, tokens, query |
+| [Bricks](/docs/reference/bricks/) | the contract, and how to write your own |
+| [Environment variables](/docs/reference/env/) | readers that throw instead of guessing |
+| [CLI](/docs/reference/cli/) | `create`, `dev`, `db`, `worker`, `doctor` |
 
 ## Status
 

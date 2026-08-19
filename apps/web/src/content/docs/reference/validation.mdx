@@ -1,0 +1,180 @@
+---
+title: Validation
+description: One declaration that validates the request, types the handler, and documents the endpoint.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```ts
+export default route(
+  {
+    params: z.object({ id: z.uuid() }),
+    query: z.object({ page: z.coerce.number().int().min(1).default(1) }),
+    body: z.object({ title: z.string().min(1).max(200) }),
+  },
+  (ctx) => ({
+    id: ctx.params.id,      // string, a valid UUID
+    page: ctx.query.page,   // number
+    title: ctx.body.title,  // string, 1–200 chars
+  }),
+)
+```
+
+One declaration does three jobs: it rejects bad input before your handler runs, it types `ctx`,
+and it becomes the [OpenAPI](/docs/bricks/openapi/) description of the endpoint. Writing the
+schema twice — once to validate, once to document — is how the two drift apart.
+
+## What can be validated
+
+| Key | Validates |
+| --- | --- |
+| `params` | path parameters |
+| `query` | the query string |
+| `body` | the request body |
+| `headers` | request headers |
+| `response` | what your handler returns, keyed by status |
+
+## Any Standard Schema validator
+
+Oven validates through [Standard Schema](https://standardschema.dev), not through Zod. Zod is the
+default because `z.toJSONSchema()` makes OpenAPI generation free — but nothing is coupled to it.
+
+```ts
+import * as v from 'valibot'
+
+export default route(
+  { body: v.object({ title: v.pipe(v.string(), v.minLength(1)) }) },
+  (ctx) => ctx.body.title,   // typed, from Valibot
+)
+```
+
+Valibot, ArkType and Effect Schema all work, and the test suite exercises Valibot alongside Zod
+precisely so "any Standard Schema validator" is a tested claim rather than a hopeful one.
+
+## Coercion is yours to ask for
+
+A query string has no types — every value arrives as a string. Oven does **not** guess:
+
+```ts
+query: z.object({
+  page: z.coerce.number().default(1),
+  includeArchived: z.coerce.boolean().default(false),
+})
+```
+
+<Aside type="note" title="Why not coerce automatically?">
+  Because it cannot know what you meant. Turning `"123"` into `123` before the schema sees it
+  would quietly break a `z.string()` field that legitimately holds digits — an order reference, a
+  postcode, a phone number. `z.coerce` says so explicitly, where you can see it.
+</Aside>
+
+## Uploads
+
+```ts
+export default route(
+  {
+    body: z.object({
+      title: z.string(),
+      file: z.file().max(5_000_000).mime(['image/png', 'image/jpeg']),
+    }),
+  },
+  (ctx) => ctx.storage.upload(`uploads/${ctx.body.file.name}`, ctx.body.file),
+)
+```
+
+`ctx.body.file` is a web [`File`](https://developer.mozilla.org/docs/Web/API/File). Multipart
+bodies are streamed rather than buffered, and large parts spill to a temporary file — so a schema
+declaring a file does not mean the whole upload sits in memory first.
+
+Limits can also be set once for the whole app, which is the right place for a hard ceiling:
+
+```ts
+createApp({ body: { limit: 10_000_000, maxFiles: 5, allowedFileTypes: ['image/*'] } })
+```
+
+The app-level limit is enforced during parsing, before any schema runs. A per-route `z.file().max()`
+narrows it further; it cannot widen it.
+
+## When validation fails
+
+A `422`, naming **every** offending field at once rather than the first:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Unprocessable Content",
+  "status": 422,
+  "detail": "Request validation failed.",
+  "errors": [
+    { "location": "body", "path": "email", "message": "Invalid email address" },
+    { "location": "body", "path": "age", "message": "Expected number, received string" }
+  ]
+}
+```
+
+`location` is `params`, `query`, `body` or `headers`; `path` is dotted for nested fields
+(`address.postcode`) and bracketed for arrays (`items[0].sku`).
+
+Assert on `location` and `path` in tests, never on `message` — validator messages get reworded
+between versions, and a test that breaks when prose changes is a test that gets deleted.
+
+## Response validation
+
+```ts
+export default route(
+  {
+    response: {
+      200: z.object({ id: z.string(), title: z.string() }),
+      404: z.object({ error: z.string() }),
+    },
+  },
+  handler,
+)
+```
+
+Response schemas always shape the OpenAPI document. Whether they are *enforced* at runtime
+depends on `validateResponses`, which defaults to **on in development, off in production**.
+
+<Aside type="caution" title="That default is deliberate">
+  Response validation checks *your* code, not untrusted input — so the bug it catches is one local
+  development and CI should already have caught. Unlike request validation, the cost lands on
+  every successful response rather than only on bad input. Turn it on in production with
+  `createApp({ validateResponses: true })` if you would rather fail loudly than serve a wrong
+  shape.
+</Aside>
+
+## Validating headers
+
+```ts
+headers: z.object({ 'x-api-version': z.enum(['1', '2']) })
+```
+
+Header names are matched case-insensitively, as HTTP defines them.
+
+## Where validation sits
+
+Ordering matters, and it is fixed:
+
+1. **Middleware** — wraps everything, sees unmatched requests too
+2. **Brick `request()` hooks** — `ctx.user` is populated here
+3. **`beforeHandle` hooks** — cheap rejections before any parsing cost
+4. **Validation**
+5. **The handler**
+
+A guard rejecting a request never pays to parse a body, and a handler never sees input it did not
+ask for.
+
+## Without a schema
+
+`ctx.body` is still there — parsed, content-type aware, and typed `unknown`:
+
+```ts
+app.post('/webhook', async (ctx) => {
+  const payload = await ctx.body   // unknown; narrow it yourself
+})
+```
+
+`unknown` rather than `any` on purpose: it forces the narrowing that a schema would have done for
+you.

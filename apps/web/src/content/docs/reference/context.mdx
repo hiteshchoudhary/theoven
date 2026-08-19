@@ -1,74 +1,320 @@
 ---
 title: Context
-description: The single argument every handler receives.
+description: The single argument every handler receives — request, response, and whatever your bricks contributed.
+sidebar:
+  order: 2
 ---
 
-`ctx` is passed to every handler. Everything expensive on it is lazy: reading nothing costs
-nothing.
+import { Aside } from '@astrojs/starlight/components'
+
+`ctx` is the one argument every handler, middleware and hook receives.
+
+```ts
+app.get('/users/:id', (ctx) => {
+  ctx.log.info('looking up', { id: ctx.params.id })
+  return ctx.db.select().from(users).where(eq(users.id, ctx.params.id))
+})
+```
+
+Two things shape the whole design.
+
+**Everything expensive is lazy.** A handler that returns a string parses no body, no query string
+and no cookies, and generates no request id. This is not an aspiration — it is asserted by tests
+that count reads of the underlying request.
+
+**Its type is what you registered.** `ctx.db` exists because you added the database brick; leave
+it out and touching it is a compile error, not a crash at 3am.
 
 ## Request
 
 ### `ctx.req`
+
 The raw web-standard [`Request`](https://developer.mozilla.org/docs/Web/API/Request). Never
-wrapped, always available.
+wrapped, always available — anything the framework does not expose, you can reach here.
 
 ### `ctx.params`
-Path parameters from the matched route, as strings. Frozen and shared when the route has none.
 
-### `ctx.url`
-The parsed `URL`. Built on first read and reused.
+Path parameters from the matched route, as strings.
+
+```ts
+// src/routes/users/[id]/posts/[postId].get.ts
+ctx.params.id      // string
+ctx.params.postId  // string
+```
+
+Declare a `params` schema and they are typed and coerced instead:
+
+```ts
+export default route({ params: z.object({ id: z.uuid() }) }, (ctx) => ctx.params.id)
+```
+
+A catch-all segment `[...key]` puts the remainder under that name — `ctx.params.key`. A bare
+`*` in a programmatically registered route lands under `ctx.params['*']`.
 
 ### `ctx.path`
-The pathname. Extracted without constructing a `URL`, since routing needs it on every request.
+
+The pathname, e.g. `/users/42`. Answered from a substring rather than by building a `URL`,
+because routing needs it on every request.
 
 ### `ctx.method`
-The request method.
+
+The request method, uppercase.
+
+### `ctx.url`
+
+The parsed [`URL`](https://developer.mozilla.org/docs/Web/API/URL), built on first read and
+reused. Reach for it when you want the origin, hash or raw `searchParams`; `ctx.path` and
+`ctx.query` cover the common cases without constructing one.
+
+### `ctx.query`
+
+The query string, parsed lazily, with arrays and nested keys.
+
+```ts
+// ?tag=a&tag=b&page[size]=20
+ctx.query.tag        // ['a', 'b']
+ctx.query.page       // { size: '20' }
+```
+
+Values are strings — a query string has no types. Declare a `query` schema to coerce them:
+
+```ts
+export default route(
+  { query: z.object({ page: z.coerce.number().default(1) }) },
+  (ctx) => ctx.query.page,   // number
+)
+```
+
+<Aside type="note" title="Prototype keys are dropped">
+  `__proto__`, `constructor` and `prototype` are refused as keys, and nesting is capped at five
+  levels with a 1000-key limit. A query string is attacker-controlled input, and prototype
+  pollution through it is a real bug class rather than a theoretical one.
+</Aside>
+
+### `ctx.header(name)`
+
+One request header, or `undefined`. Case-insensitive.
+
+```ts
+ctx.header('content-type')
+```
+
+Returns `undefined` rather than `null`, which reads better beside every other optional on the
+context.
+
+### `ctx.accepts(...types)`
+
+Content negotiation. Returns the best of the offered types for this client's `Accept` header, or
+`undefined` when none is acceptable.
+
+```ts
+switch (ctx.accepts('application/json', 'text/html')) {
+  case 'text/html': return page()
+  default:          return data()
+}
+```
+
+Quality values are honoured, and a request with no `Accept` gets your first offer.
 
 ### `ctx.ip`
+
 The client address, or `undefined` when a `Request` was dispatched directly rather than served
 over a socket.
+
+<Aside type="caution" title="`X-Forwarded-For` is not trusted by default">
+  Any client can send that header. Believing it without a proxy in front means clients choose
+  their own IP — and with it, defeat any rate limit or audit log keyed on `ctx.ip`. Set
+  `trustProxy: true` for one proxy, or a number for how many hops to skip.
+</Aside>
+
+## Body and uploads
+
+### `ctx.body`
+
+The parsed body, awaited. Content-type aware: JSON, urlencoded, multipart, text and raw.
+
+```ts
+const body = await ctx.body
+```
+
+With a `body` schema it is validated and typed, and you do not await it:
+
+```ts
+export default route(
+  { body: z.object({ title: z.string().min(1) }) },
+  (ctx) => ctx.body.title,   // string, already validated
+)
+```
+
+Uploads arrive as web [`File`](https://developer.mozilla.org/docs/Web/API/File) objects,
+streamed rather than buffered, with size and MIME limits applied before your handler runs.
+
+```ts
+export default route(
+  { body: z.object({ file: z.file().max(5_000_000) }) },
+  (ctx) => ctx.storage.upload(`uploads/${ctx.body.file.name}`, ctx.body.file),
+)
+```
+
+### `ctx.rawBody`
+
+The unparsed bytes, as an `ArrayBuffer`. For webhooks that sign the raw payload — re-serialising
+parsed JSON produces different bytes and a signature that never verifies.
+
+```ts
+const raw = await ctx.rawBody
+const valid = verifySignature(raw, ctx.header('stripe-signature'))
+```
+
+Reading it does not prevent reading `ctx.body` afterwards.
+
+## Cookies
+
+### `ctx.cookies`
+
+Parsed on first touch.
+
+```ts
+ctx.cookies.get('session')          // string | undefined
+ctx.cookies.has('session')          // boolean
+ctx.cookies.all()                   // Record<string, string>
+ctx.cookies.set('session', token, { maxAge: 3600 })
+ctx.cookies.delete('session')
+```
+
+Cookies set through `ctx.cookies` are `httpOnly` and `SameSite=Lax` by default, and `Secure`
+outside development — so shipping to production does not quietly downgrade every session cookie.
+Signing is available without a separate package.
+
+## Credentials
+
+### `ctx.token`
+
+The credential, captured from `Authorization`, then the `token` cookie, then the
+`?access_token=` query parameter — in that precedence. Present **with or without** an auth brick
+installed.
+
+```ts
+if (ctx.token) { /* … */ }
+```
+
+Both fallbacks are configurable, and the query one can be switched off entirely:
+
+```ts
+createApp({ token: { cookie: 'session', query: null } })
+```
+
+<Aside type="caution" title="A credential in a URL does not stay private">
+  Query strings end up in access logs, browser history and `Referer` headers. `?access_token=` is
+  supported because `EventSource` and some download flows cannot set headers — not because it is
+  a good idea. `ctx.tokenSource` lets you refuse it where it does not belong.
+</Aside>
+
+### `ctx.tokenSource`
+
+Where the token came from: `'header'`, `'cookie'` or `'query'`.
+
+```ts
+// Refuse a credential that arrived somewhere it could be logged.
+if (ctx.tokenSource === 'query') throw new Unauthorized('Send the token as a header.')
+```
+
+### `ctx.tokenScheme`
+
+The `Authorization` scheme, when the credential came from a header — `Bearer`, `Basic`, and so on.
+
+### `ctx.basicAuth`
+
+Decoded `Basic` credentials, when that is what arrived.
+
+```ts
+const creds = ctx.basicAuth   // { username, password } | undefined
+```
+
+### `ctx.user`
+
+Present when the [`auth`](/docs/bricks/auth/) brick is registered. `Identity | null` on an open
+route; **narrowed to non-null** inside a route declaring `auth: true` or a policy name.
+
+```ts
+export default route({ auth: true }, (ctx) => ctx.user.id)   // no null check needed
+```
 
 ## Observability
 
 ### `ctx.id`
-A stable id for this request. Adopted from the `x-request-id` header when a proxy already set
-one, so a trace survives the hop; generated otherwise.
 
-Generated **lazily** — an app that never logs never pays for a UUID. The id is echoed on the
-response only when something actually read it.
+A stable id for this request. Adopted from `x-request-id` when a proxy already set one, so a
+trace survives the hop; generated otherwise.
+
+Generated **lazily** — an app that never logs never pays for a UUID — and echoed on the response
+only when something actually read it.
 
 ### `ctx.log`
-A `Logger` with `requestId` bound to every line. Derived on first read.
+
+A `Logger` with `requestId` bound to every line, derived on first read.
 
 ```ts
 ctx.log.info('charging card', { amount: 1200 })
+ctx.log.error('gateway refused', { code })
 ```
+
+Every error response also carries the request id, so a user's screenshot is enough to find the
+log line.
 
 ## Response
 
 ### `ctx.status`
-Set to choose the status. Left unset, the returned value decides: `null` becomes `204`,
+
+Set it to choose the status. Left unset, the returned value decides: `null` becomes `204`,
 everything else `200`.
 
-### `ctx.set(name, value)`
-Sets a response header. Chainable.
+```ts
+ctx.status = 201
+```
 
-### `ctx.append(name, value)`
-Appends a response header, keeping existing values — needed for `set-cookie`.
+### `ctx.set(name, value)` · `ctx.append(name, value)`
+
+Set or append a response header. Both chainable. Use `append` for headers that legitimately
+repeat, such as `set-cookie`.
+
+```ts
+ctx.set('cache-control', 'no-store').set('x-thing', '1')
+```
 
 ### `ctx.redirect(location, status?)`
-Builds a redirect response. `302` by default.
+
+Builds a redirect response. `302` unless you say otherwise.
 
 ```ts
 app.get('/old', (ctx) => ctx.redirect('/new', 301))
 ```
 
 ### `ctx.respond(value)`
-Coerces a value into a `Response` using this context's status and headers. Called by the server
-for you; exposed because middleware occasionally needs it.
 
-## Coming in Phase 1.3
+Coerces a value into a `Response` using this context's status and headers. The server calls it
+for you; it is exposed because middleware occasionally needs to build the response early.
 
-`ctx.body`, `ctx.query`, `ctx.cookies`, `ctx.token`, `ctx.headers` and `ctx.files` — all
-always-on, all lazy. See the
-[roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md).
+### `ctx.responseHeaders`
+
+The headers staged so far, or `undefined` if none have been set. Mostly of interest to
+middleware inspecting what a handler did.
+
+## What bricks add
+
+Everything above is always there. Each brick you register adds its own, typed:
+
+| Brick | Adds |
+| --- | --- |
+| [`db`](/docs/bricks/db/) | `ctx.db` — the native ORM client |
+| [`auth`](/docs/bricks/auth/) | `ctx.user`, `ctx.auth` |
+| [`storage`](/docs/bricks/storage/) | `ctx.storage` |
+| [`queue`](/docs/bricks/queue/) | `ctx.queue` |
+| [`mail`](/docs/bricks/mail/) | `ctx.mail` |
+
+Writing your own is [about fifty lines](/docs/reference/bricks/).
+
+## Outside a request
+
+`app.service('db')` reaches the same configured value with no request in sight — for a migration
+script, a seed, or `oven worker`. See [App](/docs/reference/app/#appservicename).

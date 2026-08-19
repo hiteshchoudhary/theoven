@@ -143,3 +143,33 @@ describe('toOvenError', () => {
     expect(toOvenError(null, false).status).toBe(500)
   })
 })
+
+/**
+ * RFC 9110: a 401 **MUST** carry a `WWW-Authenticate` challenge. Without one the client is told
+ * it was refused but not how to authenticate, and some HTTP clients treat the response as
+ * malformed rather than retrying with a credential.
+ */
+describe('401 carries a challenge', () => {
+  test('Unauthorized sets WWW-Authenticate by default', () => {
+    expect(new Unauthorized('nope').headers).toEqual({ 'www-authenticate': 'Bearer' })
+  })
+
+  // An auth provider using a different scheme must be able to say so.
+  test('an explicit challenge wins', () => {
+    const error = new Unauthorized('nope', {
+      headers: { 'www-authenticate': 'Basic realm="admin"' },
+    })
+    expect(error.headers?.['www-authenticate']).toBe('Basic realm="admin"')
+  })
+
+  test('other headers are kept alongside the default', () => {
+    const error = new Unauthorized('nope', { headers: { 'x-trace': 'abc' } })
+    expect(error.headers).toEqual({ 'www-authenticate': 'Bearer', 'x-trace': 'abc' })
+  })
+
+  // Only 401 is required to carry one; adding it elsewhere would be noise.
+  test('other statuses carry no challenge', () => {
+    expect(new Forbidden('no').headers).toBeUndefined()
+    expect(new NotFound('no').headers).toBeUndefined()
+  })
+})
