@@ -59,6 +59,7 @@ export class Context {
   private cachedLog: Logger | undefined
   private cachedUrl: URL | undefined
   private cachedPath: string | undefined
+  private matchedPattern: string | undefined
   private cachedQuery: ParsedQuery | undefined
   private cachedCookies: Cookies | undefined
   private cachedBody: Promise<unknown> | undefined
@@ -89,6 +90,23 @@ export class Context {
    */
   assignParams(params: RouteParams): void {
     this.mutableParams = params
+  }
+
+  /**
+   * The matched route's pattern — `/users/:id`, not `/users/8f14e45f`.
+   *
+   * `undefined` before routing resolves, and on a request that matched nothing. Metrics, logs and
+   * tracing all want this rather than `ctx.path`: a backend that sees a million distinct route
+   * names cannot aggregate anything, and reconstructing the pattern from the path means inventing
+   * a rule about which segments are ids — which is wrong on every slug.
+   */
+  get routePattern(): string | undefined {
+    return this.matchedPattern
+  }
+
+  /** @internal called by the framework once a route matches. */
+  assignRoutePattern(pattern: string): void {
+    this.matchedPattern = pattern
   }
 
   // ------------------------------------------------------------------ request

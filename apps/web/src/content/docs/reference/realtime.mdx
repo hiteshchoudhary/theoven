@@ -1,0 +1,157 @@
+---
+title: WebSockets & SSE
+description: Real-time, upgraded from an ordinary route — so guards, params and validation all still apply.
+sidebar:
+  order: 11
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## WebSockets
+
+```ts
+app.ws('/rooms/:id', { auth: true, params: z.object({ id: z.uuid() }) }, {
+  upgrade: (ctx) => ({ room: ctx.params.id, userId: ctx.user.id }),
+  open:    (socket) => socket.subscribe(socket.data.data.room),
+  message: (socket, text) => app.publish(socket.data.data.room, String(text)),
+  close:   (socket) => socket.unsubscribe(socket.data.data.room),
+})
+```
+
+`app.ws()` registers an **ordinary route** that happens to upgrade. That is the design, and it is
+the whole reason to use it:
+
+- `auth: true` refuses an anonymous connection **before** a socket exists
+- `params` rejects a malformed `:id` before a socket exists
+- `ctx.user` is there, populated by whichever auth brick you registered
+- brick hooks, middleware and request hooks all ran
+
+<Aside type="caution" title="This is the part that matters">
+  A separate socket entry point means a second, weaker authentication story — and that is how a
+  socket endpoint becomes the unguarded way into an application. Here there is one guard, and it
+  runs first.
+</Aside>
+
+### The handlers
+
+| | |
+| --- | --- |
+| `upgrade(ctx)` | before the socket opens. Return per-connection data; **throw to refuse** |
+| `open(socket)` | the connection is live |
+| `message(socket, message)` | a frame arrived — `string` or `Buffer` |
+| `close(socket, code, reason)` | it went away |
+| `drain(socket)` | a backpressured socket has room again |
+| `options` | Bun's `maxPayloadLength`, `idleTimeout`, `backpressureLimit` |
+
+Refuse an upgrade by throwing — `throw new Unauthorized()` — exactly as anywhere else, and the
+client gets the usual problem+json before any socket exists.
+
+### Per-connection data
+
+Whatever `upgrade` returns is on every callback:
+
+```ts
+app.ws('/chat', {
+  upgrade: (ctx) => ({ userId: ctx.user.id, joinedAt: Date.now() }),
+  message: (socket) => {
+    socket.data.data.userId   // typed, inferred from upgrade's return
+    socket.data.requestId     // the id of the request that opened it
+  },
+})
+```
+
+`socket.data.requestId` is the same id as the upgrade request's, so a trace spans both.
+
+### Rooms
+
+```ts
+socket.subscribe('room:42')
+app.publish('room:42', JSON.stringify({ text }))
+socket.unsubscribe('room:42')
+```
+
+Bun's own pub/sub, so a broadcast does not walk a list of connections in JavaScript.
+
+### A plain GET
+
+A browser visiting a socket route gets `426 Upgrade Required` with an `Upgrade: websocket`
+header, rather than a confusing 404.
+
+## Server-sent events
+
+```ts
+import { sse } from '@theoven/core'
+
+app.get('/progress', (ctx) =>
+  sse(
+    async (stream) => {
+      for (let percent = 0; percent <= 100; percent += 10) {
+        stream.send({ event: 'progress', data: { percent } })
+        await Bun.sleep(200)
+      }
+    },
+    { signal: ctx.req.signal },
+  ),
+)
+```
+
+```js
+const events = new EventSource('/progress')
+events.addEventListener('progress', (e) => console.log(JSON.parse(e.data)))
+```
+
+### Which to reach for
+
+| | WebSocket | SSE |
+| --- | --- | --- |
+| Direction | both ways | server → client |
+| Protocol | its own, after an upgrade | plain HTTP |
+| Reconnects | you write it | the browser does it |
+| Proxies, `Authorization` | occasionally awkward | just works |
+| Binary | yes | text only |
+
+If the client only listens — progress, a feed, tokens from a model — SSE is less to get wrong.
+
+### The stream
+
+```ts
+stream.send({ event: 'tick', data: { n: 1 }, id: '7', retry: 500 })
+stream.send('bare value')       // becomes `data: bare value`
+stream.comment('still here')    // a comment the client never sees
+stream.close()
+```
+
+| | |
+| --- | --- |
+| `data` | required; objects are JSON-encoded, strings sent as-is |
+| `event` | the name the client listens for; without one, `onmessage` fires |
+| `id` | sets `lastEventId`, returned as `Last-Event-ID` on reconnect |
+| `retry` | how long the client should wait before reconnecting, in ms |
+
+`send` returns `false` once the client has gone rather than throwing, so a producer can check
+`stream.closed` and stop without a `try`.
+
+### Details that matter
+
+**Pass `ctx.req.signal`.** Without it, a browser closing the tab leaves the producer running: the
+writes fail silently and whatever it was computing carries on forever.
+
+**Multi-line payloads are split across `data:` lines**, because a raw newline ends an event — the
+client would see a truncated payload and report nothing.
+
+**Heartbeat comments every 15s** by default, since proxies close connections that go quiet. Set
+`heartbeat: 0` to disable.
+
+**A producer that throws sends an `error` event.** The response has already begun, so there is no
+status left to change; telling the client is the only thing left worth doing.
+
+## Limitations
+
+- **No automatic reconnect state.** `Last-Event-ID` arrives as a header; resuming from it is yours
+  to implement.
+- **`app.publish()` needs a listening server** — it returns `0` when a `Request` was dispatched
+  directly, as in tests.
+- **No room registry.** Bun's topics are strings; who is in which room is your application's to
+  track if you need to know.
+- **SSE has no backpressure signal.** A slow client's writes queue; a WebSocket's `drain` gives
+  you the hook that SSE does not.

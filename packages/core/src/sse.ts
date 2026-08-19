@@ -3,7 +3,7 @@
  *
  * The right tool for one-way updates — a progress bar, a live feed, a token stream from a model.
  * It is plain HTTP, so it passes through proxies, respects `Authorization`, and reconnects on its
- * own. Reach for a [WebSocket](/docs/reference/websockets/) when the client also needs to send.
+ * own. Reach for a [WebSocket](/docs/reference/realtime/) when the client also needs to send.
  */
 
 export interface ServerSentEvent {

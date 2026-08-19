@@ -1,0 +1,127 @@
+---
+title: telemetry
+description: OpenTelemetry tracing — spans named by route, context propagation, and logs you can get back to a trace from.
+sidebar:
+  order: 14
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/telemetry` |
+| **Adds to context** | nothing — it is middleware |
+| **Endpoints** | none |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/telemetry @opentelemetry/api
+```
+
+```ts title="src/app.ts"
+import { telemetry } from '@theoven/telemetry'
+
+export const app = createApp().use(telemetry())
+```
+
+<Aside type="note" title="No SDK, no exporter">
+  This brick brings neither. You configure them exactly as you would for any OpenTelemetry
+  application, and it uses whatever is globally registered. A framework shipping its own exporter
+  would own that dependency's release cadence forever — and give you two places to configure the
+  same thing.
+</Aside>
+
+```ts title="src/telemetry.ts"
+import { NodeSDK } from '@opentelemetry/sdk-node'
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
+
+new NodeSDK({ traceExporter: new OTLPTraceExporter() }).start()
+```
+
+Import that before your app and every request is traced.
+
+## Spans are named by route
+
+```
+GET /users/:id        ← not GET /users/8f14e45f
+```
+
+`http.route` carries the pattern and `url.path` carries the actual path. A backend that sees a
+million distinct span names cannot aggregate anything, so the pattern is what goes in the name.
+
+This works because core exposes `ctx.routePattern` — reconstructing it from the path would mean
+inventing a rule about which segments are ids, which is wrong on the first slug.
+
+## Only 5xx is an error
+
+A `404` or a `422` is the server working correctly: a client asked for something that is not
+there, or sent something invalid. Marking those as failed spans gives you an error rate made of
+other people's typos, and nobody looks at a dashboard that is always red.
+
+That holds whether the status was *returned* or *thrown* — `throw new NotFound()` is the
+documented way to answer 404 here, so it is classified by its status like anything else. Only a
+5xx records an exception.
+
+## Distributed traces actually connect
+
+An incoming `traceparent` is extracted before the span is created, so a request arriving from
+another service continues that trace rather than starting a disconnected root. Without it, the
+distributed part of distributed tracing quietly does not work.
+
+## Correlating logs
+
+```ts
+import { traceIds } from '@theoven/telemetry'
+
+ctx.log.info('charged card', { amount, ...traceIds() })
+```
+
+A trace you cannot reach from a log line, and a log line you cannot reach from a trace, are two
+tools instead of one.
+
+## Spans of your own
+
+```ts
+import { span } from '@theoven/telemetry'
+
+const rates = await span('fetch-rates', () => fetch(url).then((r) => r.json()))
+```
+
+For the parts of a request worth seeing separately — a third-party call, an expensive query. It
+ends the span whether the work returns or throws.
+
+## Configuration
+
+| Option | Default | |
+| --- | --- | --- |
+| `name` | `@theoven/core` | tracer name, as it appears in your backend |
+| `version` | — | tracer version |
+| `ignore` | `/health`, `/healthz`, `/_oven/*` | paths never traced; `*` suffix matches a prefix |
+| `attributes` | — | `(ctx) => Attributes`, for a tenant id or plan |
+| `useRoutePattern` | `true` | name spans by pattern rather than path |
+
+Health checks are ignored by default because a liveness probe every second is the loudest thing
+in a trace backend and tells you nothing. Setting `ignore` **replaces** that list rather than
+adding to it.
+
+## Limitations
+
+- **Requests only.** Database queries, queue jobs and outbound `fetch` are not instrumented
+  automatically — wrap them with `span()`, or use the relevant OpenTelemetry instrumentation.
+- **Traces, not metrics or logs.** The other two signals are not wired up.
+- **No sampling configuration here** — that belongs to your SDK, which is where it already is.
+
+## How it is verified
+
+Against a recording tracer registered globally the way a real SDK would be, asserting on the
+spans actually produced — names, attributes, statuses, exceptions. A test against a mock tracer
+proves the mock works.
+
+The 4xx-versus-5xx test caught a real bug while it was being written: the middleware classified
+every *thrown* error as a failure regardless of status, which would have put every
+`throw new NotFound()` into the error rate — the exact mistake the rule exists to prevent,
+arrived at from the other side.

@@ -1,0 +1,91 @@
+---
+title: storage-imagekit
+description: ImageKit as a storage driver, plus the transformation URLs that are the reason to use it.
+sidebar:
+  order: 16
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/storage-imagekit` |
+| **Adds to context** | nothing itself — it is a driver for [`storage`](/docs/bricks/storage/) |
+| **Endpoints** | none |
+| **Creates files** | whatever you upload, in your media library |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/storage @theoven/storage-imagekit
+```
+
+```ts title="src/app.ts"
+import { storage } from '@theoven/storage'
+import { imagekitStorage } from '@theoven/storage-imagekit'
+
+const media = imagekitStorage({
+  privateKey: env.string('IMAGEKIT_PRIVATE_KEY'),
+  urlEndpoint: env.string('IMAGEKIT_URL_ENDPOINT'),
+})
+
+export const app = createApp().use(storage(media))
+```
+
+## Transformations
+
+The reason to use ImageKit rather than plain object storage:
+
+```ts
+media.url('avatars/1.png', { transform: { width: 200, height: 200, format: 'auto' } })
+// https://ik.imagekit.io/demo/avatars/1.png?tr=w-200,h-200,f-auto
+```
+
+`format: 'auto'` lets ImageKit serve webp or avif per browser, which is most of the win.
+
+Deliberately on the **driver**, not on `ctx.storage`: resizing an image is not something a storage
+contract should have an opinion about, and inventing one would mean every other driver pretending
+it could crop.
+
+### Signed URLs
+
+```ts
+media.url('private/report.png', { transform: { width: 800 }, expiresIn: 300 })
+```
+
+The signature covers the transformation as well as the path — so a client cannot edit `tr=` to
+request a 10 000px render off a signed URL, which matters on a product billed per transformation.
+
+## Configuration
+
+| Option | Default | |
+| --- | --- | --- |
+| `privateKey` | — | **required**; never send it to a browser |
+| `urlEndpoint` | — | **required**, e.g. `https://ik.imagekit.io/your_id` |
+
+<Aside type="caution" title="Paths cost an extra lookup">
+  The storage contract is path-keyed; ImageKit deletes and inspects by `fileId`. So `remove`,
+  `exists` and `stat` each search for the file first — one extra round trip per call, which S3 and
+  Bunny do not pay. It is visible in the tests rather than hidden.
+</Aside>
+
+Uploads set `useUniqueFileName: false`, because ImageKit otherwise appends a random suffix — and
+then the key you asked for is not the key you get, which silently breaks every other method in the
+contract.
+
+## Limitations
+
+- **No presigned uploads.** ImageKit's browser upload uses a token/signature triple posted to
+  their endpoint, not a `PUT`-able URL, so `presignUpload` is unavailable rather than misleading.
+- **An extra lookup on `remove`, `exists` and `stat`** — see above.
+- **Paging is offset-based**, so `next` is a count rather than a key.
+- **Uploads are buffered**, since the upload API is multipart.
+
+## How it is verified
+
+URL building, transformation syntax and signing are deterministic and fully tested — including
+that changing a transformation changes the signature. Request shapes and the fileId lookup are
+tested against an injected fetcher.
+
+That ImageKit *accepts* those requests is not verified: there is no account in CI.

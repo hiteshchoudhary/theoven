@@ -1,0 +1,98 @@
+---
+title: storage-bunny
+description: Bunny.net Storage as a driver for the storage brick — cheap egress through pull zones, signed delivery URLs.
+sidebar:
+  order: 15
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/storage-bunny` |
+| **Adds to context** | nothing itself — it is a driver for [`storage`](/docs/bricks/storage/) |
+| **Endpoints** | none |
+| **Creates files** | whatever you upload, in your storage zone |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/storage @theoven/storage-bunny
+```
+
+```ts title="src/app.ts"
+import { storage } from '@theoven/storage'
+import { bunnyStorage } from '@theoven/storage-bunny'
+
+export const app = createApp().use(
+  storage(
+    bunnyStorage({
+      zone: env.string('BUNNY_ZONE'),
+      accessKey: env.string('BUNNY_ACCESS_KEY'),
+      pullZone: 'cdn.example.com',
+    }),
+  ),
+)
+```
+
+Everything on `ctx.storage` works unchanged — upload, download, list, delete. What Bunny adds is
+cheap egress through its pull zones, which is the reason to pick it.
+
+<Aside type="caution" title="`accessKey` is the zone password">
+  Not the account API key. Find it under the storage zone's **FTP & API Access**. Using the
+  account key gives 401s that look like a wrong password, which is exactly what they are.
+</Aside>
+
+## Reads go through the edge
+
+With `pullZone` set, `download()` fetches from the CDN. Without it, reads fall back to the storage
+API — which works, and is slower and costs more.
+
+The zone password is **never** sent to the pull zone host; a test asserts that, because leaking a
+storage credential to a public edge is not a mistake you want to make once.
+
+## Configuration
+
+| Option | Default | |
+| --- | --- | --- |
+| `zone` | — | **required**; the storage zone name |
+| `accessKey` | — | **required**; the zone password |
+| `region` | `storage.bunnycdn.com` | `ny.`, `la.`, `sg.`, `syd.`, `uk.`, `se.`, `br.`, `jh.` |
+| `pullZone` | — | hostname for public URLs |
+| `tokenKey` | — | token-authentication key, if enabled on the pull zone |
+
+A zone created in one region is not reachable through another's host.
+
+## Signed URLs
+
+```ts
+ctx.storage.presignDownload('reports/q3.pdf', { expiresIn: 300 })
+```
+
+Available only once both `pullZone` and `tokenKey` are set — `presign` is `undefined` otherwise,
+so `canPresign` tells you before it matters.
+
+<Aside type="note" title="Downloads only">
+  Bunny's token authentication protects *delivery*. There is no signed-upload equivalent, so
+  `presignUpload` throws rather than handing back a URL that fails at the edge. Upload through
+  your server, or use an S3-compatible driver for browser-direct uploads.
+</Aside>
+
+## Limitations
+
+- **No presigned uploads** — see above.
+- **Uploads are buffered.** Bunny's `PUT` needs a known length, so a stream is collected before
+  sending. S3 streams; this does not.
+- **`list` is directory-based.** A prefix is split into a directory and a "starts with", so a
+  prefix spanning directories does not work the way it does on S3.
+- **Paging is client-side.** Bunny returns a whole directory; `limit` and `after` slice it here.
+
+## How it is verified
+
+Request shapes, key encoding, pull-zone routing, paging and the URL signing are tested against an
+injected fetcher — deterministic, and where the bugs are. The token is checked across forty keys
+to be URL-safe, since base64's `+` and `/` do not survive a query string.
+
+That Bunny *accepts* those requests is not verified here: live tests are gated on `BUNNY_ZONE`
+and skip with a printed notice.

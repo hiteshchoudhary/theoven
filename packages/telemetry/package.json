@@ -1,0 +1,51 @@
+{
+  "name": "@theoven/telemetry",
+  "version": "0.1.2",
+  "description": "OpenTelemetry tracing for Oven — spans, context propagation and log correlation",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "opentelemetry",
+    "otel",
+    "tracing",
+    "observability"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/telemetry/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/telemetry"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^",
+    "@opentelemetry/api": ">=1.9.0"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:^",
+    "@opentelemetry/api": "^1.9.1"
+  }
+}

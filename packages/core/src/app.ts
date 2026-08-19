@@ -808,6 +808,7 @@ export class App<Ext = unknown> implements BrickHost {
     }
 
     ctx.assignParams(match.params)
+    ctx.assignRoutePattern(match.payload.pattern)
 
     if (this.requestBricks.length > 0) {
       for (const brick of this.requestBricks) await brick.onRequest?.(ctx)
