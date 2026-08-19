@@ -2,8 +2,18 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { boolFlag, type ParsedArgs, stringFlag } from '../args'
-import { renderTemplate, TEMPLATES, type TemplateName } from '../templates'
-import { BANNER, fail, info, style, success } from '../ui'
+import {
+  type AuthChoice,
+  type DatabaseChoice,
+  renderTemplate,
+  TEMPLATES,
+  type TemplateName,
+} from '../templates'
+
+const DATABASE_CHOICES: readonly DatabaseChoice[] = ['none', 'sqlite', 'postgres']
+const AUTH_CHOICES: readonly AuthChoice[] = ['none', 'basic']
+
+import { BANNER, fail, info, style, success, warn } from '../ui'
 
 /**
  * `oven create <name>`.
@@ -86,6 +96,42 @@ export async function create(args: ParsedArgs): Promise<number> {
     ? await confirm('Include OpenAPI docs at /docs?', true)
     : boolFlag(args.flags, 'openapi', true)
 
+  let database = stringFlag(args.flags, 'db') as DatabaseChoice | undefined
+  if (!database && interactive) {
+    info('')
+    info(
+      `  ${style.cyan('sqlite'.padEnd(10))} ${style.dim('Drizzle over bun:sqlite — no server to run')}`,
+    )
+    info(`  ${style.cyan('postgres'.padEnd(10))} ${style.dim('Drizzle over Postgres')}`)
+    info(`  ${style.cyan('none'.padEnd(10))} ${style.dim('no database')}`)
+    info('')
+    database = (await prompt('Database?', 'sqlite')) as DatabaseChoice
+  }
+  database ??= 'none'
+
+  if (!DATABASE_CHOICES.includes(database)) {
+    fail(`Unknown database "${database}".`, `Available: ${DATABASE_CHOICES.join(', ')}`)
+    return 1
+  }
+
+  let auth = stringFlag(args.flags, 'auth') as AuthChoice | undefined
+  if (!auth && interactive) {
+    auth = (await confirm('Scaffold email and password auth?', false)) ? 'basic' : 'none'
+  }
+  auth ??= 'none'
+
+  if (!AUTH_CHOICES.includes(auth)) {
+    fail(`Unknown auth option "${auth}".`, `Available: ${AUTH_CHOICES.join(', ')}`)
+    return 1
+  }
+
+  // Auth needs somewhere to put users. Say so rather than scaffolding something that will not
+  // run, or silently changing an answer the user gave.
+  if (auth === 'basic' && database === 'none') {
+    warn('auth-basic needs a database; scaffolding with SQLite.')
+    database = 'sqlite'
+  }
+
   const target = resolve(process.cwd(), name)
   const targetProblem = await checkTarget(target)
   if (targetProblem) {
@@ -93,7 +139,7 @@ export async function create(args: ParsedArgs): Promise<number> {
     return 1
   }
 
-  const files = renderTemplate(template, { name, openapi })
+  const files = renderTemplate(template, { name, openapi, database, auth })
 
   for (const file of files) {
     const full = join(target, file.path)
@@ -107,6 +153,12 @@ export async function create(args: ParsedArgs): Promise<number> {
   info('  Next:')
   info(style.dim(`    cd ${name}`))
   info(style.dim('    bun install'))
+  if (database !== 'none') {
+    // Without this the first request that touches a table fails with "no such table", which
+    // reads like a bug in the scaffold rather than a step nobody was told about.
+    info(style.dim('    cp .env.example .env'))
+    info(style.dim('    bun run db:generate && bun run db:migrate'))
+  }
   info(style.dim('    bun run dev'))
   info('')
 

@@ -19,6 +19,32 @@ oven doctor            # check the project for common problems
 ## `oven create`
 
 ```bash
+oven create my-app --db sqlite --auth basic
+```
+
+| Flag | Values | Default |
+| --- | --- | --- |
+| `--template` | `minimal`, `api` | `api` |
+| `--db` | `sqlite`, `postgres`, `none` | asked, or `none` |
+| `--auth` | `basic`, `none` | asked, or `none` |
+| `--openapi` | `--openapi` / `--no-openapi` | on |
+| `--yes` | skip every prompt | — |
+
+`--db sqlite` scaffolds **Drizzle over `bun:sqlite`** — no server to run, no native module. The
+switch to Postgres is one import and one line in `src/db.ts`; every query you have written stays
+the same.
+
+`--auth basic` adds working signup, login, refresh, logout, password change and reset, with the
+[`auth-basic`](/docs/bricks/auth-basic/) tables re-exported from `src/schema.ts` so
+`oven db generate` picks them up. Mail defaults to the console driver, so the reset link is
+printed to your terminal and the whole flow works before you have configured a provider. Auth
+implies a database; asking for auth with `--db none` scaffolds SQLite and says so.
+
+Every project also gets an **`AGENTS.md`** describing the conventions — route naming, return
+values instead of `res.json()`, `defineRoute`, native ORM queries — and the things never to do,
+because a model that has not read the docs otherwise reaches for Express habits.
+
+```bash
 oven create my-app --template api
 ```
 
@@ -103,6 +129,16 @@ What you get instead is one set of command names whatever adapter you chose, and
 where the tools disagree — `oven db push` runs `drizzle-kit push` in one project and
 `prisma db push` in another. A command with no equivalent says so rather than running something
 that looks similar.
+
+### `migrate` runs in-process on Drizzle
+
+`generate`, `push`, `studio` and `drop` shell out to drizzle-kit. `migrate` does not, on Drizzle
+projects: drizzle-kit's SQLite migrator cannot use `bun:sqlite` and asks you to install
+`better-sqlite3` or `@libsql/client`, which would mean the default Oven stack could *generate* a
+migration and then fail to apply it.
+
+Drizzle ships Bun-native migrators, so `oven db migrate` uses those. It reads the same
+`drizzle.config.ts` drizzle-kit does, so the two cannot disagree about where migrations live.
 
 Anything after `--` is passed through unchanged:
 

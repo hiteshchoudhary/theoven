@@ -34,6 +34,8 @@ ${style.bold('Options')}
   --no-minify        skip minification   ${style.dim('(build)')}
   --out <path>       write to a file     ${style.dim('(openapi)')}
   --template <name>  minimal | api       ${style.dim('(create)')}
+  --db <name>        sqlite | postgres | none  ${style.dim('(create)')}
+  --auth <name>      basic | none        ${style.dim('(create)')}
   --yes              skip prompts        ${style.dim('(create)')}
   -h, --help         show this
   -v, --version      show the version

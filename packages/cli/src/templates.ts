@@ -14,10 +14,21 @@ export interface TemplateFile {
   contents: string
 }
 
+export type DatabaseChoice = 'none' | 'sqlite' | 'postgres'
+export type AuthChoice = 'none' | 'basic'
+
 export interface TemplateOptions {
   name: string
   /** Include the OpenAPI brick and a `/docs` reference. */
   openapi: boolean
+  /**
+   * Drizzle over `bun:sqlite` or Postgres, or no database at all.
+   *
+   * Both write the same `src/db.ts` shape, so switching is one line and no query changes (D24).
+   */
+  database?: DatabaseChoice
+  /** Scaffold `auth-basic`, which implies a database and mail. */
+  auth?: AuthChoice
 }
 
 const GITIGNORE = `node_modules/
@@ -52,55 +63,82 @@ const TSCONFIG = `{
 }
 `
 
-function packageJson(name: string): string {
+function packageJson(options: TemplateOptions): string {
+  const hasDatabase = options.database !== undefined && options.database !== 'none'
+  const hasAuth = options.auth === 'basic'
+
+  const dependencies: Record<string, string> = {
+    '@theoven/core': '^0.0.0',
+    zod: '^4.0.0',
+  }
+  const devDependencies: Record<string, string> = {
+    '@theoven/cli': '^0.0.0',
+    '@types/bun': 'latest',
+    typescript: '^5.9.0',
+  }
+  const scripts: Record<string, string> = {
+    dev: 'oven dev',
+    build: 'oven build',
+    start: 'oven start',
+    routes: 'oven routes',
+    doctor: 'oven doctor',
+  }
+
+  if (hasDatabase) {
+    dependencies['@theoven/db'] = '^0.0.0'
+    dependencies['@theoven/db-drizzle'] = '^0.0.0'
+    dependencies['drizzle-orm'] = '^0.44.0'
+    devDependencies['drizzle-kit'] = '^0.31.0'
+    scripts['db:generate'] = 'oven db generate'
+    scripts['db:migrate'] = 'oven db migrate'
+  }
+
+  if (hasAuth) {
+    dependencies['@theoven/auth'] = '^0.0.0'
+    dependencies['@theoven/auth-basic'] = '^0.0.0'
+    dependencies['@theoven/mail'] = '^0.0.0'
+  }
+
   return `${JSON.stringify(
     {
-      name,
+      name: options.name,
       version: '0.0.0',
       private: true,
       type: 'module',
-      scripts: {
-        dev: 'oven dev',
-        build: 'oven build',
-        start: 'oven start',
-        routes: 'oven routes',
-        doctor: 'oven doctor',
-      },
-      dependencies: {
-        '@theoven/core': '^0.0.0',
-        zod: '^4.0.0',
-      },
-      devDependencies: {
-        '@theoven/cli': '^0.0.0',
-        '@types/bun': 'latest',
-        typescript: '^5.9.0',
-      },
+      scripts,
+      dependencies,
+      devDependencies,
     },
     null,
     2,
   )}\n`
 }
 
-/**
- * The app module: builds and exports, but does not listen.
- *
- * Split from the entry on purpose. `oven routes` and `oven openapi` import this to inspect the
- * app, and if listening happened here, asking for a route table would bind a port.
- */
 function appModule(options: TemplateOptions): string {
-  const imports = options.openapi
-    ? "import { createApp, loadRoutes, openapi, requestLogger, securityHeaders } from '@theoven/core'"
-    : "import { createApp, loadRoutes, requestLogger, securityHeaders } from '@theoven/core'"
+  const hasDatabase = options.database !== undefined && options.database !== 'none'
+  const hasAuth = options.auth === 'basic'
 
-  const bricks = options.openapi
-    ? `  .use(requestLogger())
-  .use(securityHeaders())
-  .use(openapi({ info: { title: '${options.name}', version: '0.1.0' } }))`
-    : `  .use(requestLogger())
-  .use(securityHeaders())`
+  const coreImports = ['createApp', 'loadRoutes', 'requestLogger', 'securityHeaders']
+  if (options.openapi) coreImports.splice(3, 0, 'openapi')
 
-  return `${imports}
-import { config } from './env'
+  const imports = [`import { ${coreImports.sort().join(', ')} } from '@theoven/core'`]
+  if (hasAuth) imports.push("import { auth } from '@theoven/auth'")
+  if (hasAuth) imports.push("import { mail } from '@theoven/mail'")
+  imports.push("import { config } from './env'")
+  if (hasDatabase) imports.push("import { database } from './db'")
+  if (hasAuth) imports.push("import { provider } from './auth'")
+  if (hasAuth) imports.push("import { driver } from './mail'")
+
+  // Order matters only where a brick depends on another; these read in the order they run.
+  const bricks = ['  .use(requestLogger())', '  .use(securityHeaders())']
+  if (hasDatabase) bricks.push('  .use(database)')
+  if (hasAuth) bricks.push('  .use(mail(driver))')
+  if (hasAuth) bricks.push('  .use(auth(provider))')
+  if (options.openapi) {
+    bricks.push(`  .use(openapi({ info: { title: '${options.name}', version: '0.1.0' } }))`)
+  }
+
+  return `${imports.join('\n')}
 
 /**
  * The configured app.
@@ -109,7 +147,7 @@ import { config } from './env'
  * can import it without starting a server. Listening happens in index.ts.
  */
 export const app = createApp({ logLevel: config.logLevel })
-${bricks}
+${bricks.join('\n')}
 
 await loadRoutes(app, \`\${import.meta.dir}/routes\`)
 
@@ -132,7 +170,7 @@ function read() {
   return {
     port: env.port('PORT', 3000),
     logLevel: env.oneOf('LOG_LEVEL', ['debug', 'info', 'warn', 'error'], 'info'),
-    isProduction: env.isProduction,
+    isProduction: env.isProduction,__EXTRA_ENV__
   }
 }
 
@@ -252,6 +290,21 @@ export default defineRoute(
 `
 
 function readme(options: TemplateOptions): string {
+  const stackLines: string[] = []
+  if (options.database === 'sqlite') {
+    stackLines.push('- **Database:** Drizzle over `bun:sqlite` (`src/schema.ts`, `src/db.ts`)')
+  }
+  if (options.database === 'postgres') {
+    stackLines.push('- **Database:** Drizzle over Postgres (`src/schema.ts`, `src/db.ts`)')
+  }
+  if (options.auth === 'basic') {
+    stackLines.push('- **Auth:** `auth-basic` — eight endpoints at `/auth/*`, rate limited')
+    stackLines.push(
+      '- **Mail:** the console driver, so password reset works before you configure one',
+    )
+  }
+  const stack = stackLines.length > 0 ? `\n## Stack\n\n${stackLines.join('\n')}\n` : ''
+
   const docsLine = options.openapi
     ? '\nAn API reference is served at `/docs`, generated from the schemas in each route file.\n'
     : ''
@@ -261,10 +314,16 @@ function readme(options: TemplateOptions): string {
 Built with [Oven](https://theoven.app).
 
 \`\`\`bash
-bun install
+bun install${
+    options.database && options.database !== 'none'
+      ? `
+cp .env.example .env
+bun run db:generate && bun run db:migrate`
+      : ''
+  }
 bun run dev
 \`\`\`
-${docsLine}
+${docsLine}${stack}
 ## Layout
 
 \`\`\`
@@ -290,19 +349,285 @@ app without binding a port.
 `
 }
 
+// ---------------------------------------------------------------------------------------
+// Database, auth and mail
+// ---------------------------------------------------------------------------------------
+
+function schemaModule(options: TemplateOptions): string {
+  const authTables =
+    options.auth === 'basic'
+      ? `
+/**
+ * The tables \`auth-basic\` owns: \`auth_users\`, \`auth_refresh_tokens\`, \`auth_reset_tokens\`.
+ *
+ * Re-exported here so \`oven db generate\` writes migrations for them alongside your own. Drop
+ * this line and signup fails at runtime with "no such table: auth_users".
+ */
+export * from '@theoven/auth-basic/schema'
+`
+      : ''
+
+  return `${SCHEMA}${authTables}`
+}
+
+const SCHEMA = `import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+/**
+ * Your tables.
+ *
+ * Switching to Postgres means importing from \`drizzle-orm/pg-core\` here and changing one line
+ * in db.ts. Every query you write against \`ctx.db\` stays exactly the same.
+ */
+export const notes = sqliteTable('notes', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  body: text('body'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+})
+`
+
+function dbModule(choice: DatabaseChoice): string {
+  const provider =
+    choice === 'postgres'
+      ? 'drizzlePostgres({ url: config.databaseUrl, schema })'
+      : 'drizzleSqlite({ url: config.databaseUrl, schema })'
+
+  const other = choice === 'postgres' ? 'drizzleSqlite' : 'drizzlePostgres'
+  const otherCall =
+    choice === 'postgres'
+      ? 'drizzleSqlite({ url: config.databaseUrl, schema })'
+      : 'drizzlePostgres({ url: config.databaseUrl, schema })'
+
+  return `import { db } from '@theoven/db'
+import { ${choice === 'postgres' ? 'drizzlePostgres' : 'drizzleSqlite'} } from '@theoven/db-drizzle'
+import { config } from './env'
+import * as schema from './schema'
+
+/**
+ * The database brick.
+ *
+ * \`ctx.db\` is the Drizzle client itself, typed from the schema above — not a wrapper. Your
+ * queries are Drizzle queries, which is also why a model already knows how to write them.
+ *
+ * The one-line switch:
+ *
+ *   import { ${other} } from '@theoven/db-drizzle'
+ *   export const database = db(${otherCall})
+ *
+ * Change the import and this line. Every query stays the same.
+ */
+export const database = db(${provider})
+`
+}
+
+const AUTH_MODULE = `import { basicAuth } from '@theoven/auth-basic'
+import { client } from './client'
+import { config } from './env'
+
+/**
+ * Email-and-password auth.
+ *
+ * Mounts eight endpoints at /auth/*: signup, login, refresh, logout, me, change-password,
+ * forgot-password and reset-password. Login, signup and reset are rate limited by default.
+ *
+ * The reset email goes through ctx.mail. In development that is the console driver, so the link
+ * is printed to the terminal and the whole flow works before you have configured a provider.
+ */
+export const provider = basicAuth({
+  db: client,
+  secret: config.authSecret,
+  sendResetEmail: async (to, token) => {
+    const { mailer } = await import('./mail')
+    await mailer.send({
+      to,
+      subject: 'Reset your password',
+      text: \`Open \${config.appUrl}/reset?token=\${token}\`,
+    })
+  },
+})
+`
+
+const AUTH_CLIENT = `import { Database } from 'bun:sqlite'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { config } from './env'
+import * as schema from './schema'
+
+/**
+ * The raw Drizzle client, for the pieces that need one before the app exists.
+ *
+ * \`auth-basic\` takes a client rather than reading it off the context, because it builds its
+ * store at construction. Inside a route, keep using \`ctx.db\` — it is this same client.
+ */
+export const client = drizzle(new Database(config.databaseUrl), { schema })
+`
+
+const MAIL_MODULE = `import { consoleMail } from '@theoven/mail'
+
+/**
+ * Mail, defaulting to the console driver.
+ *
+ * Password reset works immediately: the link is printed to your terminal. Swap in a real driver
+ * when you have one — the console driver is refused in production, so this cannot ship by
+ * accident.
+ *
+ *   import { resendMail } from '@theoven/mail'
+ *   export const driver = resendMail({ apiKey: env.string('RESEND_API_KEY') })
+ */
+export const driver = consoleMail()
+
+export const mailer = {
+  send: (message: Parameters<typeof driver.send>[0]) => driver.send(message),
+}
+`
+
+const ME_ROUTE = `import { defineRoute } from '@theoven/core'
+
+/** The guard is what narrows ctx.user: inside this handler it cannot be null. */
+export default defineRoute(
+  { auth: true, summary: 'The signed-in user' },
+  (ctx) => ({ id: ctx.user.id, email: ctx.user.email, name: ctx.user.name }),
+)
+`
+
+const DRIZZLE_CONFIG_SQLITE = `import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  schema: './src/schema.ts',
+  out: './drizzle',
+  dialect: 'sqlite',
+  dbCredentials: { url: process.env.DATABASE_URL ?? './data.db' },
+})
+`
+
+const DRIZZLE_CONFIG_POSTGRES = `import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  schema: './src/schema.ts',
+  out: './drizzle',
+  dialect: 'postgresql',
+  dbCredentials: { url: process.env.DATABASE_URL as string },
+})
+`
+
+/**
+ * Instructions for coding agents, written into every project.
+ *
+ * A model that has not read Oven's docs will otherwise reach for Express habits — `res.json`,
+ * `require`, middleware signatures with three arguments. Stating the conventions once, in the
+ * file agents look for, is cheaper than correcting them per session (D22).
+ */
+function agentsFile(options: TemplateOptions): string {
+  const dbSection =
+    options.database && options.database !== 'none'
+      ? `
+## Database
+
+- \`ctx.db\` is the **Drizzle client**, typed from \`src/schema.ts\`. Write ordinary Drizzle
+  queries: \`await ctx.db.select().from(notes)\`. There is no Oven query API to learn.
+- Add tables in \`src/schema.ts\`, then run \`oven db generate\` and \`oven db migrate\`.
+- For a transaction, \`import { transaction } from '@theoven/db'\` or use Drizzle's own form.
+`
+      : ''
+
+  const authSection =
+    options.auth === 'basic'
+      ? `
+## Auth
+
+- The endpoints at \`/auth/*\` come from \`auth-basic\`. Do not write your own signup or login.
+- Guard a route with \`{ auth: true }\` in its schema. Inside such a route \`ctx.user\` is
+  non-null — no null check needed, and TypeScript knows.
+- For a rule beyond "signed in", add a named policy and use \`{ auth: 'policy-name' }\`.
+- Never read or log \`passwordHash\`.
+`
+      : ''
+
+  return `# Working in this project
+
+This is an [Oven](https://theoven.app) app. Oven is not Express — the conventions below are not
+stylistic preferences, they are what the framework expects.
+
+## Routes
+
+- The filesystem is the router. \`src/routes/users/[id].get.ts\` serves \`GET /users/:id\`.
+- A route file default-exports a handler. Use \`defineRoute(schema, handler)\` when it has a
+  schema — that is what makes \`ctx.params\`, \`ctx.query\` and \`ctx.body\` typed and what
+  puts the route in the OpenAPI document.
+- **Return values.** Return a plain object and Oven serialises it. There is no \`res\`, no
+  \`res.json()\`, no \`next()\`. Return \`null\` for 204. Set \`ctx.status\` to change the code.
+- **Errors.** \`throw new NotFound('...')\` and friends from \`@theoven/core\`. They become
+  RFC 9457 problem+json. Do not hand-write error responses.
+- Validation is [Standard Schema](https://standardschema.dev), so Zod works and so does Valibot.
+  A failed validation is a 422 naming the field; you do not write that check.
+${dbSection}${authSection}
+## Never
+
+- **No Express middleware.** \`(req, res, next)\` does not work here. Oven middleware is
+  \`(ctx, next) => ...\` and returns a Response.
+- **No CommonJS.** ESM only — \`import\`, never \`require\`.
+- **No \`process.env\` reads scattered through the code.** Add it to \`src/env.ts\`, where a
+  missing variable fails at boot with a message instead of at 3am as \`undefined\`.
+- **No \`any\` to silence an inference problem.** The types are the documentation; if one is
+  wrong, that is worth knowing.
+
+## Commands
+
+\`\`\`bash
+bun run dev       # watcher
+bun run routes    # print the route table — use this to check what you registered
+bun run doctor    # configuration problems, with what to do about each
+\`\`\`
+
+Full documentation: https://theoven.app/docs — and https://theoven.app/llms.txt for a
+model-readable index of it.
+`
+}
+
 /** Builds the file list for a template. */
 export function renderTemplate(template: TemplateName, options: TemplateOptions): TemplateFile[] {
+  const database = options.database ?? 'none'
+  // Auth needs somewhere to put users. Choosing SQLite silently is better than a scaffold that
+  // does not run, and the README says which database it picked.
+  const resolved: TemplateOptions = {
+    ...options,
+    database: options.auth === 'basic' && database === 'none' ? 'sqlite' : database,
+  }
+  const hasDatabase = resolved.database !== 'none'
+  const hasAuth = resolved.auth === 'basic'
+
   const files: TemplateFile[] = [
-    { path: 'package.json', contents: packageJson(options.name) },
+    { path: 'package.json', contents: packageJson(resolved) },
     { path: 'tsconfig.json', contents: TSCONFIG },
     { path: '.gitignore', contents: GITIGNORE },
-    { path: '.env.example', contents: '# Copy to .env and adjust.\nPORT=3000\nLOG_LEVEL=info\n' },
-    { path: 'README.md', contents: readme(options) },
-    { path: 'src/env.ts', contents: ENV_MODULE },
-    { path: 'src/app.ts', contents: appModule(options) },
+    { path: '.env.example', contents: envExample(resolved) },
+    { path: 'README.md', contents: readme(resolved) },
+    { path: 'AGENTS.md', contents: agentsFile(resolved) },
+    { path: 'src/env.ts', contents: envModule(resolved) },
+    { path: 'src/app.ts', contents: appModule(resolved) },
     { path: 'src/index.ts', contents: ENTRY },
     { path: 'src/routes/index.get.ts', contents: ROOT_ROUTE },
   ]
+
+  if (hasDatabase) {
+    files.push(
+      { path: 'src/schema.ts', contents: schemaModule(resolved) },
+      { path: 'src/db.ts', contents: dbModule(resolved.database as DatabaseChoice) },
+      {
+        path: 'drizzle.config.ts',
+        contents:
+          resolved.database === 'postgres' ? DRIZZLE_CONFIG_POSTGRES : DRIZZLE_CONFIG_SQLITE,
+      },
+    )
+  }
+
+  if (hasAuth) {
+    files.push(
+      { path: 'src/client.ts', contents: AUTH_CLIENT },
+      { path: 'src/mail.ts', contents: MAIL_MODULE },
+      { path: 'src/auth.ts', contents: AUTH_MODULE },
+      { path: 'src/routes/me.get.ts', contents: ME_ROUTE },
+    )
+  }
 
   if (template === 'api') {
     files.push(
@@ -315,6 +640,49 @@ export function renderTemplate(template: TemplateName, options: TemplateOptions)
   }
 
   return files
+}
+
+/**
+ * `.env.example` lists every variable the scaffold reads.
+ *
+ * Generated from the same choices as the code, so a scaffold cannot ship a `src/env.ts` that
+ * demands a variable the example file never mentions.
+ */
+function envExample(options: TemplateOptions): string {
+  const lines = ['# Copy to .env and adjust.', 'PORT=3000', 'LOG_LEVEL=info']
+
+  if (options.database === 'sqlite') lines.push('DATABASE_URL=./data.db')
+  if (options.database === 'postgres') {
+    lines.push('DATABASE_URL=postgres://user:password@localhost:5432/' + options.name)
+  }
+  if (options.auth === 'basic') {
+    lines.push(
+      '',
+      '# Signs access tokens. Generate one: openssl rand -base64 32',
+      'AUTH_SECRET=',
+      '# Used in password-reset links.',
+      'APP_URL=http://localhost:3000',
+    )
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+function envModule(options: TemplateOptions): string {
+  const extra: string[] = []
+  if (options.database === 'postgres') {
+    extra.push("    databaseUrl: env.string('DATABASE_URL'),")
+  } else if (options.database === 'sqlite') {
+    extra.push("    databaseUrl: env.string('DATABASE_URL', './data.db'),")
+  }
+  if (options.auth === 'basic') {
+    // No default. A framework that invents a signing secret has invented one every deployment
+    // shares, so this must fail at boot when it is missing.
+    extra.push("    authSecret: env.string('AUTH_SECRET'),")
+    extra.push("    appUrl: env.string('APP_URL', 'http://localhost:3000'),")
+  }
+
+  return ENV_MODULE.replace('__EXTRA_ENV__', extra.length > 0 ? `\n${extra.join('\n')}` : '')
 }
 
 export const TEMPLATES: Record<TemplateName, string> = {

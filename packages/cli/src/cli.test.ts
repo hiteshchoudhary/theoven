@@ -428,3 +428,153 @@ describe('database toolchain detection', () => {
     expect(isSubcommand(undefined)).toBe(false)
   })
 })
+
+/**
+ * The scaffold's stack options.
+ *
+ * These assert on the generated files rather than on the renderer's internals, because what
+ * breaks in practice is a file that references something another file no longer exports.
+ */
+describe('scaffolded stack', () => {
+  function render(options: Partial<Parameters<typeof renderTemplate>[1]> = {}) {
+    const files = renderTemplate('api', { name: 'demo', openapi: true, ...options })
+    return {
+      paths: new Set(files.map((file) => file.path)),
+      read: (path: string) => files.find((file) => file.path === path)?.contents ?? '',
+    }
+  }
+
+  test('no database means no database files', () => {
+    const { paths } = render({ database: 'none' })
+    expect(paths.has('src/db.ts')).toBe(false)
+    expect(paths.has('drizzle.config.ts')).toBe(false)
+  })
+
+  test('sqlite scaffolds Drizzle over bun:sqlite', () => {
+    const { paths, read } = render({ database: 'sqlite' })
+
+    expect(paths.has('src/db.ts')).toBe(true)
+    expect(paths.has('src/schema.ts')).toBe(true)
+    expect(read('src/db.ts')).toContain('drizzleSqlite')
+    expect(read('drizzle.config.ts')).toContain("dialect: 'sqlite'")
+  })
+
+  // The claim the default stack makes: changing databases does not change queries.
+  test('postgres differs from sqlite by the provider line and nothing else', () => {
+    const sqlite = render({ database: 'sqlite' })
+    const postgres = render({ database: 'postgres' })
+
+    expect(postgres.read('src/db.ts')).toContain('drizzlePostgres')
+    expect(postgres.read('drizzle.config.ts')).toContain("dialect: 'postgresql'")
+    // Same schema file, same route files — only db.ts and the drizzle config move.
+    expect(postgres.read('src/schema.ts')).toBe(sqlite.read('src/schema.ts'))
+    expect(postgres.read('src/routes/users/index.get.ts')).toBe(
+      sqlite.read('src/routes/users/index.get.ts'),
+    )
+  })
+
+  test('auth scaffolds its modules and a guarded route', () => {
+    const { paths, read } = render({ auth: 'basic' })
+
+    expect(paths.has('src/auth.ts')).toBe(true)
+    expect(paths.has('src/mail.ts')).toBe(true)
+    expect(paths.has('src/routes/me.get.ts')).toBe(true)
+    expect(read('src/routes/me.get.ts')).toContain('auth: true')
+    expect(read('src/app.ts')).toContain('.use(auth(provider))')
+  })
+
+  // Auth needs somewhere to put users; a scaffold that cannot run is not a kindness.
+  test('auth implies a database even when none was asked for', () => {
+    const { paths, read } = render({ auth: 'basic', database: 'none' })
+    expect(paths.has('src/db.ts')).toBe(true)
+    expect(read('src/db.ts')).toContain('drizzleSqlite')
+  })
+
+  /**
+   * The bug this catches is a runtime "no such table: auth_users" after a clean generate and
+   * migrate — because drizzle-kit only sees the tables `src/schema.ts` exports.
+   */
+  test("the auth brick's tables reach drizzle-kit through src/schema.ts", () => {
+    const { read } = render({ auth: 'basic' })
+    expect(read('src/schema.ts')).toContain("export * from '@theoven/auth-basic/schema'")
+  })
+
+  test('mail defaults to the console driver so reset works with no provider', () => {
+    const { read } = render({ auth: 'basic' })
+    expect(read('src/mail.ts')).toContain('consoleMail()')
+    expect(read('src/app.ts')).toContain('.use(mail(driver))')
+  })
+
+  // A scaffold whose env.ts demands a variable its .env.example never mentions is a bad first
+  // five minutes.
+  test('every variable src/env.ts requires is in .env.example', () => {
+    for (const database of ['none', 'sqlite', 'postgres'] as const) {
+      const { read } = render({ auth: 'basic', database })
+      const example = read('.env.example')
+
+      for (const [, name] of read('src/env.ts').matchAll(/env\.\w+\('([A-Z_]+)'/g)) {
+        expect(example).toContain(name as string)
+      }
+    }
+  })
+
+  test('AGENTS.md is always written, and covers what was scaffolded', () => {
+    const bare = render({ database: 'none' })
+    expect(bare.paths.has('AGENTS.md')).toBe(true)
+    expect(bare.read('AGENTS.md')).not.toContain('## Auth')
+
+    const full = render({ database: 'sqlite', auth: 'basic' })
+    expect(full.read('AGENTS.md')).toContain('## Auth')
+    expect(full.read('AGENTS.md')).toContain('## Database')
+    // The Express habits a model will otherwise reach for.
+    expect(full.read('AGENTS.md')).toContain('No Express middleware')
+    expect(full.read('AGENTS.md')).toContain('No CommonJS')
+  })
+
+  test('dependencies follow the choices rather than being listed always', () => {
+    const bare = JSON.parse(render({ database: 'none' }).read('package.json'))
+    expect(bare.dependencies['@theoven/db']).toBeUndefined()
+    expect(bare.scripts['db:generate']).toBeUndefined()
+
+    const full = JSON.parse(render({ database: 'sqlite', auth: 'basic' }).read('package.json'))
+    expect(full.dependencies['@theoven/db-drizzle']).toBeDefined()
+    expect(full.dependencies['@theoven/auth-basic']).toBeDefined()
+    expect(full.dependencies['@theoven/mail']).toBeDefined()
+    expect(full.devDependencies['drizzle-kit']).toBeDefined()
+    expect(full.scripts['db:migrate']).toBe('oven db migrate')
+  })
+
+  /**
+   * Templates are strings, so a syntax error in one is invisible until someone scaffolds. Every
+   * generated TypeScript file is parsed here.
+   */
+  test('every generated TypeScript file parses', () => {
+    const transpiler = new Bun.Transpiler({ loader: 'tsx' })
+    const files = renderTemplate('api', {
+      name: 'demo',
+      openapi: true,
+      database: 'sqlite',
+      auth: 'basic',
+    })
+
+    for (const file of files.filter((candidate) => candidate.path.endsWith('.ts'))) {
+      expect(() => transpiler.transformSync(file.contents)).not.toThrow()
+    }
+  })
+
+  // Backticks and ${} inside template strings are easy to over-escape, and the result is a
+  // literal backslash in someone's new project.
+  test('no over-escaped backticks survive into the output', () => {
+    const files = renderTemplate('api', {
+      name: 'demo',
+      openapi: true,
+      database: 'sqlite',
+      auth: 'basic',
+    })
+
+    for (const file of files) {
+      expect(file.contents).not.toContain('\\`')
+      expect(file.contents).not.toContain('\\${')
+    }
+  })
+})

@@ -451,14 +451,27 @@ Only as far as `auth-basic` needs it: password reset cannot work without sending
 - [ ] The remaining drivers, templating and the preview inbox stay in §3.2
 
 ### 2.8 Default stack and scaffold (D21, D24)
-- [ ] `oven create` defaults to **Drizzle over `bun:sqlite`**, with a one-line switch to Postgres
-      that leaves every query untouched
-- [ ] Optional `--auth basic` scaffolds signup, login and reset working out of the box
-- [ ] Mail defaults to the console driver, so password reset works before any provider exists
 
-**Not done in 2.5:** rate limiting on the auth endpoints (use core's `rateLimit` in front of
-`/auth/*` for now), and email verification — the column exists and is never set. Both are on
-the brick's page under Limitations rather than left for someone to discover.
+**Verified by running it, not by reading it:** scaffolded a project, linked it to the workspace,
+ran `oven db generate` (4 tables, auth's three included), `oven db migrate`, started it, signed
+up, called a guarded route with the access token, and requested a password reset — the link
+printed to the console. Two real gaps turned up doing that and are fixed:
+
+- `src/schema.ts` did not re-export `auth-basic`'s tables, so a clean generate/migrate produced
+  a runtime `no such table: auth_users`.
+- drizzle-kit's SQLite migrator cannot use `bun:sqlite` — it demands `better-sqlite3` or
+  `@libsql/client`. `oven db migrate` now runs in-process through Drizzle's Bun-native migrator,
+  so the default stack needs no native module.
+- [x] `oven create --db sqlite` scaffolds **Drizzle over `bun:sqlite`**, with a one-line switch to
+      Postgres that leaves every query untouched — asserted by a test comparing the two renders
+      file by file
+- [x] `--auth basic` scaffolds signup, login and reset working out of the box, with
+      `auth-basic`'s tables re-exported from `src/schema.ts` so `oven db generate` picks them up
+- [x] Mail defaults to the console driver, so password reset works before any provider exists
+
+**Not done in 2.5:** email verification — the column exists and is never set. It is on the
+brick's page under Limitations rather than left for someone to discover. (Rate limiting *was*
+done; see §2.5 above.)
 
 **Found while building `db-drizzle`:** Drizzle's `bun-sqlite` transaction does **not** roll back
 an async failure. `bun:sqlite` is synchronous, so the transaction commits before the rejection
@@ -471,8 +484,9 @@ own method still has the flaw so the difference stays visible.
       model — finds the same headings on every brick
 - [x] **Writing your own brick** guide at `/docs/guides/writing-a-brick/`
 - [ ] `llms.txt` and `llms-full.txt` generated from the docs at build time, so they cannot drift
-- [ ] `AGENTS.md` written by `oven create`: route naming, `defineRoute`, native ORM queries,
-      policies, and the things never to do (no Express middleware, no CommonJS)
+- [x] `AGENTS.md` written by `oven create`: route naming, `defineRoute`, native ORM queries,
+      policies, and the things never to do (no Express middleware, no CommonJS). Sections appear
+      only for what was actually scaffolded.
 
 **Deliberately not doing:** a unified query API (D16), normalised roles (D17), and a required
 sign-in method every adapter must implement (D19). Each was considered and rejected for reasons

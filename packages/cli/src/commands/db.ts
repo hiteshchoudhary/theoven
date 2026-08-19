@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ParsedArgs } from '../args'
 import { resolveRoot } from '../paths'
-import { BANNER, fail, info, style, warn } from '../ui'
+import { BANNER, fail, info, style, success, warn } from '../ui'
 
 /**
  * `oven db` — schema and migration commands.
@@ -104,6 +104,18 @@ export async function dbCommand(args: ParsedArgs): Promise<number> {
     return 1
   }
 
+  /**
+   * `migrate` on Drizzle is run in-process rather than through drizzle-kit.
+   *
+   * drizzle-kit's SQLite migrator cannot use `bun:sqlite` — it asks for `better-sqlite3` or
+   * `@libsql/client`, which means the default Oven stack could generate a migration and then not
+   * apply it. Drizzle ships Bun-native migrators; this uses them, so the default stack needs no
+   * native module.
+   */
+  if (sub === 'migrate' && toolchain.name === 'drizzle') {
+    return migrateWithDrizzle(root)
+  }
+
   const translated = toolchain.translate(sub)
   if (translated === null) {
     fail(
@@ -137,4 +149,67 @@ export async function dbCommand(args: ParsedArgs): Promise<number> {
   }
 
   return code
+}
+
+/**
+ * Applies generated migrations using Drizzle's Bun-native migrator.
+ *
+ * Reads the same `drizzle.config.ts` drizzle-kit does, so `generate` and `migrate` cannot
+ * disagree about where migrations live or which database they target.
+ */
+async function migrateWithDrizzle(root: string): Promise<number> {
+  const configPath = ['drizzle.config.ts', 'drizzle.config.js', 'drizzle.config.mjs']
+    .map((name) => join(root, name))
+    .find((path) => existsSync(path))
+
+  if (!configPath) {
+    fail('No drizzle.config.ts found.', 'Create one, or run `bunx drizzle-kit migrate` yourself.')
+    return 1
+  }
+
+  const config = ((await import(configPath)) as { default?: DrizzleConfig }).default
+  const folder = config?.out ?? './drizzle'
+  const url = config?.dbCredentials?.url
+
+  if (!url) {
+    fail(
+      `${configPath} has no dbCredentials.url.`,
+      'Oven needs it to connect. Set it, or run the migration through your own script.',
+    )
+    return 1
+  }
+
+  if (!existsSync(join(root, folder))) {
+    fail(`No migrations found in ${folder}.`, 'Generate them first: oven db generate')
+    return 1
+  }
+
+  info(style.dim(`  applying migrations from ${folder}`))
+
+  try {
+    if (config?.dialect === 'postgresql') {
+      const { drizzle } = await import('drizzle-orm/bun-sql')
+      const { migrate } = await import('drizzle-orm/bun-sql/migrator')
+      const client = drizzle({ connection: { url } })
+      await migrate(client, { migrationsFolder: join(root, folder) })
+    } else {
+      const { Database } = await import('bun:sqlite')
+      const { drizzle } = await import('drizzle-orm/bun-sqlite')
+      const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
+      const client = drizzle(new Database(url))
+      migrate(client, { migrationsFolder: join(root, folder) })
+    }
+  } catch (error) {
+    fail('The migration failed.', error instanceof Error ? error.message : String(error))
+    return 1
+  }
+
+  success('migrations applied')
+  return 0
+}
+
+interface DrizzleConfig {
+  out?: string
+  dialect?: string
+  dbCredentials?: { url?: string }
 }
