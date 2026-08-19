@@ -1,0 +1,51 @@
+{
+  "name": "@theoven/storage-bunny",
+  "version": "0.1.2",
+  "description": "Bunny.net Storage for Oven — object storage plus signed pull-zone URLs",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "storage",
+    "bunny",
+    "bunnycdn",
+    "cdn"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/storage-bunny/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/storage-bunny"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^",
+    "@theoven/storage": "workspace:^"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:^",
+    "@theoven/storage": "workspace:^"
+  }
+}

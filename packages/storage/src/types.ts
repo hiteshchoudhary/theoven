@@ -120,8 +120,14 @@ export interface StorageDriver {
   stat(key: string): Promise<StoredObject | null>
   list(options: ListOptions): Promise<ListResult>
 
-  /** Signs a URL. Absent when the backend has no such concept — checked at boot, not at use. */
-  presign?(key: string, options: PresignOptions): string
+  /**
+   * Signs a URL. Absent when the backend has no such concept — checked at boot, not at use.
+   *
+   * Declared as an optional *property* rather than an optional method so a driver can decide at
+   * construction: Bunny can sign only when a pull zone and token key are configured, and needs
+   * to say so with `presign: undefined`.
+   */
+  presign?: ((key: string, options: PresignOptions) => string) | undefined
 
   /** The underlying client, for whatever the contract does not cover. */
   readonly raw: unknown

@@ -227,6 +227,30 @@
         "@theoven/core": "workspace:^",
       },
     },
+    "packages/storage-bunny": {
+      "name": "@theoven/storage-bunny",
+      "version": "0.1.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/storage": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/storage": "workspace:^",
+      },
+    },
+    "packages/storage-imagekit": {
+      "name": "@theoven/storage-imagekit",
+      "version": "0.1.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/storage": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/storage": "workspace:^",
+      },
+    },
   },
   "packages": {
     "@apidevtools/json-schema-ref-parser": ["@apidevtools/json-schema-ref-parser@15.5.2", "", { "dependencies": { "js-yaml": "^5.2.2", "undici": "^6.28.0" }, "peerDependencies": { "@types/json-schema": "^7.0.15" } }, "sha512-B+C9Ok0DF/rjANIUHgwcV5/d4C72MB7f2IbKFL8jDGcGq2qn3yr893s8vAn2kbhmyaelAin0JK8EKF9P1+y7aQ=="],
@@ -648,6 +672,10 @@
     "@theoven/queue": ["@theoven/queue@workspace:packages/queue"],
 
     "@theoven/storage": ["@theoven/storage@workspace:packages/storage"],
+
+    "@theoven/storage-bunny": ["@theoven/storage-bunny@workspace:packages/storage-bunny"],
+
+    "@theoven/storage-imagekit": ["@theoven/storage-imagekit@workspace:packages/storage-imagekit"],
 
     "@theoven/web": ["@theoven/web@workspace:apps/web"],
 
