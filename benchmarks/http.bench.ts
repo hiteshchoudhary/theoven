@@ -1,5 +1,5 @@
 /**
- * Socket-level HTTP benchmark: Oven vs Hono vs Elysia vs Fastify vs Express.
+ * Socket-level HTTP benchmark: Oven vs Hono vs Fastify vs Express.
  *
  * This is the benchmark that includes Express and Fastify, because it is the only kind that
  * can. Both are built on Node's `req`/`res` and have no `Request` entry point, so they cannot
@@ -9,7 +9,7 @@
  * socket, which is what an actual deployment looks like.
  *
  * **Runtime choice matters here, so it is explicit.** Each framework runs on the runtime it is
- * actually deployed on: Oven, Hono and Elysia on Bun; Express and Fastify on Node. Running the
+ * actually deployed on: Oven and Hono on Bun; Express and Fastify on Node. Running the
  * Node frameworks on Bun's `node:http` compatibility layer would measure Bun's shim rather than
  * the framework, and running them on Node is the honest question anyway — this is the choice a
  * team actually makes.
@@ -31,7 +31,6 @@ interface Contender {
 const CONTENDERS: Contender[] = [
   { name: 'oven', runtime: 'bun', script: 'benchmarks/servers/oven.server.ts' },
   { name: 'hono', runtime: 'bun', script: 'benchmarks/servers/hono.server.ts' },
-  { name: 'elysia', runtime: 'bun', script: 'benchmarks/servers/elysia.server.ts' },
   { name: 'fastify', runtime: 'node', script: 'benchmarks/servers/fastify.server.mjs' },
   { name: 'express', runtime: 'node', script: 'benchmarks/servers/express.server.mjs' },
 ]

@@ -1,5 +1,5 @@
 /**
- * Framework dispatch benchmark: Oven vs Hono vs Elysia.
+ * Framework dispatch benchmark: Oven vs Hono.
  *
  * **What this measures:** the cost of taking a `Request` and producing a `Response` — routing,
  * context construction, handler invocation, and response coercion. All three frameworks expose
@@ -17,7 +17,6 @@
  *
  * Run: bun benchmarks/dispatch.bench.ts
  */
-import { Elysia } from 'elysia'
 import { Hono } from 'hono'
 import { createApp, silentLogger } from '../packages/core/src/index'
 
@@ -37,16 +36,9 @@ hono.get('/', (c) => c.text('ok'))
 hono.get('/users/:id', (c) => c.json({ id: c.req.param('id') }))
 hono.get('/a/b/c/d/e', (c) => c.text('deep'))
 
-// --- Elysia ------------------------------------------------------------------------------
-const elysia = new Elysia()
-  .get('/', () => 'ok')
-  .get('/users/:id', ({ params }) => ({ id: params.id }))
-  .get('/a/b/c/d/e', () => 'deep')
-
 const contenders: Array<{ name: string; dispatch: Dispatcher }> = [
   { name: 'oven', dispatch: (request) => oven.fetch(request) },
   { name: 'hono', dispatch: (request) => hono.fetch(request) },
-  { name: 'elysia', dispatch: (request) => elysia.handle(request) },
 ]
 
 const scenarios: Array<{ label: string; url: string }> = [

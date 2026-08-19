@@ -2,7 +2,7 @@
  * Router micro-benchmark.
  *
  * Measures lookup only — no HTTP, no context, no handler. The comparative benchmark against
- * Express/Hono/Elysia lives in `benchmarks/server.bench.ts` and needs the server layer
+ * Express/Hono lives in `benchmarks/server.bench.ts` and needs the server layer
  * (Phase 1.2) before it can be meaningful.
  *
  * Run: bun benchmarks/router.bench.ts

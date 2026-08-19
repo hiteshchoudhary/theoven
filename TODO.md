@@ -19,7 +19,7 @@ thirteen packages — `db`, `db-drizzle`, `db-mongoose`, `auth`, `auth-basic`, `
 gated on env vars and run in CI against service containers; CI fails if any of them *skips*, so
 a typo in an env name cannot turn a green run into a false one.
 
-Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
+Benchmarked against Hono, Fastify and Express at both dispatch and socket level.
 Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
 landing page live at theoven.pages.dev; GitHub repo live; `@theoven` npm org claimed.
 
@@ -94,11 +94,12 @@ Everything else depends on this. Do not start Phase 2 until Phase 1 is done and 
       encoded segments, 405 collection, 1500-route table
 - [x] Micro-benchmark in `benchmarks/router.bench.ts` — 11.9M static lookups/s,
       8.6M single-param/s, 4.9M with backtracking
-- [x] Comparative benchmark vs Hono / Elysia — see `benchmarks/README.md`. Express excluded on
+- [x] Comparative benchmark vs Hono — see `benchmarks/README.md`. Express excluded on
       purpose: it has no `Request` entry point, so the comparison would not be like-for-like
 - [x] Socket-level throughput benchmark with a real load generator, including Express and
-      Fastify — `benchmarks/http.bench.ts`. Oven ~6x Express, ~1.35x Fastify, level with
-      Elysia and Hono. Confirms the dispatch-level Elysia gap is worth 2.5% at the socket
+      Fastify — `benchmarks/http.bench.ts`. Oven ~5.8x Express, ~1.3x Fastify; Hono is ~3.5%
+      ahead of us. Confirms that dispatch-level differences compress at the socket: Hono
+      dispatches 1.55x faster than Oven on a static root and is only 4.7% ahead over a socket
 
 ### 1.2 Server + Context ✅
 
@@ -753,13 +754,44 @@ development and production. Covered by tests now.
 - [ ] 💡 i18n brick
 - [ ] 💡 Payments brick (Stripe)
 - [ ] 💡 `oven deploy` to Fly/Railway/Cloudflare Containers
-- [ ] 💡 **AOT route compilation.** Elysia is ~2× faster than Oven on dispatch because it
-      compiles each route into a specialised function with `new Function` at boot, leaving no
-      generic dispatch on the hot path. Adopting this is the only way to close that gap — but
-      it is a large change and must wait until the brick and context contracts stop moving,
-      or we will be recompiling the compiler. See `benchmarks/README.md`.
+- [ ] 💡 **AOT route compilation.** Compiling each route into a specialised function with
+      `new Function` at boot leaves no generic dispatch on the hot path; Oven interprets the same
+      structure on every request, and the dispatch table in `benchmarks/README.md` is where that
+      cost shows up. It is a large change and must wait until the brick and context contracts
+      stop moving, or we will be recompiling the compiler.
+
+      **Note:** this item used to cite a measured ~2× gap against Elysia. Elysia was removed from
+      the benchmark suite on request, so that figure is no longer reproducible from this repo —
+      the technique is still worth adopting, but the number is gone and should be re-measured
+      against whatever we compare to next rather than quoted from memory.
 
 ---
+
+## Regressions to chase
+
+- [ ] 🔴 **Dispatch got ~45% slower.** Re-measuring after removing Elysia showed Oven's dispatch
+      at 1664/1931/1826/1910 ns against a previously published 1089/1303/1236/1336 ns for the
+      same four scenarios. Hono, measured in the same runs on the same machine, is unchanged
+      (1069→1074, 1819→1829), so this is ours and not the machine. Three consecutive runs agreed
+      to within 1%.
+
+      At the socket it costs less but is still visible: Oven went from beating Hono by 9% on the
+      parameterised route to trailing it by 3.5%. Every published number has been updated to the
+      measured ones — the old figures flattered us and no longer reproduce.
+
+      **Not yet bisected.** The likely window is the Phase 2–3 work on the request path; the
+      brick `request()` hook and the per-request context contributions are the first places to
+      look, since neither existed when the original numbers were taken. `bun benchmarks/dispatch.bench.ts`
+      reproduces it in about ten seconds.
+
+- [ ] Re-run benchmarks before launch, on a quiet machine, and check the landing-page figures
+      against the result rather than against memory.
+
+**Also found:** the Astro docs build was silently depending on `elysia` hoisting `cookie@1.1.1`
+to the root. Removing Elysia hoisted express's `cookie@0.7.2` instead — CJS, no named exports —
+and the docs build failed on `parseCookie`. `cookie@^2.0.1` is now a direct devDependency so the
+resolution is declared rather than a side effect of an unrelated benchmark package. Express keeps
+its own nested 0.7.2 and still benchmarks.
 
 ## Open questions
 

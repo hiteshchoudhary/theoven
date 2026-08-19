@@ -21,37 +21,40 @@ runtime it is actually deployed on.
 
 | framework | runtime | static text req/s | param + json req/s | p99 |
 | --- | --- | ---: | ---: | ---: |
-| elysia | bun | 114,106 | 113,325 | &lt;1 ms |
-| **oven** | **bun** | **114,451** | **110,483** | **&lt;1 ms** |
-| hono | bun | 114,682 | 101,011 | 1 ms |
-| fastify | node | 84,397 | 81,581 | 1 ms |
-| express | node | 18,501 | 18,331 | 5 ms |
+| hono | bun | 114,348 | 109,920 | &lt;1 ms |
+| **oven** | **bun** | **109,261** | **106,163** | **&lt;1 ms** |
+| fastify | node | 84,230 | 81,171 | 1 ms |
+| express | node | 18,482 | 18,339 | 5 ms |
 
-Oven is about **6× Express** and **1.35× Fastify**, and sits level with Elysia and Hono.
+Oven is about **5.8× Express** and **1.3× Fastify**. Hono is currently ahead of us — 3.5% on the
+parameterised route, 4.7% on static text.
 
 ## Dispatch overhead
 
 `Request` in, `Response` out, with no socket involved. Express and Fastify cannot appear here —
 they are built on Node's `req`/`res` and have no `Request` entry point.
 
-| scenario | oven | hono | elysia |
-| --- | ---: | ---: | ---: |
-| static root | 1089 ns | 1069 ns | 479 ns |
-| param + json | 1303 ns | 1819 ns | 898 ns |
-| 404 miss | 1336 ns | 2013 ns | 588 ns |
+| scenario | oven | hono |
+| --- | ---: | ---: |
+| static root | 1664 ns | 1074 ns |
+| param + json | 1931 ns | 1829 ns |
+| 404 miss | 1910 ns | 1901 ns |
 
-<Aside type="caution" title="Elysia is 2x faster than us here">
-  Elysia compiles each route into a specialised function with `new Function` at boot, so its hot
-  path contains no generic dispatch. Oven interprets the same structure per request. Adopting
-  that technique is tracked as a post-1.0 item — doing it before the brick and context
-  contracts settle would mean writing the compiler twice.
+<Aside type="caution" title="This is not the ceiling">
+  A framework that compiles each route into a specialised function at boot — with `new Function`,
+  leaving no generic dispatch on the hot path — beats both of these columns comfortably. Oven
+  interprets the same structure on every request. Adopting that technique is tracked as a
+  post-1.0 item; doing it before the brick and context contracts settle would mean writing the
+  compiler twice.
 </Aside>
 
 ## Read both tables together
 
-That 2× dispatch advantage is worth **2.5% at the socket**: 113,325 vs 110,483 req/s, inside
-run-to-run variance. Once a real connection exists, syscalls and TCP dominate and a ~600 ns
-framework difference vanishes.
+This is the point, and it currently runs against us.
+
+On `static root` Hono dispatches **1.55× faster** than Oven — 590 ns of advantage. At the socket
+that same pair is **4.7%** apart, not 55%. Once a real connection exists, syscalls and TCP
+dominate and a few hundred nanoseconds of framework overhead compresses into near-nothing.
 
 The dispatch table is a useful signal about where our own overhead lives, and a bad basis for
 choosing a framework. We publish both, because publishing only the flattering one would be
