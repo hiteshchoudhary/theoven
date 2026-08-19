@@ -229,6 +229,41 @@ export function generateOpenApi(
       }
     }
 
+    /**
+     * A guarded route says so in its own operation.
+     *
+     * Without this the document describes a public API that answers 401 — every generated
+     * client omits the credential, and the person reading `/docs` has no way to tell which
+     * endpoints need one. Core does not interpret `auth`; it only reports what the route
+     * declared, and the scheme names come from whichever auth provider is registered (D18).
+     */
+    if (schema?.auth) {
+      const schemes = Object.keys(options.securitySchemes ?? {})
+      // No scheme registered means an auth brick declared none. `[{}]` is the spec's way of
+      // saying "authentication required, unspecified" — better than silence.
+      operation.security = schemes.length > 0 ? schemes.map((name) => ({ [name]: [] })) : [{}]
+
+      responses['401'] = {
+        description: 'Unauthorized',
+        content: { 'application/problem+json': { schema: PROBLEM_SCHEMA } },
+      }
+
+      // A named policy is more than "signed in", and the reader needs to know which one — it is
+      // a function in the codebase they can go and read.
+      if (typeof schema.auth === 'string' || Array.isArray(schema.auth)) {
+        const policies = (Array.isArray(schema.auth) ? schema.auth : [schema.auth]).join(', ')
+        operation.description = operation.description
+          ? `${operation.description as string}\n\nRequires the \`${policies}\` policy.`
+          : `Requires the \`${policies}\` policy.`
+        operation['x-oven-policies'] = Array.isArray(schema.auth) ? schema.auth : [schema.auth]
+
+        responses['403'] = {
+          description: 'Forbidden',
+          content: { 'application/problem+json': { schema: PROBLEM_SCHEMA } },
+        }
+      }
+    }
+
     operation.responses = responses
 
     paths[path] ??= {}

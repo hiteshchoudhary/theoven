@@ -57,6 +57,7 @@ export {
   UnsupportedMediaType,
 } from './errors'
 export {
+  type ContextOf,
   type DiscoveredMiddleware,
   type DiscoveredRoute,
   type Discovery,
@@ -71,6 +72,7 @@ export {
   RouteFileError,
   type RouteModule,
   readRouteModule,
+  routesFor,
   scanRoutes,
   segmentToPattern,
   setRouteManifest,

@@ -1,0 +1,22 @@
+{
+  "name": "@theoven/example-kitchen-sink",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/auth-basic": "workspace:*",
+    "@theoven/core": "workspace:*",
+    "@theoven/db": "workspace:*",
+    "@theoven/db-drizzle": "workspace:*",
+    "@theoven/mail": "workspace:*",
+    "@theoven/queue": "workspace:*",
+    "@theoven/storage": "workspace:*",
+    "drizzle-orm": "^0.45.0",
+    "zod": "^4.0.0"
+  }
+}

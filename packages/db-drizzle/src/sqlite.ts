@@ -22,6 +22,26 @@ export interface SqliteOptions<Schema extends Record<string, unknown>> {
    * this as sporadic `SQLITE_BUSY` errors under exactly the traffic it was meant to handle.
    */
   tune?: boolean
+  /**
+   * An existing `bun:sqlite` connection to adopt, instead of opening one.
+   *
+   * For when something else already needs a client before the app exists — `auth-basic` builds
+   * its store at construction, so it takes one. Without this you get **two** connections: two
+   * connections to one file work but waste a handle, and two `:memory:` connections are two
+   * separate databases, which fails as "no such table" on a schema you can see was created.
+   *
+   * ```ts
+   * const sqlite = new Database('./data.db')
+   * const client = drizzle(sqlite, { schema })
+   *
+   * app.use(db(drizzleSqlite({ client: sqlite, schema })))
+   *    .use(auth(basicAuth({ db: client, secret })))
+   * ```
+   *
+   * An adopted connection is **not closed** on shutdown: it was not ours to open, and closing
+   * something a caller still holds is a worse failure than leaking one handle at exit.
+   */
+  client?: Database
 }
 
 type SqliteClient<Schema extends Record<string, unknown>> = ReturnType<typeof drizzle<Schema>>
@@ -43,17 +63,19 @@ type SqliteClient<Schema extends Record<string, unknown>> = ReturnType<typeof dr
 export function drizzleSqlite<Schema extends Record<string, unknown> = Record<string, never>>(
   options: SqliteOptions<Schema> = {},
 ): DatabaseProvider<SqliteClient<Schema>> {
-  const { url = './data.db', schema, logger = false, tune = true } = options
+  const { url = './data.db', schema, logger = false, tune = true, client: adopted } = options
   let sqlite: Database | undefined
   /** Tail of the transaction queue; see `transaction` below for why it exists. */
   let queue: Promise<void> = Promise.resolve()
 
   return {
-    name: `drizzle:sqlite(${url})`,
+    name: `drizzle:sqlite(${adopted ? 'adopted' : url})`,
 
     connect: () => {
-      sqlite = new Database(url, { create: true })
+      sqlite = adopted ?? new Database(url, { create: true })
 
+      // Pragmas are the connection's, so an adopted one gets them too — unless the caller
+      // opted out, which is the reason `tune` is a flag rather than always-on here.
       if (tune) {
         // WAL lets readers proceed while a write is in flight; without it a web application
         // hits SQLITE_BUSY under ordinary concurrency. `NORMAL` trades an fsync per commit for
@@ -78,7 +100,9 @@ export function drizzleSqlite<Schema extends Record<string, unknown> = Record<st
     },
 
     close: () => {
-      sqlite?.close()
+      // Only what we opened. Closing a connection the caller still holds turns shutdown into
+      // their problem.
+      if (!adopted) sqlite?.close()
       sqlite = undefined
     },
 

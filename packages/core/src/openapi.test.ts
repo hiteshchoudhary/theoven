@@ -587,3 +587,73 @@ describe('validated against a real OpenAPI parser', () => {
     expect(result.valid).toBe(false)
   })
 })
+
+/**
+ * A guarded route has to say so in its own operation.
+ *
+ * Without it the document describes a public API that answers 401: every generated client omits
+ * the credential, and someone reading `/docs` cannot tell which endpoints need one.
+ */
+describe('guarded routes in the document', () => {
+  function build(
+    schema: Parameters<typeof generateOpenApi>[0][number]['schema'],
+    securitySchemes?: Record<string, unknown>,
+  ) {
+    return generateOpenApi([{ method: 'GET', pattern: '/thing', schema }], {
+      info: { title: 'T', version: '1' },
+      ...(securitySchemes ? { securitySchemes } : {}),
+    })
+  }
+
+  function operation(document: ReturnType<typeof generateOpenApi>) {
+    return (document.paths as Record<string, Record<string, Record<string, unknown>>>)['/thing']
+      ?.get as Record<string, unknown>
+  }
+
+  test('auth: true requires the registered schemes', () => {
+    const document = build({ auth: true }, { bearerAuth: { type: 'http', scheme: 'bearer' } })
+    expect(operation(document).security).toEqual([{ bearerAuth: [] }])
+  })
+
+  test('a guarded route documents its 401', () => {
+    const document = build({ auth: true })
+    const responses = operation(document).responses as Record<string, { description: string }>
+    expect(responses['401']?.description).toBe('Unauthorized')
+  })
+
+  test('an unguarded route says nothing about security', () => {
+    const document = build({ summary: 'Public' })
+    expect(operation(document).security).toBeUndefined()
+    expect((operation(document).responses as Record<string, unknown>)['401']).toBeUndefined()
+  })
+
+  // The spec's way of saying "authentication required, unspecified" — better than silence.
+  test('with no scheme registered it still marks the route as requiring auth', () => {
+    expect(operation(build({ auth: true })).security).toEqual([{}])
+  })
+
+  /**
+   * A named policy is more than "signed in". The reader needs to know which one, because it is
+   * a function in the codebase they can go and read (D18).
+   */
+  test('a named policy is named, and adds a 403', () => {
+    const document = build({ auth: 'admin' }, { bearerAuth: { type: 'http', scheme: 'bearer' } })
+    const built = operation(document)
+
+    expect(built.description).toContain('admin')
+    expect(built['x-oven-policies']).toEqual(['admin'])
+    expect((built.responses as Record<string, unknown>)['403']).toBeDefined()
+  })
+
+  test('several policies are all listed', () => {
+    const built = operation(build({ auth: ['admin', 'billing'] }))
+    expect(built['x-oven-policies']).toEqual(['admin', 'billing'])
+    expect(built.description).toContain('admin, billing')
+  })
+
+  test('a policy note is appended to an existing description, not replacing it', () => {
+    const built = operation(build({ auth: 'admin', description: 'Deletes the account.' }))
+    expect(built.description).toContain('Deletes the account.')
+    expect(built.description).toContain('admin')
+  })
+})

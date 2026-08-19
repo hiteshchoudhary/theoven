@@ -254,6 +254,48 @@ export function defineRoute<const Schema extends RouteSchema>(
   return { schema, handler: handler as unknown as (ctx: Context) => unknown, __oven: 'route' }
 }
 
+/** Whatever `.use()` contributed to an app's context. */
+export type ContextOf<Application> = Application extends { __ext?: infer Ext } ? Ext : unknown
+
+/**
+ * `defineRoute`, bound to one app's bricks.
+ *
+ * `defineRoute` alone types `ctx.params`, `ctx.query` and `ctx.body` from the schema beside them,
+ * but it cannot know what bricks the app registered — a route file and `app.ts` are separate
+ * modules, and nothing connects them. So `ctx.db` in a route file was `unknown`, which quietly
+ * gave up the framework's central promise in the one place most routes are written.
+ *
+ * Declare it once per project:
+ *
+ * ```ts title="src/route.ts"
+ * import { routesFor } from '@theoven/core'
+ * import type { app } from './app'
+ *
+ * export const route = routesFor<typeof app>()
+ * ```
+ *
+ * ```ts title="src/routes/notes/index.get.ts"
+ * import { route } from '../../route'
+ *
+ * export default route({ query: z.object({ limit: z.coerce.number() }) }, (ctx) =>
+ *   ctx.db.select().from(notes).limit(ctx.query.limit),   // both typed
+ * )
+ * ```
+ *
+ * The import of `app` is **type-only**, so it does not create a cycle with the module that loads
+ * these files.
+ */
+export function routesFor<Application>(): <const Schema extends RouteSchema>(
+  schema: Schema,
+  handler: ValidatedHandler<Schema, ContextOf<Application>>,
+) => RouteDefinition {
+  return (schema, handler) => ({
+    schema,
+    handler: handler as unknown as (ctx: Context) => unknown,
+    __oven: 'route',
+  })
+}
+
 /** True for the object `defineRoute` produces. */
 function isRouteDefinition(value: unknown): value is RouteDefinition {
   return typeof value === 'object' && value !== null && '__oven' in value

@@ -624,7 +624,11 @@ recorded in `CLAUDE.md`.
       shipping code that claims an effect it does not have is worse than the rough edge
 - [x] `oven db` / `oven worker` report that they need an unbuilt module, rather than looking
       like a typo the user made
-- [ ] `bun create oven` — needs a published `create-oven` package; Phase 5, at release
+- [x] `bun create theoven my-app` — shipped as `create-theoven`, a thin delegate to
+      `oven create` so there is one scaffolder rather than two that drift.
+
+      **Not `bun create oven`:** `create-oven` on npm belongs to someone else (see D27). Bun maps
+      `bun create <x>` to `create-<x>`, so the name had to change, not the command shape.
 
 **Two design decisions worth recording:**
 
@@ -685,7 +689,24 @@ development and production. Covered by tests now.
       benchmarks. Remaining: testing, deployment (Docker/Fly/Railway)
 - [~] API reference. Written: `App`, `Context`. Remaining: every other package
 - [ ] Docs code samples compiled and tested in CI
-- [ ] `examples/minimal` + `examples/kitchen-sink` complete and CI-tested
+- [x] `examples/minimal` + `examples/kitchen-sink` complete and CI-tested. The kitchen sink is
+      the framework's **integration test**: every brick in one app, exercised through `fetch`,
+      so a change that breaks how two of them compose fails there rather than in someone's
+      project.
+
+      **Three real gaps it found**, none of which any unit test could have:
+
+      1. `defineRoute` hardcoded `Ext = unknown`, so a file-based route could not see the bricks
+         the app registered — `ctx.db` was `unknown` in the one place most routes are written.
+         Core now exports `routesFor<typeof app>()`, bound once per project via a type-only
+         import so there is no cycle.
+      2. The db brick and `auth-basic` each opened their own connection. Two to a file waste a
+         handle; two to `:memory:` are two separate databases, which surfaces as `no such table`
+         on a schema you watched being created. `drizzleSqlite({ client })` now adopts an
+         existing one, and does not close what it did not open.
+      3. OpenAPI never read a route's `auth`, so guarded routes were documented as public
+         endpoints that answer 401 — every generated client would omit the credential. Operations
+         now carry `security`, a `401`, and for a named policy its name plus a `403` (D18).
 - [x] Benchmarks page with reproducible methodology, including where we lose
 - [ ] Launch: HN, r/bun, Bun Discord, X thread
 

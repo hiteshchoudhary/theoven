@@ -123,3 +123,36 @@ export function registerRoutes(app: App): void { /* ... */ }
 
 Two reasons. Production should not walk the filesystem on every cold start, and a bundler can
 only tree-shake route modules it can see imported by name.
+
+## Typing `ctx` with your bricks
+
+`defineRoute` types `ctx.params`, `ctx.query` and `ctx.body` from the schema beside them. It
+cannot know what **bricks** your app registered, though — a route file and `app.ts` are separate
+modules, and nothing connects them. So `ctx.db` in a route file is `unknown`.
+
+Bind it once per project:
+
+```ts title="src/route.ts"
+import { routesFor } from '@theoven/core'
+import type { app } from './app'
+
+export const route = routesFor<typeof app>()
+```
+
+```ts title="src/routes/notes/index.get.ts"
+import { route } from '../../route'
+import { z } from 'zod'
+import { notes } from '../../schema'
+
+export default route(
+  { query: z.object({ limit: z.coerce.number().int().max(100).default(20) }) },
+  (ctx) => ctx.db.select().from(notes).limit(ctx.query.limit),
+  //          ^ the Drizzle client, typed from your schema
+)
+```
+
+The import of `app` is **type-only**, so it does not create a cycle with the module that loads
+these files — `app.ts` loads the routes, and the routes only reference its type.
+
+Use `defineRoute` when a route touches no bricks; `route` everywhere else. They are the same
+function, one with the context bound.

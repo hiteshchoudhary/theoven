@@ -33,6 +33,22 @@
         "sharp": "^0.34.0",
       },
     },
+    "examples/kitchen-sink": {
+      "name": "@theoven/example-kitchen-sink",
+      "version": "0.0.0",
+      "dependencies": {
+        "@theoven/auth": "workspace:*",
+        "@theoven/auth-basic": "workspace:*",
+        "@theoven/core": "workspace:*",
+        "@theoven/db": "workspace:*",
+        "@theoven/db-drizzle": "workspace:*",
+        "@theoven/mail": "workspace:*",
+        "@theoven/queue": "workspace:*",
+        "@theoven/storage": "workspace:*",
+        "drizzle-orm": "^0.45.0",
+        "zod": "^4.0.0",
+      },
+    },
     "examples/minimal": {
       "name": "@theoven/example-minimal",
       "version": "0.0.0",
@@ -113,7 +129,7 @@
         "oven": "./src/index.ts",
       },
       "dependencies": {
-        "@theoven/core": "workspace:*",
+        "@theoven/core": "workspace:^",
       },
     },
     "packages/core": {
@@ -121,6 +137,16 @@
       "version": "0.1.0",
       "dependencies": {
         "zod": "^4.0.0",
+      },
+    },
+    "packages/create-theoven": {
+      "name": "create-theoven",
+      "version": "0.1.0",
+      "bin": {
+        "create-theoven": "./src/index.ts",
+      },
+      "dependencies": {
+        "@theoven/cli": "workspace:^",
       },
     },
     "packages/db": {
@@ -605,6 +631,8 @@
 
     "@theoven/db-mongoose": ["@theoven/db-mongoose@workspace:packages/db-mongoose"],
 
+    "@theoven/example-kitchen-sink": ["@theoven/example-kitchen-sink@workspace:examples/kitchen-sink"],
+
     "@theoven/example-minimal": ["@theoven/example-minimal@workspace:examples/minimal"],
 
     "@theoven/mail": ["@theoven/mail@workspace:packages/mail"],
@@ -838,6 +866,8 @@
     "cookie-es": ["cookie-es@1.2.3", "", {}, "sha512-lXVyvUvrNXblMqzIRrxHb57UUVmqsSWlxqt3XIjCkUP0wDAf6uicO6KMbEgYrMNtEvWgWHwe42CKxPu9MYAnWw=="],
 
     "cookie-signature": ["cookie-signature@1.2.2", "", {}, "sha512-D76uU73ulSXrD1UXF4KE2TMxVVwhsnCgfAyTg9k8P6KGZjlXKrOLe4dJQKI3Bxi5wjesZoFXJWElNWBjPZMbhg=="],
+
+    "create-theoven": ["create-theoven@workspace:packages/create-theoven"],
 
     "cross-argv": ["cross-argv@2.0.0", "", {}, "sha512-YIaY9TR5Nxeb8SMdtrU8asWVM4jqJDNDYlKV21LxtYcfNJhp1kEsgSa6qXwXgzN0WQWGODps0+TlGp2xQSHwOg=="],
 

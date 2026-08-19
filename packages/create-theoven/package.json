@@ -1,0 +1,47 @@
+{
+  "name": "create-theoven",
+  "version": "0.1.0",
+  "description": "Scaffold an Oven app — bun create theoven my-app",
+  "keywords": [
+    "bun",
+    "oven",
+    "create",
+    "scaffold",
+    "framework"
+  ],
+  "homepage": "https://theoven.app",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/create-theoven"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "create-theoven": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@theoven/cli": "workspace:^"
+  }
+}

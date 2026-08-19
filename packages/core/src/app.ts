@@ -118,6 +118,15 @@ interface RouteEntry {
  * passing test means the served behaviour is genuinely covered.
  */
 export class App<Ext = unknown> implements BrickHost {
+  /**
+   * Carries `Ext` where a type can read it back off the class.
+   *
+   * `App<Ext>` uses its parameter only in method signatures, and TypeScript cannot recover a
+   * type parameter from those. `routesFor<typeof app>()` needs it, so it is published here.
+   * Declared, never assigned, and erased at runtime.
+   */
+  declare readonly __ext?: Ext
+
   private readonly router = new Router<RouteEntry>()
   /**
    * Resolved configuration.

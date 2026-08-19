@@ -87,6 +87,27 @@ logs and a connection string carries a password.
   becoming folklore.
 </Aside>
 
+## Sharing one connection
+
+Something may need a client **before** the app exists — [`auth-basic`](/docs/bricks/auth-basic/)
+builds its store at construction, so it takes one. Let the brick adopt yours rather than opening
+a second:
+
+```ts
+const sqlite = new Database('./data.db')
+const client = drizzle(sqlite, { schema })
+
+const app = createApp()
+  .use(db(drizzleSqlite({ client: sqlite, schema })))
+  .use(auth(basicAuth({ db: client, secret })))
+```
+
+Two connections to a file work and waste a handle. Two connections to `:memory:` are **two
+separate databases** — which shows up as `no such table` on a schema you can watch being created,
+and is a genuinely confusing hour.
+
+An adopted connection is not closed on shutdown: it was not the brick's to open.
+
 ## Limitations
 
 - **MySQL is untested.** Drizzle supports it; this provider has no MySQL entry point yet.
