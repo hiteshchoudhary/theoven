@@ -152,8 +152,10 @@ shadowed the method on the instance. Renamed to `settings`, with a comment so it
 - [x] Tests including a path-traversal filename, which is preserved verbatim and never resolved
 - [x] Zod integration: `z.file()` validates a real multipart upload end to end, including
       size constraints and a text field sent where a file was declared
-- [ ] Direct handoff to `@theoven/storage` without a round trip through memory — genuinely
-      blocked: the storage brick does not exist yet (§3.1)
+- [x] Direct handoff to `@theoven/storage` without a round trip through memory. A multipart
+      `File` is already spilled to a temporary file by Bun; `ctx.storage.upload(key, file)` hands
+      that straight to `Bun.S3Client.write` or `Bun.write`, both of which stream. Nothing calls
+      `arrayBuffer()`. Covered by a route test that uploads a real multipart form.
 
 **Cookies** (replaces `cookie-parser`)
 - [x] `ctx.cookies.get/has/all/set/delete`, lazily parsed
@@ -510,15 +512,23 @@ recorded in `CLAUDE.md`.
 ## Phase 3 — Infrastructure modules
 
 ### 3.1 `@theoven/storage` (S3)
-- [ ] Config → `Bun.S3Client` (S3, R2, MinIO, Spaces)
-- [ ] `upload`, `download`, `delete`, `exists`, `list`
-- [ ] `presignedUploadUrl` / `presignedDownloadUrl`
-- [ ] Streaming + multipart for large files
-- [ ] Zero-copy handoff from core's file handling (§1.3)
-- [ ] Browser direct-upload helper (presign + policy)
-- [ ] Local-disk driver for dev — the app must run with no S3
-- [ ] Multiple named buckets
-- [ ] Tests against MinIO in CI
+- [x] Config → `Bun.S3Client` (S3, R2, MinIO, Spaces) — no SDK; the runtime signs its own requests
+- [x] `upload`, `download`, `delete`, `exists`, `stat`, `list` (with prefix and paging)
+- [x] `presignUpload` / `presignDownload`, and `canPresign` so the gap is visible before it bites
+- [x] Streaming + multipart for large files — Bun switches to multipart above `partSize` with no
+      separate API to call; `partSize`, `queueSize` and `retry` are exposed for tuning
+- [x] Zero-copy handoff from core's file handling (§1.3) — see the note there
+- [x] Browser direct-upload helper — `ctx.storage.directUpload(key)` returns a ticket
+      (`url`, `method`, `headers`, `key`, `expiresAt`) meant to be returned from a route as JSON.
+      A plain object rather than a bare URL because the content type is *signed*: omit the header
+      and S3 answers with a signature mismatch that explains nothing.
+- [x] Local-disk driver for dev — the app runs with no S3, and the driver is **refused in
+      production** unless explicitly allowed, because uploads on a container filesystem vanish on
+      the next deploy while the service looks healthy
+- [x] Multiple named buckets — `ctx.storage.bucket('avatars')`, resolved from a map built at boot
+- [x] Tests against MinIO in CI, gated on `S3_ENDPOINT` and skipped locally with a printed
+      notice. CI starts `minio/minio` as a step (a service container cannot be given a `server`
+      command) and fails if the suite skips.
 
 ### 3.2 `@theoven/mail`
 - [ ] Drivers: Resend, SES, SMTP, `console` (dev), `memory` (test)

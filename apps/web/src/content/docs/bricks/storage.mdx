@@ -1,0 +1,217 @@
+---
+title: storage
+description: Object storage on S3, R2, MinIO or Spaces — with a local directory for development, so uploads work before you have a bucket.
+sidebar:
+  order: 10
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/storage` |
+| **Adds to context** | `ctx.storage` |
+| **Endpoints** | none |
+| **Creates files** | in development, whatever you upload, under the directory you name |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/storage
+```
+
+```ts title="src/app.ts"
+import { createApp, env } from '@theoven/core'
+import { diskStorage, s3Storage, storage } from '@theoven/storage'
+
+export const app = createApp().use(
+  storage(
+    env.has('S3_BUCKET')
+      ? s3Storage({ bucket: env.string('S3_BUCKET') })
+      : diskStorage({ dir: './storage' }),
+  ),
+)
+```
+
+```ts title="src/routes/avatar.post.ts"
+import { defineRoute } from '@theoven/core'
+import { z } from 'zod'
+
+export default defineRoute(
+  { auth: true, body: z.object({ file: z.file().max(5_000_000) }) },
+  (ctx) => ctx.storage.upload(`avatars/${ctx.user.id}`, ctx.body.file),
+)
+```
+
+No SDK. `Bun.S3Client` is in the runtime and signs its own requests, which is why this brick is a
+few hundred lines rather than a dependency tree.
+
+## Usage
+
+```ts
+await ctx.storage.upload('reports/q3.pdf', file)     // returns { key, size, type, bucket }
+await ctx.storage.exists('reports/q3.pdf')           // boolean
+await ctx.storage.stat('reports/q3.pdf')             // metadata, or null
+await ctx.storage.delete('reports/q3.pdf')           // deleting something absent is fine
+
+const { objects, next } = await ctx.storage.list({ prefix: 'reports/', limit: 50 })
+const more = await ctx.storage.list({ prefix: 'reports/', after: next })
+```
+
+### Downloads stream
+
+```ts
+app.get('/files/[...key]', (ctx) => ctx.storage.download(ctx.params.key))
+```
+
+`download()` returns a **`Blob`** — a lazy handle, not bytes. Nothing is fetched until something
+reads it, and returning it from a handler streams it to the client without the body ever being
+held in memory. Both `Bun.file()` and Bun's `S3File` are Blobs, so this is the same line whichever
+driver is configured.
+
+<Aside type="caution" title="That route serves anything in the bucket">
+  As written it is a public file server. Add `auth: true`, a policy, or a key prefix scoped to
+  the signed-in user — the brick refuses traversing keys, not unauthorised ones.
+</Aside>
+
+## Direct uploads from the browser
+
+For anything large, do not proxy the bytes through your server:
+
+```ts title="src/routes/uploads.post.ts"
+export default defineRoute({ auth: true }, (ctx) =>
+  ctx.storage.directUpload(`users/${ctx.user.id}/${crypto.randomUUID()}`, {
+    type: 'image/png',
+    expiresIn: 600,
+  }),
+)
+```
+
+```ts title="in the browser"
+const ticket = await (await fetch('/uploads', { method: 'POST' })).json()
+await fetch(ticket.url, { method: ticket.method, headers: ticket.headers, body: file })
+// then tell your API about ticket.key
+```
+
+A 2GB file never touches your server: no request timeout to raise, no memory to budget, no
+bandwidth paid for twice.
+
+The ticket is an object rather than a bare URL because **the content type is part of the
+signature**. Send a different one and S3 answers with a signature mismatch whose message explains
+nothing — so the header you must send comes back with the URL.
+
+| Field | |
+| --- | --- |
+| `url` | the presigned URL |
+| `method` | always `PUT` |
+| `headers` | what the browser must send; content type when you set one |
+| `key` | store this — the URL is temporary, the key is not |
+| `expiresAt` | ISO timestamp |
+
+## Large files
+
+There is no separate multipart API. Bun switches to a multipart upload above `partSize`
+automatically, so a 5MB file and a 5GB file are the same call. Tune it if you need to:
+
+```ts
+s3Storage({ bucket: 'uploads', partSize: 16 * 1024 * 1024, queueSize: 8 })
+```
+
+An upload from a form arrives as a `File` that Bun already spilled to a temporary file while
+parsing the request. `ctx.storage.upload()` hands that straight to the driver — nothing calls
+`arrayBuffer()`, so the bytes go from spill file to bucket without passing through your heap.
+
+## Configuration
+
+### `s3Storage`
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `bucket` | — | **required** |
+| `accessKeyId`, `secretAccessKey` | AWS env vars | credentials |
+| `sessionToken` | — | for temporary credentials |
+| `region` | `us-east-1` | |
+| `endpoint` | AWS | R2, MinIO, Spaces, B2 |
+| `virtualHostedStyle` | driver default | MinIO and most self-hosted gateways need `false` |
+| `partSize` | 5 MiB | bytes per multipart part |
+| `queueSize` | 5 | parts uploaded in parallel |
+| `retry` | 3 | retries per part |
+
+```ts
+// Cloudflare R2
+s3Storage({ bucket: 'uploads', endpoint: `https://${accountId}.r2.cloudflarestorage.com` })
+
+// MinIO
+s3Storage({ bucket: 'uploads', endpoint: 'http://localhost:9000', virtualHostedStyle: false })
+```
+
+### `diskStorage`
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `dir` | — | **required**; created on first write |
+| `bucket` | `local` | the name reported on stored objects |
+
+### Several buckets
+
+```ts
+storage(s3Storage({ bucket: 'uploads' }), {
+  buckets: { avatars: s3Storage({ bucket: 'avatars' }) },
+})
+
+await ctx.storage.bucket('avatars').upload(key, file)
+```
+
+## Capabilities
+
+`presign` is declared, not assumed:
+
+```ts
+if (ctx.storage.canPresign) { /* … */ }
+```
+
+S3 can hand a browser a URL that uploads straight into the bucket. A local directory cannot —
+there is no signing authority and no endpoint — so `presignUpload` **throws** on the disk driver
+rather than returning something that does not work. Check `canPresign`, or serve the object
+through a route in development.
+
+<Aside type="caution" title="The disk driver is refused in production">
+  Uploads written to a container's filesystem are lost on the next deploy, and the service looks
+  perfectly healthy while it happens — the failure shows up weeks later as avatars nobody can
+  explain. So it fails at boot outside development. Pass `allowDiskInProduction` if the host
+  genuinely has persistent storage.
+</Aside>
+
+## Object keys
+
+Keys are usually built from something a user typed, so they are checked before they reach a
+backend. Traversal (`../`, both separators), absolute paths, empty keys and null bytes are all
+refused. The disk driver checks a second time after resolving, because the consequence there is
+a write outside the directory you chose.
+
+The key is always what **you** passed. A browser's filename is never used as one — that is how
+`../../etc/passwd` becomes a file path.
+
+## Limitations
+
+- **No content-type or size enforcement on direct uploads.** The type is signed, so a mismatch
+  is rejected; the *size* is not. A presigned `PUT` cannot cap it. If that matters, upload
+  through your server with `z.file().max(n)`, or set a bucket lifecycle policy.
+- **No image processing.** No resizing, no thumbnails, no transforms.
+- **The disk driver cannot presign**, and infers content types from the key's extension rather
+  than storing them.
+- **`list` on the disk driver reads the whole directory tree** before paging. Fine for
+  development; it is not an index.
+- **No copy or move.** Read and write, or reach through `ctx.storage.raw`.
+
+## How it is verified
+
+Key handling, both drivers, paging, capability refusals and the production guard run everywhere.
+Presigning is pure computation, so those tests need no server: they assert the URL is signed,
+carries the expiry, differs between `PUT` and `GET`, and never contains the secret.
+
+Real I/O — round trips, a 5MB streamed upload, a 12MB multipart upload, and a direct-upload
+ticket used exactly as issued — runs against **MinIO in CI**, gated on `S3_ENDPOINT`. Locally
+those skip and say so. CI fails if they skip.

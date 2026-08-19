@@ -28,6 +28,7 @@ its page says so rather than omitting the section.
 | [`auth-mongo`](/docs/bricks/auth-mongo/) | the same flows, on Mongoose | eight, at `/auth/*` |
 | [`auth-clerk`](/docs/bricks/auth-clerk/) | `ctx.user` from Clerk, hosted sign-in | **none** |
 | [`auth-better`](/docs/bricks/auth-better/) | `ctx.user` from better-auth | **all of its own** |
+| [`storage`](/docs/bricks/storage/) | `ctx.storage` — S3, R2, MinIO, or a local directory | none |
 | [`mail`](/docs/bricks/mail/) | `ctx.mail` | none |
 
 ## Planned
@@ -35,7 +36,6 @@ its page says so rather than omitting the section.
 | Brick | Adds |
 | --- | --- |
 | `@theoven/db-prisma` | `ctx.db` — a `PrismaClient` |
-| `@theoven/storage` | `ctx.storage` — S3, R2, MinIO |
 | `@theoven/queue` | `ctx.queue` — jobs and cron |
 
 <Aside type="note" title="Bricks are not middleware">
