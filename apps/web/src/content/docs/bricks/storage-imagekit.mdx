@@ -10,9 +10,10 @@ import { Aside } from '@astrojs/starlight/components'
 | | |
 | --- | --- |
 | **Package** | `@theoven/storage-imagekit` |
-| **Adds to context** | nothing itself — it is a driver for [`storage`](/docs/bricks/storage/) |
+| **Adds to context** | `ctx.storage` — it is a driver for [`storage`](/docs/bricks/storage/) |
 | **Endpoints** | none |
 | **Creates files** | whatever you upload, in your media library |
+| **Creates tables** | none |
 | **Status** | shipped |
 
 ## Install
@@ -32,6 +33,54 @@ const media = imagekitStorage({
 
 export const app = createApp().use(storage(media))
 ```
+
+## What it does
+
+Puts ImageKit behind the storage contract, so `ctx.storage` works exactly as it does on S3 or
+disk. On top of that the driver exposes `url()`, which builds ImageKit's transformation URLs —
+resize, crop, reformat on delivery.
+
+## Endpoints
+
+This brick adds no endpoints.
+
+## Usage
+
+**Uploading is `ctx.storage.upload()`** — the same call as every other driver:
+
+```ts title="src/routes/avatar.post.ts"
+import { z } from 'zod'
+import { media } from '../app'
+
+export const auth = true
+export const body = z.object({ file: z.file() })
+
+export default async ({ body, storage, user }) => {
+  const key = `avatars/${user.id}.png`
+  await storage.upload(key, body.file)
+
+  return { url: media.url(key, { transform: { width: 200, height: 200, format: 'auto' } }) }
+}
+```
+
+Upload the original once, then serve whatever size you need from the URL — that is the pattern
+ImageKit exists for, and why you do not store thumbnails yourself.
+
+```ts
+await storage.upload('photos/a.png', bytes, { type: 'image/png' })
+
+const blob = storage.download('photos/a.png')   // lazy — no request until read
+await storage.exists('photos/a.png')
+await storage.stat('photos/a.png')
+await storage.list({ prefix: 'photos/', limit: 50 })
+await storage.delete('photos/a.png')
+```
+
+Full detail on each is on the [storage](/docs/bricks/storage/) page; they behave the same here.
+
+## What it creates
+
+Nothing in your repository. Files go to your ImageKit media library.
 
 ## Transformations
 
@@ -74,10 +123,21 @@ Uploads set `useUniqueFileName: false`, because ImageKit otherwise appends a ran
 then the key you asked for is not the key you get, which silently breaks every other method in the
 contract.
 
+## Capabilities
+
+| | |
+| --- | --- |
+| `upload`, `download`, `delete`, `exists`, `stat`, `list` | ✓ |
+| `media.url()` with transformations and signing | ✓ |
+| `presignDownload` / `presignUpload` | ✗ — use `media.url({ expiresIn })` for signed delivery |
+| `directUpload` | ✗ — depends on `presignUpload` |
+| Multiple buckets via `storage.bucket()` | ✗ — one media library per driver |
+
 ## Limitations
 
-- **No presigned uploads.** ImageKit's browser upload uses a token/signature triple posted to
+- **No browser-direct uploads.** ImageKit's browser upload uses a token/signature triple posted to
   their endpoint, not a `PUT`-able URL, so `presignUpload` is unavailable rather than misleading.
+  Server-side `upload()` is unaffected — send the file to a route, as in [Usage](#usage).
 - **An extra lookup on `remove`, `exists` and `stat`** — see above.
 - **Paging is offset-based**, so `next` is a count rather than a key.
 - **Uploads are buffered**, since the upload API is multipart.

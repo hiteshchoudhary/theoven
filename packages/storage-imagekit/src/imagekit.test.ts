@@ -1,17 +1,27 @@
 import { describe, expect, test } from 'bun:test'
+import { createApp } from '@theoven/core'
+import { storage } from '@theoven/storage'
 import { imagekitStorage } from './imagekit'
 import { buildUrl, transformationOf } from './url'
 
 const CONFIG = { privateKey: 'private_abc', urlEndpoint: 'https://ik.imagekit.io/demo' }
 
 function fake(answers: Record<string, Response> = {}) {
-  const calls: Array<{ method: string; url: string; auth: string | null }> = []
+  const calls: Array<{
+    method: string
+    url: string
+    auth: string | null
+    form: FormData | undefined
+  }> = []
   const fetcher = (async (input: string | URL, init?: RequestInit) => {
     const url = String(input)
     calls.push({
       method: init?.method ?? 'GET',
       url,
       auth: new Headers(init?.headers as Record<string, string>).get('authorization'),
+      // Uploads are multipart. Without capturing it, "uploads go to the upload host" says nothing
+      // about whether the file, its name or its folder were actually in the request.
+      form: init?.body instanceof FormData ? init.body : undefined,
     })
     for (const [pattern, answer] of Object.entries(answers)) {
       if (url.includes(pattern)) return answer.clone()
@@ -116,6 +126,12 @@ describe('the driver', () => {
     expect(calls[0]?.url).toContain('upload.imagekit.io/api/v1/files/upload')
     expect(calls[0]?.auth).toStartWith('Basic ')
     expect(stored).toMatchObject({ key: 'a/b.txt', size: 5 })
+
+    const form = calls[0]?.form
+    expect(form?.get('fileName')).toBe('b.txt')
+    expect(form?.get('folder')).toBe('/a')
+    expect(form?.get('useUniqueFileName')).toBe('false')
+    expect(await (form?.get('file') as File).text()).toBe('hello')
   })
 
   /**
@@ -165,5 +181,30 @@ describe('the driver', () => {
     expect(calls).toHaveLength(0)
     expect(await handle.text()).toBe('bytes')
     expect(calls).toHaveLength(1)
+  })
+})
+
+/**
+ * The seam between the contract and the driver — see the equivalent in `storage-bunny`. The docs
+ * tell a reader that uploading here is `ctx.storage.upload()` like anywhere else; this is what
+ * makes that claim true rather than aspirational.
+ */
+describe('uploading through the brick', () => {
+  test('ctx.storage.upload reaches the driver and sends the file', async () => {
+    const { calls, fetcher } = fake({
+      'upload.imagekit.io': new Response(
+        JSON.stringify({ fileId: 'f1', name: 'a.png', filePath: '/photos/a.png', size: 3 }),
+      ),
+    })
+    const app = createApp().use(storage(imagekitStorage({ ...CONFIG, fetcher })))
+    app.post('/up', async (ctx) => ctx.storage.upload('photos/a.png', new Uint8Array([1, 2, 3])))
+
+    const response = await app.fetch(new Request('http://x/up', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ key: 'photos/a.png', size: 3 })
+    expect(calls[0]?.url).toContain('upload.imagekit.io')
+    expect(calls[0]?.form?.get('folder')).toBe('/photos')
+    expect(await (calls[0]?.form?.get('file') as File).bytes()).toEqual(new Uint8Array([1, 2, 3]))
   })
 })

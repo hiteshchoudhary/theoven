@@ -10,9 +10,10 @@ import { Aside } from '@astrojs/starlight/components'
 | | |
 | --- | --- |
 | **Package** | `@theoven/storage-bunny` |
-| **Adds to context** | nothing itself — it is a driver for [`storage`](/docs/bricks/storage/) |
+| **Adds to context** | `ctx.storage` — it is a driver for [`storage`](/docs/bricks/storage/) |
 | **Endpoints** | none |
 | **Creates files** | whatever you upload, in your storage zone |
+| **Creates tables** | none |
 | **Status** | shipped |
 
 ## Install
@@ -36,8 +37,52 @@ export const app = createApp().use(
 )
 ```
 
-Everything on `ctx.storage` works unchanged — upload, download, list, delete. What Bunny adds is
-cheap egress through its pull zones, which is the reason to pick it.
+## What it does
+
+Puts Bunny.net Storage behind the storage contract. Everything on `ctx.storage` works exactly as
+it does on S3 or disk — the driver is the only line that changes. What Bunny adds is cheap egress
+through its pull zones, which is the reason to pick it.
+
+## Endpoints
+
+This brick adds no endpoints.
+
+## Usage
+
+**Uploading is `ctx.storage.upload()`** — the same call as every other driver:
+
+```ts title="src/routes/upload.post.ts"
+import { z } from 'zod'
+
+export const body = z.object({ file: z.file() })
+
+export default async ({ body, storage }) => {
+  const object = await storage.upload(`uploads/${body.file.name}`, body.file)
+  return { key: object.key, size: object.size }
+}
+```
+
+`upload` takes anything web-shaped — a `File`, `Blob`, `ArrayBuffer`, `ReadableStream` or string —
+and returns `{ key, bucket, size, type, lastModified }`.
+
+```ts
+await storage.upload('reports/q3.pdf', pdfBytes, { type: 'application/pdf' })
+
+const blob = storage.download('reports/q3.pdf')   // lazy — no request until read
+const text = await blob.text()
+
+await storage.exists('reports/q3.pdf')
+await storage.stat('reports/q3.pdf')
+await storage.list({ prefix: 'reports/', limit: 50 })
+await storage.delete('reports/q3.pdf')
+```
+
+Full detail on each of these is on the [storage](/docs/bricks/storage/) page; they behave the same
+here.
+
+## What it creates
+
+Nothing in your repository. Objects go to the storage zone you configured.
 
 <Aside type="caution" title="`accessKey` is the zone password">
   Not the account API key. Find it under the storage zone's **FTP & API Access**. Using the
@@ -73,15 +118,29 @@ ctx.storage.presignDownload('reports/q3.pdf', { expiresIn: 300 })
 Available only once both `pullZone` and `tokenKey` are set — `presign` is `undefined` otherwise,
 so `canPresign` tells you before it matters.
 
-<Aside type="note" title="Downloads only">
+<Aside type="note" title="Signing is for downloads only — uploads are unaffected">
   Bunny's token authentication protects *delivery*. There is no signed-upload equivalent, so
-  `presignUpload` throws rather than handing back a URL that fails at the edge. Upload through
-  your server, or use an S3-compatible driver for browser-direct uploads.
+  `presignUpload` throws rather than handing back a URL that fails at the edge.
+
+  This is **not** a limit on uploading. `storage.upload()` works normally; what you cannot do is
+  hand a browser a URL to `PUT` to directly. Send the file to a route and upload it from there, as
+  in [Usage](#usage) above — or use an S3-compatible driver if browser-direct upload is a
+  requirement.
 </Aside>
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `upload`, `download`, `delete`, `exists`, `stat`, `list` | ✓ |
+| `presignDownload` | ✓, once `pullZone` and `tokenKey` are set — check `storage.canPresign` |
+| `presignUpload` | ✗ — throws; Bunny has no signed-upload equivalent |
+| `directUpload` | ✗ — depends on `presignUpload` |
+| Multiple buckets via `storage.bucket()` | ✗ — one zone per driver; register a second driver instead |
 
 ## Limitations
 
-- **No presigned uploads** — see above.
+- **No browser-direct uploads** — see above; server-side `upload()` is unaffected.
 - **Uploads are buffered.** Bunny's `PUT` needs a known length, so a stream is collected before
   sending. S3 streams; this does not.
 - **`list` is directory-based.** A prefix is split into a directory and a "starts with", so a

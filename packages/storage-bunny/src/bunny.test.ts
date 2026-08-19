@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { createApp } from '@theoven/core'
+import { storage } from '@theoven/storage'
 import { bunnyStorage } from './bunny'
 
 /**
@@ -6,6 +8,15 @@ import { bunnyStorage } from './bunny'
  * account — and those are where the bugs are. What is *not* tested here is that Bunny accepts
  * them; live tests are gated on `BUNNY_ZONE` at the bottom.
  */
+
+/** The bytes a request actually carried, as text — `put` sends an ArrayBuffer, never a string. */
+function decodeBody(body: RequestInit['body']): string {
+  if (body === null || body === undefined) return ''
+  if (typeof body === 'string') return body
+  if (body instanceof ArrayBuffer) return new TextDecoder().decode(body)
+  if (ArrayBuffer.isView(body)) return new TextDecoder().decode(body as Uint8Array)
+  return `<${body.constructor.name}>`
+}
 
 /** Records every request and answers with whatever the test queued. */
 function fakeBunny(answers: Record<string, Response | (() => Response)> = {}) {
@@ -17,7 +28,10 @@ function fakeBunny(answers: Record<string, Response | (() => Response)> = {}) {
       method: init?.method ?? 'GET',
       url,
       accessKey: new Headers(init?.headers as Record<string, string>).get('AccessKey'),
-      body: typeof init?.body === 'string' ? init.body : '',
+      // Decode whatever shape the body arrived in. Recording only strings would have made
+      // "sends the bytes" vacuous: `put` always sends an ArrayBuffer, so the assertion passed
+      // against an empty string no matter what the driver transmitted.
+      body: decodeBody(init?.body),
     })
 
     for (const [pattern, answer] of Object.entries(answers)) {
@@ -54,6 +68,7 @@ describe('requests', () => {
     expect(calls[0]?.method).toBe('PUT')
     expect(calls[0]?.url).toBe('https://storage.bunnycdn.com/my-zone/a/b.txt')
     expect(calls[0]?.accessKey).toBe('zone-password')
+    expect(calls[0]?.body).toBe('hello')
     expect(stored).toMatchObject({ key: 'a/b.txt', bucket: 'my-zone', size: 5 })
   })
 
@@ -254,3 +269,32 @@ integration('against a real Bunny zone', () => {
 if (!BUNNY_ZONE) {
   console.info('[storage-bunny] BUNNY_ZONE not set — live integration tests skipped.')
 }
+
+/**
+ * The seam between the contract and the driver.
+ *
+ * The tests above prove `put` sends the right request; this proves `ctx.storage.upload()` reaches
+ * it. Worth its own test because a reader's first question is "how do I upload", and the answer
+ * being "the same call as every other driver" is a claim the docs make on this brick's behalf.
+ */
+describe('uploading through the brick', () => {
+  test('ctx.storage.upload reaches the driver and sends the bytes', async () => {
+    const { fetcher, calls } = fakeBunny()
+    const app = createApp().use(
+      storage(bunnyStorage({ zone: 'demo', accessKey: 'zone-password', fetcher })),
+    )
+    app.post('/up', async (ctx) => ctx.storage.upload('docs/a.txt', 'hello world'))
+
+    const response = await app.fetch(new Request('http://x/up', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ key: 'docs/a.txt', size: 11 })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      method: 'PUT',
+      url: 'https://storage.bunnycdn.com/demo/docs/a.txt',
+      accessKey: 'zone-password',
+      body: 'hello world',
+    })
+  })
+})
