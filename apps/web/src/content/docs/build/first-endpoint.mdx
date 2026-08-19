@@ -1,0 +1,123 @@
+---
+title: 2. The first endpoint
+description: A route file, a schema, and why the filesystem is the router.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## The filesystem is the route table
+
+There is no router file to register anything in. A file's path *is* its URL:
+
+```
+src/routes/todos/index.get.ts     →  GET    /todos
+src/routes/todos/index.post.ts    →  POST   /todos
+src/routes/todos/[id].patch.ts    →  PATCH  /todos/:id
+src/routes/todos/[id].delete.ts   →  DELETE /todos/:id
+```
+
+Those four files are the whole API you are about to build. Create the directory:
+
+```bash
+mkdir -p src/routes/todos
+```
+
+## Teach `ctx` about your bricks
+
+One three-line file, once per project:
+
+```ts title="src/route.ts"
+import { routesFor } from '@theoven/core'
+import type { app } from './app'
+
+export const route = routesFor<typeof app>()
+```
+
+A route file and `app.ts` are separate modules, and TypeScript cannot relate them — so without
+this, `ctx.db` in a route would be `unknown`. `routesFor` binds the context to what your app
+actually registered.
+
+<Aside type="note" title="No import cycle">
+  `import type` is erased at build time, so this does not create a cycle with the module that
+  loads your routes. It is a type-only reference.
+</Aside>
+
+## Your first route
+
+```ts title="src/routes/todos/index.get.ts"
+import { desc } from 'drizzle-orm'
+import { z } from 'zod'
+import { route } from '../../route'
+import { todos } from '../../schema'
+
+export default route(
+  {
+    summary: 'List your todos',
+    tags: ['todos'],
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+    }),
+  },
+  (ctx) => ctx.db.select().from(todos).orderBy(desc(todos.createdAt)).limit(ctx.query.limit),
+)
+```
+
+That does not compile yet — `todos` does not exist until the next chapter — but it is worth
+reading now, because four separate things are happening in nine lines.
+
+### `route(schema, handler)`
+
+The schema and the handler are declared **together**. That pairing is what makes `ctx.query`
+typed: TypeScript cannot connect an `export const query` to a separate `export default`, so
+Oven does not ask it to.
+
+### The query is validated and coerced
+
+`?limit=50` arrives as the string `"50"`. `z.coerce.number()` turns it into `50`, `.max(100)`
+refuses `?limit=99999` with a `422` before your code runs, and `.default(20)` means
+`ctx.query.limit` is always a number — never `undefined`.
+
+Oven does **not** coerce automatically. It cannot know what you meant: turning `"123"` into `123`
+would quietly break a `z.string()` field that legitimately holds digits, like an order reference.
+
+### You return a value
+
+No `res.json()`, no `send()`. Return an array and you get `200` with
+`content-type: application/json`. Return `null` and you get `204`. Set `ctx.status` when you want
+something else.
+
+### `ctx.db` is Drizzle
+
+Not a wrapper, not a repository. `ctx.db.select().from(todos)` is a Drizzle query — its
+autocomplete is Drizzle's, its errors are Drizzle's, and its documentation is Drizzle's. There is
+no Oven query language to learn, which is also why a coding model already knows how to write
+these.
+
+## `summary` and `tags` are not decoration
+
+They are what makes [`/docs`](http://localhost:3000/docs) readable. The same declaration that
+validates the request describes the endpoint — so the documentation cannot drift from the
+behaviour, because there is only one of them.
+
+## Check what you registered
+
+```bash
+bun run routes
+```
+
+```
+▲ Oven routes
+
+  GET     /
+  GET     /me
+  GET     /todos
+  POST    /auth/signup
+  …
+```
+
+This imports `app.ts` without binding a port — which is exactly why `listen()` lives in
+`index.ts`.
+
+[Next: storing todos →](/docs/build/storing-todos/)

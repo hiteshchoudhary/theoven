@@ -104,6 +104,8 @@ function parses(code) {
     `async function __fragment() {\n${placeholderless}\n}`,
     // A bare property, e.g. a page showing just what a brick declares.
     `const __fragment = {\n${placeholderless}\n}`,
+    // A continued method chain, e.g. showing one line of a query builder in isolation.
+    `const __fragment = __x${placeholderless}`,
   ]) {
     try {
       transpiler.transformSync(candidate)

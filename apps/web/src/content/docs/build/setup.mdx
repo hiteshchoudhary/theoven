@@ -1,0 +1,165 @@
+---
+title: 1. Set it up
+description: One command, and a tour of what you get before writing a line.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+```bash
+bun create theoven todo-api --db sqlite --auth basic
+cd todo-api
+bun install
+```
+
+<Steps>
+
+1. **Set a signing secret.** The scaffold refuses to boot without one, on purpose — a framework
+   that invents a secret has invented one every deployment shares.
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Open `.env` and put something in `AUTH_SECRET`:
+
+   ```bash
+   # macOS / Linux
+   openssl rand -base64 32
+   ```
+
+2. **Create the database.**
+
+   ```bash
+   bun run db:generate    # writes a migration from your schema
+   bun run db:migrate     # applies it
+   ```
+
+3. **Run it.**
+
+   ```bash
+   bun run dev
+   ```
+
+</Steps>
+
+You now have a working API at `http://localhost:3000`, with browsable documentation at
+[`/docs`](http://localhost:3000/docs).
+
+```bash
+curl -X POST localhost:3000/auth/signup \
+  -H 'content-type: application/json' \
+  -d '{"name":"Ada","email":"ada@example.com","password":"correct-horse"}'
+```
+
+That returns a user and an access token. You have not written any code.
+
+## What you got
+
+```
+src/
+  app.ts       builds the app — every brick registered here
+  index.ts     starts the server
+  env.ts       configuration, read and validated once at boot
+  db.ts        the database brick
+  client.ts    the connection, shared
+  auth.ts      the auth provider
+  mail.ts      the mail driver
+  schema.ts    your tables
+  routes/      the route table — the filesystem *is* the router
+```
+
+### `app.ts` is the whole configuration
+
+```ts title="src/app.ts"
+export const app = createApp({ logLevel: config.logLevel })
+  .use(requestLogger())
+  .use(securityHeaders())
+  .use(database)
+  .use(mail(driver))
+  .use(auth(provider))
+  .use(openapi({ info: { title: 'todo-api', version: '0.1.0' } }))
+
+await loadRoutes(app, `${import.meta.dir}/routes`)
+```
+
+Six lines, and each one is a feature. `.use(auth(provider))` is what mounted those eight
+`/auth/*` endpoints. `.use(database)` is what will put a typed client on every request.
+
+Leave one out and the thing it provides becomes a **compile error** wherever you use it — not a
+crash at 3am.
+
+### `index.ts` is separate on purpose
+
+```ts title="src/index.ts"
+import app from './app'
+
+await app.listen(config.port)
+```
+
+`app.ts` builds and exports; `index.ts` listens. That split is what lets `oven routes`,
+`oven openapi` and your tests import the app without binding a port. Keep it.
+
+### One connection, shared
+
+```ts title="src/client.ts"
+export const sqlite = new Database(config.databaseUrl)
+export const client = drizzle(sqlite, { schema })
+```
+
+```ts title="src/db.ts"
+export const database = db(drizzleSqlite({ client: sqlite, schema }))
+```
+
+`auth-basic` builds its user store at construction — before an app exists — so it needs a client
+of its own. The database brick **adopts** that same connection rather than opening a second.
+
+<Aside type="caution" title="This matters more than it looks">
+  Two connections to a file merely waste a handle. Two connections to `:memory:` are two separate
+  databases — and the symptom is `no such table` on a schema you can watch being created. You
+  will want `:memory:` in [chapter 5](/docs/build/testing/), so it is worth knowing why this line
+  reads the way it does.
+</Aside>
+
+### `env.ts` fails loudly
+
+```ts title="src/env.ts"
+function read() {
+  return {
+    port: env.port('PORT', 3000),
+    databaseUrl: env.string('DATABASE_URL', './data.db'),
+    authSecret: env.string('AUTH_SECRET'),
+  }
+}
+```
+
+`env.string('AUTH_SECRET')` has no default, so a missing one fails at **startup** with a message
+naming the variable — rather than at 3am as `undefined` somewhere unrelated.
+
+## Two things to try before moving on
+
+**The API reference** at [`/docs`](http://localhost:3000/docs) is generated from your routes. It
+already lists every auth endpoint. As you add schemas in the next chapter, it fills in.
+
+**The mail inbox** at [`/_oven/mail`](http://localhost:3000/_oven/mail). Try a password reset:
+
+```bash
+curl -X POST localhost:3000/auth/forgot-password \
+  -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com"}'
+```
+
+The reset link appears in that inbox and in your terminal, because mail defaults to the console
+driver. The whole flow works before you have signed up for a mail provider.
+
+## Clear the decks
+
+The scaffold ships an example `users` resource to show the shape. You are building todos, so
+delete it:
+
+```bash
+rm -rf src/routes/users src/routes/health.get.ts
+```
+
+[Next: the first endpoint →](/docs/build/first-endpoint/)

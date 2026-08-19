@@ -1,0 +1,78 @@
+---
+title: Build a todo API
+description: A guided project — from an empty directory to an authenticated, tested, documented API. Every snippet is real code from a working app.
+sidebar:
+  order: 0
+  label: Overview
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+The [tutorial](/docs/tutorial/first-route/) teaches one idea per chapter. This builds one thing,
+end to end: a todo API where people sign up, log in, and can only ever see their own todos.
+
+By the end you will have:
+
+- `POST /auth/signup`, `/auth/login`, and five more auth endpoints you did not write
+- `GET`, `POST`, `PATCH` and `DELETE` for todos, each scoped to the signed-in user
+- validation that rejects bad input before your code runs, and documents itself at `/docs`
+- a test suite that proves one user cannot touch another's data
+- something you can deploy
+
+<Aside type="note" title="This code runs">
+  Every snippet here is copied out of a working application that was built and exercised while
+  the page was written — including the tests, which pass. If something does not work for you, it
+  is a bug in Oven or in these instructions, not a gap you are expected to fill in.
+</Aside>
+
+## The chapters
+
+<Steps>
+
+1. **[Set it up](/docs/build/setup/)** — one command, and a tour of what you get.
+
+2. **[The first endpoint](/docs/build/first-endpoint/)** — a route, a schema, and why the
+   filesystem is the router.
+
+3. **[Storing todos](/docs/build/storing-todos/)** — a table, a migration, and real persistence.
+
+4. **[Locking it down](/docs/build/auth/)** — signup, login, and scoping every query to its owner.
+
+5. **[Testing it](/docs/build/testing/)** — including the tests that matter most.
+
+6. **[Shipping it](/docs/build/shipping/)** — what production refuses to boot with, and why.
+
+</Steps>
+
+## What you need
+
+Bun 1.2 or newer. Nothing else — no database server, no Redis, no S3 account. The default stack
+is SQLite on disk and mail printed to your terminal, so the whole thing runs on a laptop on a
+plane.
+
+```bash
+bun --version   # 1.2.0 or higher
+```
+
+## The finished thing
+
+If you would rather read the code than build it, here is the whole app — six files you write, on
+top of what `bun create` gives you:
+
+```
+src/
+  app.ts            configured by the scaffold; you add nothing
+  route.ts          binds ctx to your bricks — three lines
+  schema.ts         your table, plus auth's
+  routes/todos/
+    index.get.ts    list
+    index.post.ts   create
+    [id].patch.ts   update
+    [id].delete.ts  delete
+  app.test.ts       the suite
+```
+
+Four route files, a schema, and a test. Everything else — auth endpoints, request parsing, error
+shapes, OpenAPI, graceful shutdown — you get without writing it.
+
+[Start with the setup →](/docs/build/setup/)

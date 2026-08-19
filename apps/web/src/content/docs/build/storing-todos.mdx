@@ -1,0 +1,228 @@
+---
+title: 3. Storing todos
+description: A table, a migration, and the three routes that write to it.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## The table
+
+```ts title="src/schema.ts"
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const todos = sqliteTable('todos', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  title: text('title').notNull(),
+  notes: text('notes'),
+  done: integer('done', { mode: 'boolean' }).notNull().default(false),
+  dueAt: integer('due_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+export * from '@theoven/auth-basic/schema'
+```
+
+Two things worth pausing on.
+
+**`userId` is there from the start.** Every todo belongs to someone. Adding ownership later means
+a migration and an audit of every query; putting it in now costs one line.
+
+**That last line re-exports auth's three tables** — `auth_users`, `auth_refresh_tokens`,
+`auth_reset_tokens` — so `oven db generate` writes migrations for them alongside yours.
+
+<Aside type="caution" title="Delete that line and signup breaks">
+  Not at compile time — at runtime, with `no such table: auth_users`, on the first person who
+  tries to sign up. drizzle-kit only sees what `src/schema.ts` exports.
+</Aside>
+
+`mode: 'boolean'` and `mode: 'timestamp_ms'` are Drizzle telling SQLite how to store types it
+does not have. You get real `boolean` and `Date` values in your handlers.
+
+## Migrate
+
+```bash
+bun run db:generate
+bun run db:migrate
+```
+
+```
+4 tables
+todos 7 columns 0 indexes 0 fks
+auth_refresh_tokens 5 columns 2 indexes 1 fks
+auth_reset_tokens 5 columns 1 indexes 1 fks
+auth_users 6 columns 1 indexes 0 fks
+```
+
+`db:generate` writes a SQL file into `drizzle/` — **commit it**. It is the record of how your
+schema got to where it is, and it is what `db:migrate` replays on a fresh database.
+
+## Creating
+
+```ts title="src/routes/todos/index.post.ts"
+import { z } from 'zod'
+import { route } from '../../route'
+import { todos } from '../../schema'
+
+export default route(
+  {
+    summary: 'Create a todo',
+    tags: ['todos'],
+    body: z.object({
+      title: z.string().min(1).max(200),
+      notes: z.string().max(2000).optional(),
+      dueAt: z.coerce.date().optional(),
+    }),
+  },
+  async (ctx) => {
+    const [todo] = await ctx.db
+      .insert(todos)
+      .values({
+        id: crypto.randomUUID(),
+        userId: 'anonymous',        // fixed in the next chapter
+        title: ctx.body.title,
+        notes: ctx.body.notes ?? null,
+        dueAt: ctx.body.dueAt ?? null,
+        createdAt: new Date(),
+      })
+      .returning()
+
+    ctx.status = 201
+    return todo
+  },
+)
+```
+
+`z.coerce.date()` accepts `"2026-09-01"` from JSON and hands your handler a real `Date`. There is
+no `if (!title) return res.status(400)` because a request without a title never reaches this
+function.
+
+## Updating
+
+```ts title="src/routes/todos/[id].patch.ts"
+import { NotFound } from '@theoven/core'
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { route } from '../../route'
+import { todos } from '../../schema'
+
+export default route(
+  {
+    summary: 'Update a todo',
+    tags: ['todos'],
+    params: z.object({ id: z.uuid() }),
+    body: z
+      .object({
+        title: z.string().min(1).max(200).optional(),
+        notes: z.string().max(2000).nullable().optional(),
+        done: z.boolean().optional(),
+        dueAt: z.coerce.date().nullable().optional(),
+      })
+      .refine((patch) => Object.keys(patch).length > 0, 'Send at least one field to change.'),
+  },
+  async (ctx) => {
+    const [updated] = await ctx.db
+      .update(todos)
+      .set(ctx.body)
+      .where(eq(todos.id, ctx.params.id))
+      .returning()
+
+    if (!updated) throw new NotFound(`No todo with id ${ctx.params.id}.`)
+    return updated
+  },
+)
+```
+
+Three details:
+
+**`z.uuid()` on the param** means a request to `/todos/haha-not-a-uuid` is refused with a `422`
+before any query runs. Your database never sees it.
+
+**`.refine()` rejects an empty patch.** `PATCH` with `{}` is almost always a bug in the caller,
+and silently returning the unchanged row hides it.
+
+**`throw new NotFound(...)`**, not `return res.status(404)`. Thrown errors become
+[RFC 9457](/docs/reference/errors/) problem documents, with a request id, whether they were
+thrown synchronously or five `await`s deep.
+
+## Deleting
+
+```ts title="src/routes/todos/[id].delete.ts"
+import { NotFound } from '@theoven/core'
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { route } from '../../route'
+import { todos } from '../../schema'
+
+export default route(
+  {
+    summary: 'Delete a todo',
+    tags: ['todos'],
+    params: z.object({ id: z.uuid() }),
+  },
+  async (ctx) => {
+    const [deleted] = await ctx.db
+      .delete(todos)
+      .where(eq(todos.id, ctx.params.id))
+      .returning()
+
+    if (!deleted) throw new NotFound(`No todo with id ${ctx.params.id}.`)
+    ctx.status = 204
+    return null
+  },
+)
+```
+
+`.returning()` is doing real work here: it tells you whether anything was actually deleted, so a
+second `DELETE` on the same id is a `404` rather than a cheerful `204` for a row that stopped
+existing minutes ago.
+
+## Try it
+
+```bash
+curl -X POST localhost:3000/todos \
+  -H 'content-type: application/json' \
+  -d '{"title":"Write the walkthrough","dueAt":"2026-09-01"}'
+```
+
+```json
+{
+  "id": "4550bbb1-e547-4b7c-8426-a3b66edee1e6",
+  "userId": "anonymous",
+  "title": "Write the walkthrough",
+  "notes": null,
+  "done": false,
+  "dueAt": "2026-09-01T00:00:00.000Z",
+  "createdAt": "2026-08-19T15:32:50.412Z"
+}
+```
+
+And the validation:
+
+```bash
+curl -X POST localhost:3000/todos -H 'content-type: application/json' -d '{"title":""}'
+```
+
+```json
+{
+  "type": "about:blank",
+  "title": "Unprocessable Content",
+  "status": 422,
+  "detail": "Request validation failed.",
+  "errors": [
+    { "location": "body", "path": "title", "message": "Too small: expected string to have >=1 characters" }
+  ],
+  "requestId": "9cb7b217-1d07-4a2e-9d4a-0b1c2d3e4f50"
+}
+```
+
+Which is the shape *every* error in your API has, without you designing one.
+
+<Aside type="caution" title="Right now, anyone can edit anyone's todos">
+  Every todo has `userId: 'anonymous'` and no query filters on it. That is the next chapter, and
+  it is the interesting one.
+</Aside>
+
+[Next: locking it down →](/docs/build/auth/)

@@ -1,0 +1,155 @@
+---
+title: 6. Shipping it
+description: What production refuses to boot with, and why each refusal exists.
+sidebar:
+  order: 6
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+## Build
+
+```bash
+bun run build
+```
+
+Two things happen: a route manifest is written with a static import per route file, so production
+never walks the filesystem at boot; then `Bun.build` bundles everything into a single
+`dist/index.js`.
+
+```bash
+bun dist/index.js
+```
+
+That runs with **no `node_modules` at all** — dependencies are in the bundle. Which is what makes
+the container image below as small as it is.
+
+## The Dockerfile
+
+```dockerfile
+FROM oven/bun:1 AS build
+WORKDIR /app
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY . .
+RUN bunx oven build
+
+FROM oven/bun:1-slim
+WORKDIR /app
+
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/drizzle ./drizzle
+
+USER bun
+EXPOSE 3000
+CMD ["bun", "dist/index.js"]
+```
+
+`oven/bun` is Bun's own image — the name collision with this framework is a coincidence, since
+`oven-sh` is Bun's GitHub organisation.
+
+The `drizzle/` folder comes along because migrations are how a fresh database gets its schema.
+Run them as a release step, not from every replica at boot:
+
+```bash
+bunx oven db migrate
+```
+
+## Three things that will refuse to start
+
+This is the part worth reading before you deploy rather than after.
+
+| | Refused in production | Because |
+| --- | --- | --- |
+| `mail` | the `console` driver | reset links printed to a log look healthy while nobody can reset their password |
+| `storage` | the `disk` driver | uploads on a container filesystem vanish on the next deploy |
+| `queue` | the `memory` driver | a deploy silently drops every queued job |
+
+Your todo app uses the console mail driver, so it will not boot with `NODE_ENV=production` until
+you configure a real one:
+
+```ts title="src/mail.ts"
+import { resendMail } from '@theoven/mail'
+
+export const driver = resendMail({
+  apiKey: config.resendApiKey,
+  from: 'todos@example.com',
+})
+```
+
+<Aside type="note" title="Each of these is a bug you would have found in a month">
+  Not at deploy time — weeks later, as "password reset is broken" or "avatars keep disappearing".
+  Every one of them looks perfectly healthy from the outside. That is exactly why they are boot
+  errors rather than warnings, and each names itself and says what to configure.
+</Aside>
+
+## Configuration
+
+```bash
+NODE_ENV=production
+PORT=3000
+DATABASE_URL=/data/todo.db
+AUTH_SECRET=<from your secret store, not the image>
+```
+
+`NODE_ENV=production` is what turns on the refusals above, and what stops internal error messages
+and stacks reaching clients. `AUTH_SECRET` has no default and never should.
+
+A SQLite file needs a mounted volume — a database inside the image resets on every deploy. When
+you outgrow it, [switching to Postgres](/docs/bricks/db-drizzle/) is one import and one line in
+`db.ts`; every query you wrote in chapters 3 and 4 is unchanged.
+
+## Health checks
+
+```ts title="src/routes/health.get.ts"
+import { checkHealth } from '@theoven/db'
+import { route } from '../route'
+
+export default route({ summary: 'Liveness' }, async (ctx) => {
+  const database = await checkHealth(ctx.db)
+  ctx.status = database ? 200 : 503
+  return { status: database ? 'healthy' : 'degraded', database }
+})
+```
+
+`checkHealth` issues a real query. A check that reports whether a pool *object* exists cannot
+fail, and a health check that cannot fail is not a health check.
+
+## Shutdown is already handled
+
+`SIGTERM` stops accepting connections, waits for in-flight requests, drains the queue worker, then
+closes every brick's resources. Give your platform a grace period longer than your slowest
+request — 30 seconds is a reasonable default — or it will `SIGKILL` mid-drain and undo the point.
+
+## Before you call it done
+
+<Steps>
+
+1. `bun run doctor` passes
+2. `NODE_ENV=production` is set — several safety checks key on it
+3. `AUTH_SECRET` comes from a secret store, not the image
+4. Migrations run as a release step, not from every replica at boot
+5. A volume is mounted for the SQLite file
+6. The health check queries something real
+7. The shutdown grace period exceeds your slowest request
+
+</Steps>
+
+## What you built
+
+Four route files, a schema, and a test — on top of a scaffold you did not modify. For that you
+have authentication with revocable sessions and password reset, per-user data isolation proven by
+tests, validation that documents itself, RFC 9457 errors with request ids, an OpenAPI document
+and a browsable reference, structured logging, and graceful shutdown.
+
+None of which you wired.
+
+## Where to go next
+
+- **[Add file uploads](/docs/bricks/storage/)** — attachments on a todo, streamed straight to S3
+- **[Add background jobs](/docs/bricks/queue/)** — a nightly digest of what is overdue
+- **[Send real email](/docs/bricks/mail/)** — with typed templates
+- **[Write your own brick](/docs/reference/bricks/)** — about fifty lines
+- **[Deployment guide](/docs/guides/deployment/)** — Fly, Railway, and the full checklist

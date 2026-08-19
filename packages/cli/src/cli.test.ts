@@ -674,3 +674,43 @@ describe('scaffolded dependency versions', () => {
     }
   })
 })
+
+/**
+ * Two `:memory:` connections are two separate databases — so a scaffold that opens one in
+ * `client.ts` and another in `db.ts` cannot be tested against an in-memory database at all, and
+ * its own comment claiming they are "the same client" is false.
+ */
+describe('scaffolded database connection', () => {
+  function read(options: Partial<Parameters<typeof renderTemplate>[1]>, path: string) {
+    const files = renderTemplate('api', { name: 'demo', openapi: true, ...options })
+    return files.find((file) => file.path === path)?.contents ?? ''
+  }
+
+  test('with auth, the db brick adopts the connection client.ts opened', () => {
+    const client = read({ database: 'sqlite', auth: 'basic' }, 'src/client.ts')
+    const db = read({ database: 'sqlite', auth: 'basic' }, 'src/db.ts')
+
+    expect(client).toContain('export const sqlite = new Database(')
+    expect(db).toContain("import { sqlite } from './client'")
+    expect(db).toContain('drizzleSqlite({ client: sqlite')
+    // Exactly one connection is opened in the whole project.
+    expect(db).not.toContain('new Database(')
+  })
+
+  test('without auth there is no second client, so it opens its own', () => {
+    const db = read({ database: 'sqlite', auth: 'none' }, 'src/db.ts')
+    expect(db).toContain('drizzleSqlite({ url: config.databaseUrl')
+    expect(db).not.toContain("from './client'")
+  })
+
+  // An import that only appears in a comment is a lint error in someone's new project.
+  test('neither variant imports something it does not use', () => {
+    for (const auth of ['basic', 'none'] as const) {
+      const db = read({ database: 'sqlite', auth }, 'src/db.ts')
+      for (const [, name] of db.matchAll(/^import \{ (\w+) \}/gm)) {
+        const body = db.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/^import .*$/gm, '')
+        expect(body, `${auth}: ${name} is imported but unused`).toContain(name as string)
+      }
+    }
+  })
+})

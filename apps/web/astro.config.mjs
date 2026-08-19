@@ -35,6 +35,9 @@ export default defineConfig({
         // The hardcoded list silently omitted the database and auth pages when they were added,
         // which made two tutorial chapters unreachable from the navigation.
         { label: 'Tutorial', items: [{ autogenerate: { directory: 'tutorial' } }] },
+        // A guided project, in order. Distinct from the tutorial: that teaches one idea per
+        // chapter, this builds one application end to end.
+        { label: 'Build a todo API', items: [{ autogenerate: { directory: 'build' } }] },
         { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
         // The catalogue. One page per shipped brick, all following the same shape so a reader
         // — or a model — can find "what endpoints does this add" without hunting.

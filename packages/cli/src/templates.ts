@@ -404,11 +404,13 @@ export const notes = sqliteTable('notes', {
 })
 `
 
-function dbModule(choice: DatabaseChoice): string {
+function dbModule(choice: DatabaseChoice, hasAuth: boolean): string {
   const provider =
     choice === 'postgres'
       ? 'drizzlePostgres({ url: config.databaseUrl, schema })'
-      : 'drizzleSqlite({ url: config.databaseUrl, schema })'
+      : hasAuth
+        ? 'drizzleSqlite({ client: sqlite, schema })'
+        : 'drizzleSqlite({ url: config.databaseUrl, schema })'
 
   const other = choice === 'postgres' ? 'drizzleSqlite' : 'drizzlePostgres'
   const otherCall =
@@ -416,10 +418,11 @@ function dbModule(choice: DatabaseChoice): string {
       ? 'drizzleSqlite({ url: config.databaseUrl, schema })'
       : 'drizzlePostgres({ url: config.databaseUrl, schema })'
 
+  const adopting = choice !== 'postgres' && hasAuth
+
   return `import { db } from '@theoven/db'
 import { ${choice === 'postgres' ? 'drizzlePostgres' : 'drizzleSqlite'} } from '@theoven/db-drizzle'
-import { config } from './env'
-import * as schema from './schema'
+${adopting ? "import { sqlite } from './client'\n" : "import { config } from './env'\n"}import * as schema from './schema'
 
 /**
  * The database brick.
@@ -471,12 +474,18 @@ import { config } from './env'
 import * as schema from './schema'
 
 /**
- * The raw Drizzle client, for the pieces that need one before the app exists.
+ * One connection, shared by everything.
  *
- * \`auth-basic\` takes a client rather than reading it off the context, because it builds its
- * store at construction. Inside a route, keep using \`ctx.db\` — it is this same client.
+ * \`auth-basic\` builds its store at construction — before an app exists — so it needs a client of
+ * its own, and the db brick would otherwise open a second one. Two connections to a file merely
+ * waste a handle; two to \`:memory:\` are two separate databases, which is why the brick adopts
+ * this one in db.ts.
+ *
+ * Inside a route, keep using \`ctx.db\`. It really is this same connection.
  */
-export const client = drizzle(new Database(config.databaseUrl), { schema })
+export const sqlite = new Database(config.databaseUrl)
+
+export const client = drizzle(sqlite, { schema })
 `
 
 const MAIL_MODULE = `import { consoleMail } from '@theoven/mail'
@@ -629,7 +638,7 @@ export function renderTemplate(template: TemplateName, options: TemplateOptions)
   if (hasDatabase) {
     files.push(
       { path: 'src/schema.ts', contents: schemaModule(resolved) },
-      { path: 'src/db.ts', contents: dbModule(resolved.database as DatabaseChoice) },
+      { path: 'src/db.ts', contents: dbModule(resolved.database as DatabaseChoice, hasAuth) },
       {
         path: 'drizzle.config.ts',
         contents:

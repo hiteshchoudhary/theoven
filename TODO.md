@@ -473,6 +473,13 @@ Only as far as `auth-basic` needs it: password reset cannot work without sending
 
 ### 2.8 Default stack and scaffold (D21, D24)
 
+**Fixed later, while writing the guided walkthrough:** the scaffold opened *two* database
+connections — `client.ts` for `auth-basic` and `db.ts` for the brick — while its own comment
+claimed they were "this same client". Against a file that merely wastes a handle; against
+`:memory:` they are two separate databases, so a scaffolded project could not be tested in memory
+at all. `db.ts` now adopts the connection `client.ts` opened. Three tests, including one that
+fails on an import used only in a comment.
+
 **Verified by running it, not by reading it:** scaffolded a project, linked it to the workspace,
 ran `oven db generate` (4 tables, auth's three included), `oven db migrate`, started it, signed
 up, called a guarded route with the access token, and requested a password reset — the link
@@ -697,9 +704,15 @@ development and production. Covered by tests now.
       upload route, answers "why not middleware", and states that laziness is a test rather than
       a promise. The reference page keeps the per-API detail.
 - [x] Tutorial, FastAPI-style and progressive: first route → validation → errors → database →
-      auth, explicitly ordered so the sidebar reads as a path rather than alphabetically. Uploads,
-      queue and mail are covered by their brick pages, which follow a fixed shape; deployment got
-      its own guide.
+      auth, explicitly ordered so the sidebar reads as a path rather than alphabetically.
+- [x] **Guided project: "Build a todo API"** — six chapters from `bun create` to a deployed,
+      authenticated, tested API. Distinct from the tutorial: that teaches one idea per chapter,
+      this builds one application end to end.
+
+      Written from a **working app**, not from memory. The application was scaffolded, built,
+      exercised over HTTP and tested before a word of it was written; every snippet is copied out
+      of code that runs, and the test suite in chapter 5 passes as printed. Building it found a
+      real scaffold bug — see §2.8.
 - [x] How-to guides: "Coming from Express", benchmarks, **testing** (through `app.fetch`, with
       the memory mail driver and `worker.drain()`), and **deployment** (verified: `oven build`
       emits one `dist/index.js` that runs with no `node_modules` at all, which is what makes the

@@ -1,0 +1,191 @@
+---
+title: 4. Locking it down
+description: Signup, login, and scoping every query to its owner — the chapter that matters.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+The auth endpoints have been running since chapter 1. You did not write them, and you are not
+going to. What this chapter does is connect them to your todos.
+
+## What you already have
+
+```
+POST /auth/signup            name, email, password
+POST /auth/login             returns an access token, sets a refresh cookie
+POST /auth/refresh           rotates both
+POST /auth/logout            genuinely revokes the session
+GET  /auth/me                the signed-in user
+POST /auth/change-password   signs every other session out
+POST /auth/forgot-password   emails a single-use link
+POST /auth/reset-password    redeems it
+```
+
+Behind them: argon2id hashing, a short-lived access JWT with a revocable refresh row, single-use
+hashed reset tokens, and rate limiting on login, signup and reset keyed on **both** IP and email.
+Login also refuses to reveal which addresses have accounts — a wrong password and an unknown
+email return identical bodies, identical statuses, and comparable timing.
+
+That list is the argument for not writing auth yourself. Every item on it is something that gets
+missed at the end of a long Friday.
+
+## Guarding a route
+
+Add one line to each of your four route files:
+
+```ts title="src/routes/todos/index.post.ts" ins={5}
+export default route(
+  {
+    summary: 'Create a todo',
+    tags: ['todos'],
+    auth: true,
+    body: z.object({ /* … */ }),
+  },
+  async (ctx) => {
+    const [todo] = await ctx.db
+      .insert(todos)
+      .values({
+        id: crypto.randomUUID(),
+        userId: ctx.user.id,        // ← no null check
+        // …
+      })
+      .returning()
+
+    ctx.status = 201
+    return todo
+  },
+)
+```
+
+`ctx.user.id`, with no `if (!ctx.user)` in front of it.
+
+The guard runs **before** the handler, so a route declaring `auth: true` is unreachable
+anonymously — and TypeScript knows, narrowing `ctx.user` to non-null inside it. Delete the
+`auth: true` line and that `ctx.user.id` stops compiling. The type system is enforcing the guard,
+not just describing it.
+
+<Aside type="note" title="The route says nothing about tokens">
+  Where the credential came from — `Authorization`, a cookie, `?access_token=` — is core's
+  business. Which provider validated it is the brick's. Swap `auth-basic` for
+  [Clerk](/docs/bricks/auth-clerk/) and this file does not change.
+</Aside>
+
+## Scoping the queries
+
+A guard says *someone* is signed in. It does not say the todo is theirs. That is your job, and it
+is the part worth being careful about.
+
+### Listing
+
+```ts title="src/routes/todos/index.get.ts"
+import { and, desc, eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { route } from '../../route'
+import { todos } from '../../schema'
+
+export default route(
+  {
+    auth: true,
+    summary: 'List your todos',
+    tags: ['todos'],
+    query: z.object({
+      done: z.stringbool().optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+    }),
+  },
+  (ctx) => {
+    const mine = eq(todos.userId, ctx.user.id)
+
+    return ctx.db
+      .select()
+      .from(todos)
+      .where(ctx.query.done === undefined ? mine : and(mine, eq(todos.done, ctx.query.done)))
+      .orderBy(desc(todos.createdAt))
+      .limit(ctx.query.limit)
+  },
+)
+```
+
+`mine` is built once and every branch includes it. Written as a chain of optional filters, the
+ownership check is one `if` away from being skipped — this way it cannot be.
+
+`z.stringbool()` turns `?done=true` into a real boolean; `"false"`, `"0"` and `"no"` all work,
+which `Boolean("false") === true` famously does not.
+
+### Updating and deleting
+
+```ts title="src/routes/todos/[id].patch.ts"
+const [updated] = await ctx.db
+  .update(todos)
+  .set(ctx.body)
+  .where(and(eq(todos.id, ctx.params.id), eq(todos.userId, ctx.user.id)))
+  .returning()
+
+if (!updated) throw new NotFound(`No todo with id ${ctx.params.id}.`)
+return updated
+```
+
+The ownership check is **in the `where` clause**, not in an `if` after the read.
+
+That matters for two reasons. It is one query rather than a read-then-write, so nothing can
+change between them. And it fails as a `404`, not a `403` — which is the right answer, because
+telling a stranger "that exists but is not yours" confirms the id exists. `DELETE` gets the same
+treatment.
+
+## See it work
+
+```bash
+# Ada signs up and creates something
+ADA=$(curl -s -X POST localhost:3000/auth/signup -H 'content-type: application/json' \
+  -d '{"name":"Ada","email":"ada@example.com","password":"correct-horse"}' | jq -r .accessToken)
+
+ID=$(curl -s -X POST localhost:3000/todos -H "authorization: Bearer $ADA" \
+  -H 'content-type: application/json' -d '{"title":"Ada private"}' | jq -r .id)
+
+# Mallory signs up and goes looking
+MAL=$(curl -s -X POST localhost:3000/auth/signup -H 'content-type: application/json' \
+  -d '{"name":"Mallory","email":"mal@example.com","password":"correct-horse"}' | jq -r .accessToken)
+
+curl -s localhost:3000/todos -H "authorization: Bearer $MAL"
+# []
+
+curl -s -o /dev/null -w '%{http_code}\n' -X PATCH localhost:3000/todos/$ID \
+  -H "authorization: Bearer $MAL" -H 'content-type: application/json' -d '{"title":"pwned"}'
+# 404
+
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE localhost:3000/todos/$ID \
+  -H "authorization: Bearer $MAL"
+# 404
+```
+
+Ada's todo is invisible, unmodifiable and undeletable. And without a token at all:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' localhost:3000/todos
+# 401
+```
+
+## When "signed in" is not enough
+
+`auth: true` means *someone*. For anything more, write a named policy:
+
+```ts title="src/app.ts"
+const policies = {
+  admin: (user) => user.raw.role === 'admin',
+}
+
+app.use(auth(provider, { policies }))
+```
+
+```ts
+export default route({ auth: 'admin' }, handler)
+```
+
+A policy is a plain function — testable, greppable, and it appears in your OpenAPI document with
+its name and a documented `403`. There is deliberately no built-in `role: 'admin'` guard: roles
+are not normalised across providers, so a portable one would fail silently on any provider that
+models permissions differently.
+
+[Next: testing it →](/docs/build/testing/)

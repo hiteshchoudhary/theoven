@@ -1,0 +1,193 @@
+---
+title: 5. Testing it
+description: No server, no port, no mocks — and the tests that matter most.
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+`app.fetch(request)` runs the whole pipeline — routing, middleware, the auth guard, validation,
+your handler, serialisation — and hands back a `Response`. Nothing is mocked and no port is bound.
+
+## The setup
+
+```ts title="src/app.test.ts"
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
+import app from './app'
+import { client } from './client'
+
+const send = (path: string, init?: RequestInit) =>
+  app.fetch(new Request(`http://localhost${path}`, init))
+
+async function signUp(email: string): Promise<string> {
+  const response = await send('/auth/signup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Test', email, password: 'correct-horse' }),
+  })
+  return ((await response.json()) as { accessToken: string }).accessToken
+}
+
+function as(token: string, body?: unknown, method = 'GET'): RequestInit {
+  return {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(body ? { 'content-type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  }
+}
+
+let ada = ''
+let mallory = ''
+
+beforeAll(async () => {
+  // A fresh :memory: database has no tables — the migrations on disk were applied to your
+  // development file, not to this one.
+  migrate(client, { migrationsFolder: './drizzle' })
+
+  await app.ready()
+  ada = await signUp(`ada-${crypto.randomUUID()}@example.com`)
+  mallory = await signUp(`mal-${crypto.randomUUID()}@example.com`)
+})
+
+afterAll(() => app.close({ timeout: 1000 }))
+```
+
+Run it against a throwaway database:
+
+```bash
+DATABASE_URL=:memory: AUTH_SECRET=test-secret bun test
+```
+
+<Aside type="note" title="This is why the connection is shared">
+  `migrate(client, …)` creates the tables on the connection in `client.ts` — and because `db.ts`
+  **adopted** that connection rather than opening its own, `ctx.db` sees them. Two `:memory:`
+  connections would be two databases, and every test would fail with `no such table`.
+</Aside>
+
+Two users are created up front, because the tests that matter need someone to attack with.
+
+## The happy path
+
+```ts
+describe('todos', () => {
+  test('a todo can be created, listed, completed and deleted', async () => {
+    const created = await send('/todos', as(ada, { title: 'Write tests' }, 'POST'))
+    expect(created.status).toBe(201)
+    const todo = (await created.json()) as { id: string; done: boolean }
+    expect(todo.done).toBe(false)
+
+    const listed = (await (await send('/todos', as(ada))).json()) as Array<{ id: string }>
+    expect(listed.some((entry) => entry.id === todo.id)).toBe(true)
+
+    const patched = await send(`/todos/${todo.id}`, as(ada, { done: true }, 'PATCH'))
+    expect(((await patched.json()) as { done: boolean }).done).toBe(true)
+
+    expect((await send(`/todos/${todo.id}`, as(ada, undefined, 'DELETE'))).status).toBe(204)
+  })
+})
+```
+
+Note what is **not** here: no server started, no port chosen, no `supertest`, no cleanup between
+tests beyond a fresh database per run.
+
+## The refusals
+
+Failures are where the bugs live, so test them at least as hard as the successes:
+
+```ts
+describe('validation', () => {
+  test('an empty title is a 422 naming the field', async () => {
+    const response = await send('/todos', as(ada, { title: '' }, 'POST'))
+    expect(response.status).toBe(422)
+
+    const problem = (await response.json()) as { errors: Array<{ path: string }> }
+    expect(problem.errors[0]?.path).toBe('title')
+  })
+
+  test('a patch with no fields is refused', async () => {
+    const created = await send('/todos', as(ada, { title: 'x' }, 'POST'))
+    const { id } = (await created.json()) as { id: string }
+
+    expect((await send(`/todos/${id}`, as(ada, {}, 'PATCH'))).status).toBe(422)
+  })
+
+  test('a malformed id never reaches the database', async () => {
+    const response = await send('/todos/not-a-uuid', as(ada, { done: true }, 'PATCH'))
+    expect(response.status).toBe(422)
+  })
+})
+```
+
+Assert on `path`, not on `message`. Validator messages get reworded between versions, and a test
+that breaks when prose changes is a test somebody deletes.
+
+## The tests that matter most
+
+```ts
+describe('one user cannot touch another user\'s todos', () => {
+  test('they are invisible, and cannot be changed or deleted', async () => {
+    const created = await send('/todos', as(ada, { title: 'Ada private' }, 'POST'))
+    const { id } = (await created.json()) as { id: string }
+
+    const theirs = (await (await send('/todos', as(mallory))).json()) as unknown[]
+    expect(theirs.some((entry) => (entry as { id: string }).id === id)).toBe(false)
+
+    expect((await send(`/todos/${id}`, as(mallory, { title: 'pwned' }, 'PATCH'))).status).toBe(404)
+    expect((await send(`/todos/${id}`, as(mallory, undefined, 'DELETE'))).status).toBe(404)
+
+    // And it is still Ada's, unchanged.
+    const mine = (await (await send('/todos', as(ada))).json()) as Array<{ id: string; title: string }>
+    expect(mine.find((entry) => entry.id === id)?.title).toBe('Ada private')
+  })
+
+  test('every todo route refuses an anonymous request', async () => {
+    for (const [path, method] of [
+      ['/todos', 'GET'],
+      ['/todos', 'POST'],
+      [`/todos/${crypto.randomUUID()}`, 'PATCH'],
+      [`/todos/${crypto.randomUUID()}`, 'DELETE'],
+    ] as const) {
+      expect((await send(path, { method })).status, `${method} ${path}`).toBe(401)
+    }
+  })
+})
+```
+
+Every query in this app is scoped by `userId`. These two tests are what stop that being true only
+until somebody refactors — and the second one loops over every route deliberately, because the
+route people forget to guard is the one added last.
+
+## Verify a test can fail
+
+Before trusting any of it, break something on purpose:
+
+```ts
+// Temporarily, in [id].patch.ts
+.where(eq(todos.id, ctx.params.id))   // ownership check removed
+```
+
+```
+1 fail  one user cannot touch another user's todos > they are invisible…
+```
+
+Then put it back. A test that cannot fail is a comment with a runtime cost, and every suite has a
+few. This is the cheapest habit in software and almost nobody does it.
+
+## Result
+
+```bash
+DATABASE_URL=:memory: AUTH_SECRET=test-secret bun test
+```
+
+```
+ 8 pass
+ 0 fail
+ 20 expect() calls
+```
+
+[Next: shipping it →](/docs/build/shipping/)
