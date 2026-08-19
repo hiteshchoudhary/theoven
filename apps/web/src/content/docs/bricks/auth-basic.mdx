@@ -120,7 +120,7 @@ throttled by default. Nothing to add:
 | `POST /auth/forgot-password` | 3 per 15 min | IP **and** email |
 
 Over the limit, the request gets `429` with a `Retry-After` header — as
-[problem+json](/docs/guides/errors/), like every other Oven error.
+[problem+json](/docs/tutorial/errors/), like every other Oven error.
 
 Login and reset count against **both** the caller's IP and the email in the body. Either key
 alone leaves a hole: limiting by IP does nothing against a distributed attempt on one account,
@@ -176,6 +176,17 @@ These are the ones worth knowing about, because they shape what the endpoints re
   believes an account is compromised.
 
 Each of these has a test, including the enumeration and token-reuse cases.
+
+## Where the code lives
+
+Almost none of this package is in this package. The flows, the eight endpoints, the cookie
+handling, the rate limits and every piece of cryptography live in `@theoven/auth`, shared with
+[`auth-mongo`](/docs/bricks/auth-mongo/) and any other storage brick. What is here is
+`schema.ts` and `store.ts` — the Drizzle half, and nothing security-critical.
+
+That split is the reason `auth-mongo` is a hundred lines rather than a fork. Two auth bricks with
+their own copies of the token logic is a fix landing in one and not the other, which is the bug
+nobody finds.
 
 ## Limitations
 

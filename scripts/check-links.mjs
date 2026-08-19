@@ -52,6 +52,39 @@ function resolves(href) {
   return existsSync(`${target}.html`)
 }
 
+/**
+ * Refuses to check output older than the sources it was built from.
+ *
+ * Learned the boring way: running this against a `dist/` from an earlier build reported every
+ * link resolving while a page added since then was not in it at all. A link checker that can
+ * pass on stale output is worse than none, because it is trusted.
+ */
+async function newestSource(dir) {
+  let newest = 0
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) {
+      continue
+    }
+    const path = join(dir, entry.name)
+    newest = Math.max(newest, entry.isDirectory() ? await newestSource(path) : statSync(path).mtimeMs)
+  }
+  return newest
+}
+
+const SOURCES = ['apps/web/src', 'apps/landing'].filter((dir) => existsSync(dir))
+if (SOURCES.length > 0) {
+  const built = statSync(DIST).mtimeMs
+  const sources = Math.max(...(await Promise.all(SOURCES.map(newestSource))))
+
+  if (sources > built) {
+    console.error(
+      `${DIST} is older than the site sources, so this check would pass on output that no ` +
+        'longer matches the pages. Run the build first: bash scripts/build-site.sh',
+    )
+    process.exit(1)
+  }
+}
+
 const pages = await htmlFiles(DIST)
 const broken = new Map()
 let checked = 0

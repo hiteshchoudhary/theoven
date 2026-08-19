@@ -32,6 +32,12 @@ export {
 } from './flows'
 export type { Identity, Session } from './identity'
 export {
+  type AuthRateLimit,
+  type PasswordAuthOptions,
+  type PasswordAuthService,
+  passwordAuthProvider,
+} from './password-provider'
+export {
   type AuthRequirement,
   type Policies,
   type Policy,

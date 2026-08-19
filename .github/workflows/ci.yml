@@ -56,7 +56,7 @@ jobs:
       # suites and still print a green run, which is the failure this catches.
       - name: Confirm the integration suites ran
         run: |
-          bun test packages/db-drizzle packages/db-mongoose 2>&1 | tee /tmp/integration.log
+          bun test packages/db-drizzle packages/db-mongoose packages/auth-mongo 2>&1 | tee /tmp/integration.log
           if grep -q "integration tests skipped" /tmp/integration.log; then
             echo "::error::An integration suite was skipped in CI. Check POSTGRES_URL / MONGO_URL."
             exit 1

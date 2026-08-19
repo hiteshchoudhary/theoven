@@ -24,7 +24,8 @@ its page says so rather than omitting the section.
 | [`db-drizzle`](/docs/bricks/db-drizzle/) | `ctx.db` — Drizzle, typed from your schema | none |
 | [`db-mongoose`](/docs/bricks/db-mongoose/) | `ctx.db` — a Mongoose `Connection` | none |
 | [`auth`](/docs/bricks/auth/) | `ctx.user`, `ctx.auth` | none itself |
-| [`auth-basic`](/docs/bricks/auth-basic/) | email and password auth | eight, at `/auth/*` |
+| [`auth-basic`](/docs/bricks/auth-basic/) | email and password auth, on Drizzle | eight, at `/auth/*` |
+| [`auth-mongo`](/docs/bricks/auth-mongo/) | the same flows, on Mongoose | eight, at `/auth/*` |
 | [`mail`](/docs/bricks/mail/) | `ctx.mail` | none |
 
 ## Planned
@@ -33,7 +34,6 @@ its page says so rather than omitting the section.
 | --- | --- |
 | `@theoven/auth-clerk` | `ctx.user` from Clerk, hosted sign-in |
 | `@theoven/auth-better` | `ctx.user` from better-auth, mounted routes |
-| `@theoven/auth-mongo` | the `auth-basic` flows over Mongoose |
 | `@theoven/db-prisma` | `ctx.db` — a `PrismaClient` |
 | `@theoven/storage` | `ctx.storage` — S3, R2, MinIO |
 | `@theoven/queue` | `ctx.queue` — jobs and cron |

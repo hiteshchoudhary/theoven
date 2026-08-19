@@ -411,7 +411,20 @@ The reason `oven create` gives you a working signup before you have provisioned 
       one host sprays the whole user table. Fixed-window, in memory, per process — enough to blunt
       credential stuffing, not a precise quota, and the brick page says so.
 - [x] Drizzle schema and migrations shipped for its own tables
-- [ ] `@theoven/auth-mongo` — the same flows over Mongoose, which is what proves `AuthStore`
+- [x] `@theoven/auth-mongo` shipped — the same flows over Mongoose, which is what proves `AuthStore`
+
+      **What it forced:** the storage-agnostic half of `auth-basic` — every flow, endpoint,
+      cookie and rate limit, ~280 lines — moved into `@theoven/auth` as `passwordAuthProvider`.
+      Both bricks are now thin: a store, a schema, and a name. Copying that wiring into a second
+      brick would have been a fix landing in one and not the other.
+
+      **`AuthStore` fit without changes.** A shared conformance suite ships at
+      `@theoven/auth/testing` and both bricks run the same one — verified to fail when the
+      empty-filter guard in `deleteRefreshTokens` is removed.
+
+      **Also found:** `mongooseStore` compiled Mongoose models eagerly, so a missing signing
+      secret surfaced as a Mongoose crash instead of the sentence saying what to fix. Models are
+      now compiled on first use.
       is real rather than a Drizzle interface wearing a disguise (D25)
 - [x] Tests covering the attacks, not just the happy path: reset-token reuse, expired tokens,
       user enumeration via login and reset responses, refresh-token rotation

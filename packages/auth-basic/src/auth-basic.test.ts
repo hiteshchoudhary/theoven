@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { auth } from '@theoven/auth'
+import { describeAuthStore } from '@theoven/auth/testing'
 import { createApp, silentLogger } from '@theoven/core'
 import { db as database } from '@theoven/db'
 import { drizzleSqlite } from '@theoven/db-drizzle'
@@ -8,6 +9,7 @@ import { sql as sqlRaw } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { basicAuth } from './provider'
 import { authSchema } from './schema'
+import { drizzleStore } from './store'
 
 const opened: Array<{ close(options?: { timeout?: number }): Promise<void> }> = []
 afterEach(async () => {
@@ -654,4 +656,17 @@ describe('with the db brick', () => {
     expect(me.status).toBe(200)
     expect(await me.json()).toMatchObject({ hasDb: true })
   })
+})
+
+/**
+ * The shared `AuthStore` conformance suite, from `@theoven/auth/testing`.
+ *
+ * The same suite runs in `auth-mongo`. That is the point: the contract is checked once and both
+ * implementations answer to it, rather than each brick testing itself against its own idea of
+ * what the contract says.
+ */
+describeAuthStore('drizzle over bun:sqlite', () => {
+  const sqlite = new Database(':memory:')
+  sqlite.exec(MIGRATION)
+  return drizzleStore(drizzle(sqlite, { schema: authSchema }))
 })

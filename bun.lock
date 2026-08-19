@@ -64,6 +64,20 @@
         "drizzle-orm": ">=0.36.0",
       },
     },
+    "packages/auth-mongo": {
+      "name": "@theoven/auth-mongo",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/auth": "workspace:*",
+        "@theoven/core": "workspace:*",
+        "mongoose": "^8.24.3",
+      },
+      "peerDependencies": {
+        "@theoven/auth": "workspace:*",
+        "@theoven/core": "workspace:*",
+        "mongoose": "^8.0.0",
+      },
+    },
     "packages/cli": {
       "name": "@theoven/cli",
       "version": "0.0.0",
@@ -507,6 +521,8 @@
     "@theoven/auth": ["@theoven/auth@workspace:packages/auth"],
 
     "@theoven/auth-basic": ["@theoven/auth-basic@workspace:packages/auth-basic"],
+
+    "@theoven/auth-mongo": ["@theoven/auth-mongo@workspace:packages/auth-mongo"],
 
     "@theoven/cli": ["@theoven/cli@workspace:packages/cli"],
 

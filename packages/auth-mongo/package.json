@@ -1,0 +1,38 @@
+{
+  "name": "@theoven/auth-mongo",
+  "version": "0.0.0",
+  "description": "Email and password auth for Oven, stored in MongoDB with Mongoose",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "auth",
+    "mongodb",
+    "mongoose"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*",
+    "mongoose": "^8.0.0"
+  },
+  "devDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*",
+    "mongoose": "^8.24.3"
+  }
+}
