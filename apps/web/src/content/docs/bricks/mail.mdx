@@ -209,8 +209,8 @@ aggregator.
 
 ## Limitations
 
-- **No queueing or retries.** A send is a single attempt. Once `@theoven/queue` lands this will
-  dispatch through it; today, wrap the call yourself if a failure matters.
+- **No retries without the queue brick.** On its own, a send is a single attempt. Register
+  [`queue`](/docs/bricks/queue/) and sends go through it automatically, with retries and backoff.
 - **No bounce or complaint handling.** Webhooks from Resend and SES are yours to receive.
 - **No JSX renderer bundled.** Templates return strings; render JSX yourself if you want it.
 - **SMTP has no connection pool.** One connection per message, which is fine for transactional

@@ -70,7 +70,7 @@
   <div class="hero-bg" aria-hidden="true"></div>
   <div class="wrap hero-inner">
     <a class="pill" href="https://github.com/hiteshchoudhary/theoven">
-      <span class="dot"></span> Pre-alpha &middot; building in the open
+      <span class="dot"></span> v0.1.2 &middot; on npm
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </a>
 
@@ -90,8 +90,8 @@
         Get started
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </a>
-      <button class="btn btn-ghost copy" data-copy="oven create my-app">
-        <code>oven create my-app</code>
+      <button class="btn btn-ghost copy" data-copy="bun create theoven my-app">
+        <code>bun create theoven my-app</code>
         <svg class="ic-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
         <svg class="ic-done" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -100,7 +100,7 @@
     <dl class="stats">
       <div><dt>110k</dt><dd>req/s on Bun</dd></div>
       <div><dt>6&times;</dt><dd>faster than Express</dd></div>
-      <div><dt>1023</dt><dd>tests, all green</dd></div>
+      <div><dt>1331</dt><dd>tests, all green</dd></div>
     </dl>
   </div>
 </section>
@@ -167,10 +167,10 @@
   <div class="wrap">
     <header class="section-head reveal">
       <p class="eyebrow">Built in the open</p>
-      <h2>What is shipped, and what is not</h2>
+      <h2>What is shipped</h2>
       <p class="sub">
-        Oven is pre-alpha. Rather than describe a framework that does not exist yet, here is
-        exactly where it stands &mdash; updated as each phase lands.
+        Fourteen packages on npm at 0.1.2. Pre-1.0, so APIs can still change between minor
+        versions &mdash; here is exactly where it stands.
       </p>
     </header>
 
@@ -210,25 +210,33 @@
       </article>
       <article class="status done">
         <header><span class="tick">&check;</span><h3>The CLI</h3></header>
-        <p><code>oven create</code>, <code>dev</code>, <code>build</code>, <code>start</code>, <code>routes</code>, <code>openapi</code>, <code>doctor</code>.</p>
+        <p><code>oven create</code>, <code>dev</code>, <code>build</code>, <code>start</code>, <code>db</code>, <code>worker</code>, <code>routes</code>, <code>openapi</code>, <code>doctor</code>.</p>
       </article>
-      <article class="status next">
-        <header><span class="tick">&rarr;</span><h3>Auth &amp; database</h3></header>
-        <p><code>@theoven/auth</code> on better-auth and <code>@theoven/db</code> on Drizzle. Next up &mdash; they land on the brick system above.</p>
+      <article class="status done">
+        <header><span class="tick">&check;</span><h3>Auth</h3></header>
+        <p>Email and password on SQL or Mongo, plus Clerk and better-auth. Eight endpoints, argon2id, revocable sessions, rate limited by default.</p>
+      </article>
+      <article class="status done">
+        <header><span class="tick">&check;</span><h3>Database</h3></header>
+        <p>Drizzle over <code>bun:sqlite</code>, Postgres or MySQL, and Mongoose. <code>ctx.db</code> is the native client &mdash; your queries stay yours.</p>
       </article>
       <article class="status done">
         <header><span class="tick">&check;</span><h3>Mail</h3></header>
-        <p>Console driver by default, so password reset works the moment you create an app. Resend when you add an API key.</p>
+        <p>Console driver by default, so password reset works the moment you create an app. Resend, SES or SMTP when you are ready.</p>
       </article>
-      <article class="status todo">
-        <header><span class="tick">&middot;</span><h3>Storage &amp; queue</h3></header>
-        <p>S3 uploads and presigned URLs; background jobs and cron.</p>
+      <article class="status done">
+        <header><span class="tick">&check;</span><h3>Storage</h3></header>
+        <p>S3, R2, MinIO and Spaces, with presigned direct uploads &mdash; and a local directory so uploads work before you have a bucket.</p>
+      </article>
+      <article class="status done">
+        <header><span class="tick">&check;</span><h3>Queue</h3></header>
+        <p>Typed jobs, retries with backoff, a dead letter and cron. In memory, in Redis, or in the Postgres you already run.</p>
       </article>
     </div>
 
     <p class="caption reveal">
-      Pages in the docs that describe something unbuilt say so at the top. We would rather tell
-      you than have you copy code that cannot run.
+      Every brick's page lists what it <strong>cannot</strong> do, not just what it can. A page
+      that only lists capabilities is an advertisement.
       <a class="link-arrow" href="https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md">Full roadmap <span aria-hidden="true">&rarr;</span></a>
     </p>
   </div>

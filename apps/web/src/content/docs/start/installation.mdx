@@ -7,11 +7,6 @@ sidebar:
 
 import { Aside, Steps } from '@astrojs/starlight/components'
 
-<Aside type="caution" title="Not published yet">
-  Oven is pre-alpha and not on npm. To follow along today, clone the repo and run the example.
-  These instructions are what installation will look like at 1.0.
-</Aside>
-
 ## Requirements
 
 Bun 1.2 or newer. Oven is Bun-only by design — it uses `Bun.serve`, `Bun.file`, `Bun.S3Client`
@@ -22,47 +17,70 @@ small and fast. There is no Node build and no plan for one.
 bun --version   # 1.2.0 or higher
 ```
 
-## Running the example today
-
-<Steps>
-
-1. Clone the repository.
-
-   ```bash
-   git clone https://github.com/hiteshchoudhary/theoven.git
-   cd theoven
-   ```
-
-2. Install dependencies.
-
-   ```bash
-   bun install
-   ```
-
-3. Start the minimal example.
-
-   ```bash
-   bun run example:minimal
-   ```
-
-4. Try it.
-
-   ```bash
-   curl http://localhost:3000/users/1
-   ```
-
-</Steps>
-
-## What installation will look like at 1.0
+## A new project
 
 ```bash
-bun create oven my-app
+bun create theoven my-app
 cd my-app
-oven dev
+bun install
+bun run dev
 ```
 
-The scaffolder asks which modules you want — auth, database, storage, mail, queue — and writes
-a configured, working app. No copy-pasted boilerplate.
+The scaffolder asks what you want and writes a configured, working app — no copy-pasted
+boilerplate. Answer with flags instead if you prefer:
+
+```bash
+bun create theoven my-app --db sqlite --auth basic --yes
+```
+
+| Flag | Values | |
+| --- | --- | --- |
+| `--template` | `minimal`, `api` | `api` starts with a small REST API |
+| `--db` | `sqlite`, `postgres`, `none` | SQLite is Drizzle over `bun:sqlite` — no server to run |
+| `--auth` | `basic`, `none` | eight working endpoints at `/auth/*` |
+| `--no-openapi` | | skip the OpenAPI brick and `/docs` |
+| `--yes` | | accept every default |
+
+With a database, run the migrations the scaffold printed before starting:
+
+```bash
+cp .env.example .env
+bun run db:generate && bun run db:migrate
+bun run dev
+```
+
+<Aside type="note" title="Why `theoven` and not `oven`">
+  `create-oven` on npm belongs to someone else, and Bun maps `bun create <x>` strictly to
+  `create-<x>`. The package is [`create-theoven`](https://www.npmjs.com/package/create-theoven),
+  matching the scope and the domain. The CLI itself is still `oven`.
+</Aside>
+
+## An existing project
+
+```bash
+bun add @theoven/core
+bun add -d @theoven/cli
+```
+
+```ts title="src/app.ts"
+import { createApp, loadRoutes } from '@theoven/core'
+
+export const app = createApp()
+await loadRoutes(app, `${import.meta.dir}/routes`)
+
+export default app
+```
+
+```ts title="src/index.ts"
+import app from './app'
+
+await app.listen(3000)
+```
+
+Keep `listen()` out of `app.ts`. That split is what lets `oven routes`, `oven openapi`,
+`oven worker` and your tests import the app without binding a port.
+
+Then add whichever [bricks](/docs/bricks/) you need — each is one `bun add` and one `.use()`.
 
 ## Configuration
 
@@ -76,13 +94,27 @@ import { env } from '@theoven/core'
 const port = env.port('PORT', 3000)
 ```
 
-## Verifying the test suite
+A missing variable then fails at startup, naming itself, rather than at 3am as `undefined`
+somewhere unrelated.
 
-Oven's test suite is the contract. If you are contributing, run it first so you know a failure
-is yours:
+## Contributing
+
+Oven's test suite is the contract. Run it first, so you know a failure is yours:
 
 ```bash
-bun test        # every package
-bun run lint    # Biome
+git clone https://github.com/hiteshchoudhary/theoven.git
+cd theoven
+bun install
+
+bun test              # every package
+bun run lint          # Biome
 bun run typecheck
+bun run check:docs    # every code sample on this site
 ```
+
+`examples/kitchen-sink` registers every brick in one app and is the framework's integration
+test — if a change breaks how two bricks compose, it breaks there.
+
+## Next
+
+[Your first route →](/docs/tutorial/first-route/)

@@ -120,4 +120,5 @@ user in the database.
 - **No email verification.** `emailVerifiedAt` exists and is never set, exactly as in
   `auth-basic`.
 - **Rate limiting is per process**, as in `auth-basic`.
-- **No OAuth.** Use `auth-clerk` or `auth-better` when they land.
+- **No OAuth.** Use [`auth-clerk`](/docs/bricks/auth-clerk/) or [`auth-better`](/docs/bricks/auth-better/) — both ship, and both satisfy the same contract,
+  so `auth: true` and your policies keep working.

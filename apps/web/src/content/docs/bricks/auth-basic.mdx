@@ -195,4 +195,5 @@ nobody finds.
 - **No email verification.** `auth_users.email_verified_at` exists and is never set.
 - **Rate limiting is per process**, not shared across instances — see the caveat
   [above](#rate-limiting).
-- **No OAuth.** Use `auth-clerk` or `auth-better` when they land.
+- **No OAuth.** Use [`auth-clerk`](/docs/bricks/auth-clerk/) or [`auth-better`](/docs/bricks/auth-better/) — both ship, and both satisfy the same contract,
+  so `auth: true` and your policies keep working.

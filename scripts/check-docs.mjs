@@ -163,6 +163,40 @@ for (const file of mdxFiles(DOCS).sort()) {
   }
 }
 
+/**
+ * Version numbers written into prose go stale silently.
+ *
+ * The docs and the landing page both name the current release. Nothing else notices when one of
+ * them is left behind, and a page confidently advertising a version that is two releases old is
+ * worse than one that names none — so any `0.x.y` in a "shipped at" claim has to match the
+ * packages.
+ */
+const VERSION = JSON.parse(readFileSync(join(ROOT, 'packages/core/package.json'), 'utf8')).version
+
+for (const file of [
+  'apps/landing/index.html',
+  'apps/web/src/content/docs/index.mdx',
+  'apps/web/src/content/docs/start/installation.mdx',
+]) {
+  const path = join(ROOT, file)
+  let source
+  try {
+    source = readFileSync(path, 'utf8')
+  } catch {
+    continue
+  }
+
+  // Only claims *about the release*, not every number that looks like a version — a peer range
+  // or a dependency example is nobody's business here.
+  for (const [claim, found] of source.matchAll(
+    /(?:v|at |version )(\d+\.\d+\.\d+)(?![\w.-])/gi,
+  )) {
+    if (found !== VERSION) {
+      problems.push(`${file} — claims ${claim.trim()}, but the packages are at ${VERSION}`)
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`\n${problems.length} problem(s) in the documentation's code samples:\n`)
   for (const problem of problems) console.error(`  ✗ ${problem}`)

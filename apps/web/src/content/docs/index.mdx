@@ -18,12 +18,20 @@ storage, email and background jobs are configuration, not a week of plumbing.
 
 ## Status
 
-Pre-alpha. The core is built and tested — router, server, context, errors, response coercion
-and graceful shutdown. Validation, auth, database, storage, mail and queues are next; see the
-[roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md).
+**0.1.2, on npm.** Everything documented here is published and installable:
 
-Pages describing features that do not exist yet say so at the top. We would rather tell you
-than have you copy code that cannot run.
+```bash
+bun create theoven my-app --db sqlite --auth basic
+```
+
+Core, the CLI, and eleven bricks — database (Drizzle, Mongoose), auth (email/password on SQL or
+Mongo, Clerk, better-auth), mail, storage and queues. See the
+[brick catalogue](/docs/bricks/) for what each one does, and the
+[roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for what is next.
+
+Pre-1.0, so APIs can still change between minor versions — that freedom is deliberate while the
+contracts settle. Every brick page lists what it **cannot** do under Limitations, because a page
+that only lists capabilities is an advertisement.
 
 ## Reading this with a coding agent
 
