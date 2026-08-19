@@ -43,7 +43,7 @@ they are built on Node's `req`/`res` and have no `Request` entry point.
 <Aside type="caution" title="Elysia is 2x faster than us here">
   Elysia compiles each route into a specialised function with `new Function` at boot, so its hot
   path contains no generic dispatch. Oven interprets the same structure per request. Adopting
-  that technique is tracked as a post-1.0 item — doing it before the plugin and context
+  that technique is tracked as a post-1.0 item — doing it before the brick and context
   contracts settle would mean writing the compiler twice.
 </Aside>
 

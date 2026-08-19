@@ -90,7 +90,7 @@ return Bun.file('/path/to/report.pdf')   // streamed, content type detected
 ## Things that genuinely do not translate
 
 - **Connect middleware.** The `(req, res, next)` signature does not exist. Anything from the
-  Express ecosystem must be rewritten as an Oven plugin or a `_middleware.ts` file.
+  Express ecosystem must be rewritten as an Oven brick or a `_middleware.ts` file.
 - **`res.write()` streaming.** Return a `ReadableStream` instead.
 - **CommonJS.** Oven is ESM only.
 - **Running on Node.** Oven is Bun-only. This is a deliberate, permanent choice.

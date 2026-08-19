@@ -438,7 +438,7 @@ describe('type inference', () => {
     })
   })
 
-  test('plugin contributions survive validation', () => {
+  test('brick contributions survive validation', () => {
     const app = createApp({ logger: silentLogger }).use({
       name: 'storage' as const,
       setup: () => ({ bucket: 'uploads' }),

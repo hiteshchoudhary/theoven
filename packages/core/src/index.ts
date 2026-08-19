@@ -20,6 +20,13 @@ export {
   parseBody,
   readRaw,
 } from './body'
+export {
+  type Brick,
+  type BrickHost,
+  type BrickSetupContext,
+  type OpenApiFragment,
+  orderBricks,
+} from './brick'
 export { Context, type ContextInit } from './context'
 export { type CookieJarInit, type CookieOptions, Cookies } from './cookies'
 export {
@@ -101,13 +108,6 @@ export {
   type RouteInfo,
   toOpenApiPath,
 } from './openapi'
-export {
-  type OpenApiFragment,
-  type OvenPlugin,
-  orderPlugins,
-  type PluginHost,
-  type PluginSetupContext,
-} from './plugin'
 export { type ParsedQuery, parseQuery, type QueryOptions, type QueryValue } from './query'
 export { toResponse } from './response'
 export { normalisePath, RouteConflictError, Router } from './router/router'

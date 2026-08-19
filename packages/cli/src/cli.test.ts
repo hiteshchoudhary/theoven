@@ -305,7 +305,7 @@ describe('templates', () => {
     expect(example).toContain('LOG_LEVEL=')
   })
 
-  test('the openapi plugin is included or omitted as asked', () => {
+  test('the openapi brick is included or omitted as asked', () => {
     const withDocs = renderTemplate('api', { name: 'a', openapi: true })
     const without = renderTemplate('api', { name: 'a', openapi: false })
 

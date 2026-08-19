@@ -4,11 +4,11 @@ import type { HttpMethod } from './router/types'
 import type { RouteSchema } from './validation'
 
 /**
- * A plugin: the single extension point for everything Oven does not ship in core.
+ * A brick: the single extension point for everything Oven does not ship in core.
  *
- * `setup()` runs once at boot and returns the thing the plugin provides. That return value
+ * `setup()` runs once at boot and returns the thing the brick provides. That return value
  * becomes `ctx.<name>`, and its **type** flows through `.use()` into every handler — add the
- * storage plugin and `ctx.storage` is there, fully typed; leave it out and touching
+ * storage brick and `ctx.storage` is there, fully typed; leave it out and touching
  * `ctx.storage` is a compile error rather than a crash at 3am.
  *
  * ```ts
@@ -26,20 +26,20 @@ import type { RouteSchema } from './validation'
  * per request. Anything genuinely per-request — a session, a transaction — belongs in
  * `onRequest`, which runs with the context in hand.
  */
-export interface OvenPlugin<Name extends string = string, Value = unknown> {
-  /** Property this plugin contributes to the context. Must not collide with anything on it. */
+export interface Brick<Name extends string = string, Value = unknown> {
+  /** Property this brick contributes to the context. Must not collide with anything on it. */
   name: Name
 
   /**
-   * Plugins that must be set up first.
+   * Bricks that must be set up first.
    *
-   * Declaring the dependency rather than relying on registration order means the auth plugin
-   * can find the database plugin however the user chose to write their config.
+   * Declaring the dependency rather than relying on registration order means the auth brick
+   * can find the database brick however the user chose to write their config.
    */
   dependsOn?: readonly string[]
 
   /** Builds the value exposed as `ctx[name]`. Runs once, at boot. */
-  setup(context: PluginSetupContext): Value | Promise<Value>
+  setup(context: BrickSetupContext): Value | Promise<Value>
 
   /** Runs per request, before middleware. Use for per-request state such as a session. */
   onRequest?(ctx: Context): unknown
@@ -48,24 +48,24 @@ export interface OvenPlugin<Name extends string = string, Value = unknown> {
   onShutdown?(value: Value): unknown
 }
 
-/** OpenAPI pieces a plugin can contribute, such as the auth module's security schemes. */
+/** OpenAPI pieces a brick can contribute, such as the auth module's security schemes. */
 export interface OpenApiFragment {
   securitySchemes?: Record<string, unknown>
   tags?: Array<{ name: string; description?: string }>
 }
 
 /**
- * The parts of the app a plugin may inspect.
+ * The parts of the app a brick may inspect.
  *
- * Deliberately narrow. A plugin handed the whole `App` could register routes after boot or
- * mutate settings mid-flight; this exposes only what a plugin has a legitimate reason to reach.
+ * Deliberately narrow. A brick handed the whole `App` could register routes after boot or
+ * mutate settings mid-flight; this exposes only what a brick has a legitimate reason to reach.
  */
-export interface PluginHost {
+export interface BrickHost {
   /**
    * Every registered route with its schemas.
    *
    * Call this lazily — from inside a request handler rather than during `setup()` — because
-   * plugins registered after this one are still adding routes while setup runs.
+   * bricks registered after this one are still adding routes while setup runs.
    */
   routeTable(): ReadonlyArray<{
     method: HttpMethod
@@ -79,56 +79,56 @@ export interface PluginHost {
   readonly logger: Logger
 }
 
-/** What a plugin is handed during `setup()`. */
-export interface PluginSetupContext {
-  /** Values from plugins this one declared a dependency on, keyed by plugin name. */
+/** What a brick is handed during `setup()`. */
+export interface BrickSetupContext {
+  /** Values from bricks this one declared a dependency on, keyed by brick name. */
   resolved: Readonly<Record<string, unknown>>
-  /** Register routes the plugin owns, such as `/auth/*` or the docs UI. */
+  /** Register routes the brick owns, such as `/auth/*` or the docs UI. */
   route(method: string, path: string, handler: (ctx: Context) => unknown): void
-  /** True outside production, so plugins can pick safe-by-default behaviour. */
+  /** True outside production, so bricks can pick safe-by-default behaviour. */
   development: boolean
-  /** The app, for plugins that must inspect it — the OpenAPI generator reads the route table. */
-  app: PluginHost
+  /** The app, for bricks that must inspect it — the OpenAPI generator reads the route table. */
+  app: BrickHost
 }
 
 /**
- * Orders plugins so dependencies are set up first.
+ * Orders bricks so dependencies are set up first.
  *
  * A cycle is a configuration error that cannot be resolved at runtime, so it throws here — at
- * boot, naming both plugins — rather than deadlocking or silently picking an order.
+ * boot, naming both bricks — rather than deadlocking or silently picking an order.
  */
-export function orderPlugins(plugins: readonly OvenPlugin[]): OvenPlugin[] {
-  const byName = new Map(plugins.map((plugin) => [plugin.name, plugin]))
-  const ordered: OvenPlugin[] = []
+export function orderBricks(bricks: readonly Brick[]): Brick[] {
+  const byName = new Map(bricks.map((brick) => [brick.name, brick]))
+  const ordered: Brick[] = []
   const state = new Map<string, 'visiting' | 'done'>()
 
-  const visit = (plugin: OvenPlugin, trail: string[]): void => {
-    const status = state.get(plugin.name)
+  const visit = (brick: Brick, trail: string[]): void => {
+    const status = state.get(brick.name)
     if (status === 'done') return
     if (status === 'visiting') {
       throw new Error(
-        `Plugin dependency cycle: ${[...trail, plugin.name].join(' -> ')}. ` +
-          'Two plugins cannot each require the other to be set up first.',
+        `Brick dependency cycle: ${[...trail, brick.name].join(' -> ')}. ` +
+          'Two bricks cannot each require the other to be set up first.',
       )
     }
 
-    state.set(plugin.name, 'visiting')
+    state.set(brick.name, 'visiting')
 
-    for (const dependency of plugin.dependsOn ?? []) {
+    for (const dependency of brick.dependsOn ?? []) {
       const target = byName.get(dependency)
       if (!target) {
         throw new Error(
-          `Plugin "${plugin.name}" depends on "${dependency}", which is not registered. ` +
+          `Brick "${brick.name}" depends on "${dependency}", which is not registered. ` +
             `Add it with .use() before starting the app.`,
         )
       }
-      visit(target, [...trail, plugin.name])
+      visit(target, [...trail, brick.name])
     }
 
-    state.set(plugin.name, 'done')
-    ordered.push(plugin)
+    state.set(brick.name, 'done')
+    ordered.push(brick)
   }
 
-  for (const plugin of plugins) visit(plugin, [])
+  for (const brick of bricks) visit(brick, [])
   return ordered
 }

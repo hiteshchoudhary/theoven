@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, expectTypeOf, test } from 'bun:test'
 import { type App, type AppOptions, appFromConfig, createApp, defineConfig } from './app'
+import { type Brick, orderBricks } from './brick'
 import type { Context } from './context'
 import { silentLogger } from './logger'
-import { type OvenPlugin, orderPlugins } from './plugin'
 
 const opened: Array<{ close(options?: { timeout?: number }): Promise<void> }> = []
 afterEach(async () => {
@@ -22,12 +22,12 @@ function send(
   return app.fetch(new Request(`https://theoven.app${path}`))
 }
 
-/** A minimal plugin contributing a value under `name`. */
+/** A minimal brick contributing a value under `name`. */
 function stub<const Name extends string, Value>(
   name: Name,
   value: Value,
-  extra: Partial<OvenPlugin<Name, Value>> = {},
-): OvenPlugin<Name, Value> {
+  extra: Partial<Brick<Name, Value>> = {},
+): Brick<Name, Value> {
   return { name, setup: () => value, ...extra }
 }
 
@@ -38,7 +38,7 @@ describe('registration', () => {
     expect(await (await send(app, '/x')).json()).toEqual({ bucket: 'uploads' })
   })
 
-  test('several plugins coexist', async () => {
+  test('several bricks coexist', async () => {
     const app = make().use(stub('a', 1)).use(stub('b', 2))
     app.get('/x', (ctx) => ({ a: ctx.a, b: ctx.b }))
     expect(await (await send(app, '/x')).json()).toEqual({ a: 1, b: 2 })
@@ -73,12 +73,12 @@ describe('registration', () => {
     expect(await (await send(app, '/x')).json()).toEqual({ value: 'ready' })
   })
 
-  test('a duplicate plugin name is rejected', () => {
+  test('a duplicate brick name is rejected', () => {
     const app = make().use(stub('dup', 1))
     expect(() => app.use(stub('dup', 2))).toThrow(/already registered/)
   })
 
-  // Shadowing a core property surfaces far from the plugin responsible, so it fails at boot.
+  // Shadowing a core property surfaces far from the brick responsible, so it fails at boot.
   test('a name colliding with a context property is rejected', async () => {
     const app = make().use(stub('body', 'hijacked'))
     expect(app.ready()).rejects.toThrow(/collides with a built-in/)
@@ -134,27 +134,27 @@ describe('dependency ordering', () => {
     expect(app.ready()).rejects.toThrow(/depends on "db"/)
   })
 
-  // A cycle cannot be resolved at runtime, so it fails at boot naming both plugins.
+  // A cycle cannot be resolved at runtime, so it fails at boot naming both bricks.
   test('a dependency cycle is rejected', () => {
     const a = { name: 'a', dependsOn: ['b'], setup: () => 1 }
     const b = { name: 'b', dependsOn: ['a'], setup: () => 2 }
-    expect(() => orderPlugins([a, b])).toThrow(/cycle/)
+    expect(() => orderBricks([a, b])).toThrow(/cycle/)
   })
 
-  test('orderPlugins handles a diamond without duplicating', () => {
+  test('orderBricks handles a diamond without duplicating', () => {
     const base = { name: 'base', setup: () => 1 }
     const left = { name: 'left', dependsOn: ['base'], setup: () => 2 }
     const right = { name: 'right', dependsOn: ['base'], setup: () => 3 }
     const top = { name: 'top', dependsOn: ['left', 'right'], setup: () => 4 }
 
-    const ordered = orderPlugins([top, left, right, base]).map((plugin) => plugin.name)
+    const ordered = orderBricks([top, left, right, base]).map((brick) => brick.name)
     expect(ordered).toHaveLength(4)
     expect(ordered.indexOf('base')).toBeLessThan(ordered.indexOf('left'))
     expect(ordered.indexOf('left')).toBeLessThan(ordered.indexOf('top'))
   })
 })
 
-describe('plugin hooks', () => {
+describe('brick hooks', () => {
   test('onRequest runs for every request', async () => {
     let calls = 0
     const app = make().use({
@@ -198,7 +198,7 @@ describe('plugin hooks', () => {
     expect(closed).toEqual([{ id: 'pool-1' }])
   })
 
-  test('a plugin can register its own routes', async () => {
+  test('a brick can register its own routes', async () => {
     const app = make().use({
       name: 'docs',
       setup: (context) => {
@@ -248,7 +248,7 @@ describe('boot', () => {
     expect(await (await send(app, '/x')).json()).toEqual({ value: 'booted' })
   })
 
-  test('an app with no plugins needs no boot work', async () => {
+  test('an app with no bricks needs no boot work', async () => {
     const app = make()
     app.get('/x', () => 'ok')
     expect(await (await send(app, '/x')).text()).toBe('ok')
@@ -261,11 +261,11 @@ describe('defineConfig', () => {
     expect(config).toEqual({ trustProxy: 1, logLevel: 'warn' })
   })
 
-  test('appFromConfig registers the plugins', async () => {
+  test('appFromConfig registers the bricks', async () => {
     const app = appFromConfig(
       defineConfig({
         logger: silentLogger,
-        plugins: [stub('storage', { bucket: 'b' }), stub('queue', { driver: 'redis' })],
+        bricks: [stub('storage', { bucket: 'b' }), stub('queue', { driver: 'redis' })],
       }),
     )
     opened.push(app)
@@ -294,11 +294,11 @@ describe('defineConfig', () => {
 })
 
 /**
- * The point of the plugin system is that types flow. A plugin that runs but does not type is
+ * The point of the brick system is that types flow. A brick that runs but does not type is
  * only half the feature, so the inference is asserted rather than assumed.
  */
 describe('type inference', () => {
-  test('a registered plugin is typed on the context', () => {
+  test('a registered brick is typed on the context', () => {
     const app = createApp({ logger: silentLogger }).use(stub('storage', { bucket: 'uploads' }))
     app.get('/x', (ctx) => {
       expectTypeOf(ctx.storage).toEqualTypeOf<{ bucket: string }>()
@@ -306,7 +306,7 @@ describe('type inference', () => {
     })
   })
 
-  test('several plugins accumulate', () => {
+  test('several bricks accumulate', () => {
     const app = createApp({ logger: silentLogger })
       .use(stub('storage', { bucket: 'uploads' }))
       .use(stub('queue', { driver: 'redis' as const }))
@@ -331,7 +331,7 @@ describe('type inference', () => {
   })
 
   // The other half of the promise: an unconfigured module must not typecheck.
-  test('an unregistered plugin is a compile error, not a runtime crash', () => {
+  test('an unregistered brick is a compile error, not a runtime crash', () => {
     const app = createApp({ logger: silentLogger }).use(stub('storage', { bucket: 'uploads' }))
     app.get('/x', (ctx) => {
       // @ts-expect-error `queue` was never registered, so it does not exist on the context.

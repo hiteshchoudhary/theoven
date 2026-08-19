@@ -1,11 +1,19 @@
 ---
-title: Plugins
-description: The single extension point — add a capability, get it typed on the context.
+title: Bricks
+description: Add a brick, get a feature — the single extension point, typed onto the context.
 ---
 
 import { Aside } from '@astrojs/starlight/components'
 
-A plugin's `setup()` runs once at boot and returns the thing it provides. That value becomes
+**A brick is what other frameworks call a plugin.** Bricks build the oven: add one and a
+capability appears on the request context, fully typed. Take it away and using it is a compile
+error.
+
+The name is the only piece of invented vocabulary in Oven, and it is deliberate — a brick is a
+specific thing with a specific contract, not the grab-bag "plugin" has become elsewhere.
+
+
+A brick's `setup()` runs once at boot and returns the thing it provides. That value becomes
 `ctx.<name>`, and its **type** flows through `.use()` into every handler.
 
 ```ts
@@ -20,16 +28,16 @@ app.post('/upload', async (ctx) => {
 })
 ```
 
-Leave the queue plugin out and `ctx.queue` is a **compile error**, not a crash at 3am. That is
-the whole point, and the test suite asserts it: registering the plugin makes the
+Leave the queue brick out and `ctx.queue` is a **compile error**, not a crash at 3am. That is
+the whole point, and the test suite asserts it: registering the brick makes the
 `@ts-expect-error` on that line unnecessary, which fails the build.
 
 ## Writing one
 
 ```ts
-import type { OvenPlugin } from '@theoven/core'
+import type { Brick } from '@theoven/core'
 
-export function cache(options: { ttl: number }): OvenPlugin<'cache', CacheClient> {
+export function cache(options: { ttl: number }): Brick<'cache', CacheClient> {
   return {
     name: 'cache',
     setup: async () => connect(options),
@@ -42,7 +50,7 @@ export function cache(options: { ttl: number }): OvenPlugin<'cache', CacheClient
 | --- | --- |
 | `name` | the property added to the context |
 | `setup(context)` | builds the value; runs once, at boot |
-| `dependsOn` | plugin names that must be set up first |
+| `dependsOn` | brick names that must be set up first |
 | `onRequest(ctx)` | per-request work, such as loading a session |
 | `onShutdown(value)` | release pools, workers, connections |
 
@@ -62,9 +70,9 @@ in `onRequest`, which runs with the context in hand.
 }
 ```
 
-Declaring the dependency rather than relying on registration order means the auth plugin finds
+Declaring the dependency rather than relying on registration order means the auth brick finds
 the database however the user chose to write their config. A cycle throws at boot, naming both
-plugins — it cannot be resolved at runtime, so failing early beats deadlocking.
+bricks — it cannot be resolved at runtime, so failing early beats deadlocking.
 
 ### Contributing routes
 
@@ -85,20 +93,20 @@ This is how `/auth/*` and the docs UI will mount themselves.
 export default defineConfig({
   trustProxy: 1,
   cookies: { secret: process.env.COOKIE_SECRET },
-  plugins: [storage({ driver: 's3' }), queue({ driver: 'redis' })],
+  bricks: [storage({ driver: 's3' }), queue({ driver: 'redis' })],
 })
 ```
 
 <Aside type="note" title="Which surface should you use?">
-  `appFromConfig()` returns a plain `App`, because a runtime array of plugins cannot express
+  `appFromConfig()` returns a plain `App`, because a runtime array of bricks cannot express
   each contribution in the type system. Chain `.use()` directly when you want `ctx.storage`
   typed at the call site — that is exactly why both surfaces exist rather than one.
 </Aside>
 
 ## Errors caught at boot
 
-- A duplicate plugin name.
+- A duplicate brick name.
 - A name that collides with a built-in context property, which would shadow the real thing in a
-  way that surfaces far from the plugin responsible.
+  way that surfaces far from the brick responsible.
 - A missing or circular dependency.
-- Registering a plugin after the first request, since setup runs at boot.
+- Registering a brick after the first request, since setup runs at boot.

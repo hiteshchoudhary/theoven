@@ -1,13 +1,14 @@
 # Oven — Task Tracker
 
 **Current state:** **Phases 1 and 4 complete.** Router, server, context, errors, logger, response
-coercion, graceful shutdown, the always-on batteries, middleware, plugins, validation,
+coercion, graceful shutdown, the always-on batteries, middleware, bricks, validation,
 file-based routing, OpenAPI, and the CLI. **850 tests green**, typecheck and lint clean.
 
 Benchmarked against Hono, Elysia, Fastify and Express at both dispatch and socket level.
 Generated OpenAPI documents are validated by a real parser in the test suite. Docs site and
 landing page live at theoven.pages.dev; GitHub repo live; `@theoven` npm org claimed.
-**Next task:** Phase 2 — `@theoven/auth` (better-auth) and `@theoven/db` (drizzle).
+**Next task:** Phase 2.0 — typed per-request brick state in core, which everything else
+in Phase 2 depends on.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔴 blocker · 💡 idea, not committed
 
@@ -152,7 +153,7 @@ shadowed the method on the instance. Renamed to `settings`, with a comment so it
 
 **Token capture** (replaces the snippet everyone rewrites)
 - [x] `ctx.token` — `Authorization` header → cookie → query string, in that order
-- [x] Works with **no auth module installed**: capture is core, verification is the plugin's job
+- [x] Works with **no auth module installed**: capture is core, verification is the brick's job
 - [x] `ctx.tokenSource` and `ctx.tokenScheme`; `ctx.basicAuth` decodes `Basic` credentials
 - [x] Query capture can be disabled (`token: { query: null }`) — query strings reach access
       logs, history and `Referer`
@@ -204,28 +205,28 @@ arrived as the bare word `Bearer` and was captured as a token whose value was li
 passes streaming responses through untouched. Buffering a stream to compress it would stop
 server-sent events arriving and pull a large download into memory.
 
-### 1.5 Plugin system + type inference ✅
+### 1.5 Brick system + type inference ✅
 
-`packages/core/src/plugin.ts` — 28 tests, including type-level assertions.
+`packages/core/src/brick.ts` — 28 tests, including type-level assertions.
 
-- [x] `OvenPlugin` interface: `name`, `setup`, `dependsOn`, `onRequest`, `onShutdown`
-- [x] `.use()` accumulates plugin context types through the chain
-- [x] Plugin values live on a `Context` **subclass prototype**, so ten plugins cost nothing per
+- [x] `Brick` interface: `name`, `setup`, `dependsOn`, `onRequest`, `onShutdown`
+- [x] `.use()` accumulates brick context types through the chain
+- [x] Brick values live on a `Context` **subclass prototype**, so ten bricks cost nothing per
       request; per-request state goes through `onRequest` instead
 - [x] Dependency ordering by topological sort; missing dependencies and cycles throw at boot
-      naming the plugins involved
-- [x] Plugins can contribute their own routes (`/auth/*`, the docs UI)
+      naming the bricks involved
+- [x] Bricks can contribute their own routes (`/auth/*`, the docs UI)
 - [x] `setup()` runs once, is awaited, and is idempotent via `ready()`; `fetch()` boots
       automatically so tests need no explicit call
 - [x] Rejected at boot: duplicate names, names colliding with built-in context properties, and
       registration after the first request
 - [x] `defineConfig()` / `appFromConfig()` for a declarative config file
-- [x] **Type-level tests** proving an unregistered plugin is a compile error — and verified that
+- [x] **Type-level tests** proving an unregistered brick is a compile error — and verified that
       those tests actually fail when inference breaks, rather than passing vacuously
 
-**Known limit:** `appFromConfig()` returns a plain `App`. A runtime array of plugins cannot
+**Known limit:** `appFromConfig()` returns a plain `App`. A runtime array of bricks cannot
 express each contribution in the type system, so `.use()` chaining stays the typed surface.
-Config keys mapping to plugins (`{ storage: {...} }`) needs the module packages to exist.
+Config keys mapping to bricks (`{ storage: {...} }`) needs the module packages to exist.
 
 ### 1.6 Validation ✅
 
@@ -289,7 +290,7 @@ guessing adds risk without adding capability.
       the document they describe
 - [x] File uploads documented as `multipart/form-data`, detected by `format: 'binary'`
 - [x] `422` documented automatically for any route that validates input
-- [x] Security schemes contributed by plugins through `PluginHost.contributeOpenApi()` — the
+- [x] Security schemes contributed by bricks through `BrickHost.contributeOpenApi()` — the
       mechanism the auth module will use in Phase 2
 - [x] Non-Zod schemas documented permissively with a warning naming the vendor, rather than
       wrongly or not at all
@@ -303,36 +304,88 @@ guessing adds risk without adding capability.
    parameters are now derived from the pattern.
 2. A document with no paths is rejected by strict validators. The 3.1 spec permits an empty
    `paths` object, so rather than fake compliance the generator warns — a zero-route document
-   almost always means the plugin was installed before any routes, or `exclude` over-matched.
+   almost always means the brick was installed before any routes, or `exclude` over-matched.
 
 ---
 
 ## Phase 2 — Data & auth
 
-### 2.1 `@theoven/db` (drizzle)
-- [ ] Config → drizzle instance (postgres / mysql / sqlite via `bun:sqlite`)
-- [ ] Pooling, health check, graceful close
-- [ ] `ctx.db` typed from the user's schema
-- [ ] `oven db generate | migrate | push | studio`
-- [ ] Transaction helper + optional per-request transaction
-- [ ] Seeding
-- [ ] Tests against real Postgres + SQLite
+Restructured from the original plan: these are **contracts plus adapters**, not one package
+each. See `CLAUDE.md` D14–D22. Ordered so each step is usable before the next begins.
 
-### 2.2 `@theoven/auth` (better-auth)
-- [ ] Config → configured better-auth instance
-- [ ] Auto-mount better-auth routes under `/auth/*`
-- [ ] Consumes core's `ctx.token` (capture is core, verification is here)
-- [ ] `export const auth = true` → session required, `401` otherwise
-- [ ] `ctx.user` / `ctx.session` typed and populated
-- [ ] Role/permission guards (`auth: { role: 'admin' }`)
-- [ ] OAuth providers from plain config
-- [ ] Email verification + password reset wired to `@theoven/mail`
-- [ ] API-key / service-token strategy
-- [ ] Auto-wires the drizzle adapter when `@theoven/db` is present
-- [ ] OpenAPI security schemes
-- [ ] Tests
+### 2.0 Core: typed per-request brick state 🔴 everything else depends on it
+- [ ] Third type parameter on `Brick`: `setup()` contributes a shared service, `request()`
+      contributes per-request state, both flowing into the context type
+- [ ] Route metadata reaches bricks at request time, so `auth: 'admin'` can be enforced by a
+      brick core knows nothing about
+- [ ] Type-level tests: per-request state is typed, and absent when the brick is not registered
 
----
+### 2.1 `@theoven/db` — the contract
+- [ ] `DatabaseProvider<Client>`: `connect`, `health`, `close`, `transaction`
+- [ ] `ctx.db` is the **native client**, fully typed from the user's own schema (D16)
+- [ ] Per-request transaction opt-in via the `request()` hook
+- [ ] Graceful close wired to `app.close()`
+
+### 2.2 `@theoven/db-drizzle`
+- [ ] SQLite via `bun:sqlite` (the default), Postgres, MySQL
+- [ ] Pooling and health check
+- [ ] `oven db generate | migrate | push | studio` — drizzle-kit passthrough, replacing the
+      stub that currently reports the module is missing
+- [ ] Tests against real SQLite and Postgres
+
+### 2.3 A second db adapter
+- [ ] `@theoven/db-prisma` or `@theoven/db-mongoose` — **the point is that it is structurally
+      different from Drizzle.** A contract with one implementation is a guess; the second one
+      is what proves it holds, exactly as Valibot proved the validator contract
+
+### 2.4 `@theoven/auth` — the contract
+- [ ] `identify(ctx) → Identity | null` — the only required method (D19)
+- [ ] `Identity`: `{ id, email?, name?, image?, raw }` (D17)
+- [ ] Declared capabilities (`routes`, `signOut`, `refresh`), checked at boot with an error
+      naming the adapter and the feature
+- [ ] `auth: true` guard and **named policies** (D18), with policies appearing as named
+      security requirements in the OpenAPI document
+- [ ] `ctx.user` narrowed to non-null inside a guarded route
+
+### 2.5 `@theoven/auth-basic` — batteries, the Laravel/Rails property
+The reason `oven create` gives you a working signup before you have provisioned anything.
+
+- [ ] Signup with name, email, password
+- [ ] Login issuing a 15-minute access JWT plus a revocable refresh token row (D20)
+- [ ] `POST /auth/refresh`, `POST /auth/logout` (deletes the refresh row — logout genuinely revokes)
+- [ ] Change password while signed in; **invalidates every other session**
+- [ ] Forgot password → single-use, expiring, hashed reset token sent by email
+- [ ] Passwords hashed with `Bun.password` (argon2id); timing-safe comparisons throughout
+- [ ] Rate limiting on login, signup and reset, since these are the endpoints that get attacked
+- [ ] Schema and migrations shipped for the adapter's own tables
+- [ ] Tests covering the attacks, not just the happy path: reset-token reuse, expired tokens,
+      user enumeration via login and reset responses, refresh-token rotation
+
+### 2.6 `@theoven/auth-better` and `@theoven/auth-clerk`
+- [ ] `auth-better`: mounts its own routes, owns sessions — exercises the `routes` capability
+- [ ] `auth-clerk`: no routes, hosted sign-in, JWT verification — exercises the opposite end
+- [ ] Both must satisfy the same contract with no changes to it
+
+### 2.7 Mail, pulled forward from Phase 3
+Only as far as `auth-basic` needs it: password reset cannot work without sending mail.
+
+- [ ] `console` driver (dev) and `memory` driver (test), so reset flows work with zero config
+- [ ] One real driver (Resend or SMTP), enabled by setting env values and nothing else
+- [ ] The remaining drivers, templating and the preview inbox stay in §3.2
+
+### 2.8 Default stack and scaffold (D21)
+- [ ] `oven create` defaults to SQLite, with a documented one-line switch to Postgres
+- [ ] Optional `--auth basic` scaffolds signup, login and reset working out of the box
+- [ ] Mail defaults to the console driver, so password reset works before any provider exists
+
+### 2.9 Agent ergonomics (D22)
+- [ ] `llms.txt` and `llms-full.txt` generated from the docs at build time, so they cannot drift
+- [ ] `AGENTS.md` written by `oven create`: route naming, `defineRoute`, native ORM queries,
+      policies, and the things never to do (no Express middleware, no CommonJS)
+
+**Deliberately not doing:** a unified query API (D16), normalised roles (D17), and a required
+sign-in method every adapter must implement (D19). Each was considered and rejected for reasons
+recorded in `CLAUDE.md`.
 
 ## Phase 3 — Infrastructure modules
 
@@ -409,7 +462,7 @@ guessing adds risk without adding capability.
    `index.ts` calls `listen()`. `oven routes` and `oven openapi` import the former — if they
    imported the entry, asking for a route table would bind a port.
 2. **`oven dev` restarts rather than hot-patching.** In-place module reloading leaves a server
-   bound to the port and plugin state half-initialised. A clean restart takes single-digit
+   bound to the port and brick state half-initialised. A clean restart takes single-digit
    milliseconds in Bun, and correctness is worth more than the milliseconds.
 
 **A bug found by running the output, not by a test:** `oven build` wrote a route manifest that
@@ -456,18 +509,18 @@ development and production. Covered by tests now.
 ## Backlog / post-1.0
 
 - [ ] 💡 WebSockets + rooms (`Bun.serve` has native WS)
-- [ ] 💡 Cache plugin (Redis/memory) with `cached()` helpers
-- [ ] 💡 SSE / realtime plugin
+- [ ] 💡 Cache brick (Redis/memory) with `cached()` helpers
+- [ ] 💡 SSE / realtime brick
 - [ ] 💡 Typed RPC client generated from the route table
 - [ ] 💡 Admin panel (auto-CRUD from drizzle schema)
-- [ ] 💡 OpenTelemetry plugin
-- [ ] 💡 i18n plugin
-- [ ] 💡 Payments plugin (Stripe)
+- [ ] 💡 OpenTelemetry brick
+- [ ] 💡 i18n brick
+- [ ] 💡 Payments brick (Stripe)
 - [ ] 💡 `oven deploy` to Fly/Railway/Cloudflare Containers
 - [ ] 💡 **AOT route compilation.** Elysia is ~2× faster than Oven on dispatch because it
       compiles each route into a specialised function with `new Function` at boot, leaving no
       generic dispatch on the hot path. Adopting this is the only way to close that gap — but
-      it is a large change and must wait until the plugin and context contracts stop moving,
+      it is a large change and must wait until the brick and context contracts stop moving,
       or we will be recompiling the compiler. See `benchmarks/README.md`.
 
 ---

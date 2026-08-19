@@ -1,7 +1,7 @@
 {
   "name": "@theoven/core",
   "version": "0.0.0",
-  "description": "Router, context, plugins, validation and OpenAPI for Oven",
+  "description": "Router, context, bricks, validation and OpenAPI for Oven",
   "type": "module",
   "license": "MIT",
   "exports": {

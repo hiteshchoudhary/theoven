@@ -9,7 +9,7 @@ Express-simple. FastAPI-smart. Everything configurable.</p>
 Every backend needs the same things: auth, a database, file storage, email, background jobs.
 Every backend wires them by hand, badly, again.
 
-Oven makes each one a plugin. You add it, and you get a small, obvious, fully-typed API.
+Oven makes each one a brick. You add it, and you get a small, obvious, fully-typed API.
 
 ```ts
 // oven.config.ts
@@ -46,7 +46,7 @@ Validated. Authenticated. Typed. Documented at `/docs`. No wiring.
 
 | Package | What it does |
 |---|---|
-| `@theoven/core` | Router, context, plugins, validation, OpenAPI |
+| `@theoven/core` | Router, context, bricks, validation, OpenAPI |
 | `@theoven/auth` | Sessions, OAuth, guards — via better-auth |
 | `@theoven/db` | Drizzle + migrations, Postgres/MySQL/SQLite |
 | `@theoven/storage` | S3/R2/MinIO — upload, presigned URLs, streaming |

@@ -23,7 +23,7 @@ function missingEntry(): void {
  * Runs the app with a watcher.
  *
  * `bun --watch` restarts the process on change rather than `--hot`, which patches modules in
- * place. In-place patching leaves a server bound to the port and plugin state half-initialised
+ * place. In-place patching leaves a server bound to the port and brick state half-initialised
  * from the previous version; a clean restart takes single-digit milliseconds in Bun and has no
  * such failure mode. The correctness is worth far more than the milliseconds.
  */

@@ -1,6 +1,6 @@
 import { z } from 'zod'
+import type { Brick } from './brick'
 import type { Logger } from './logger'
-import type { OvenPlugin } from './plugin'
 import type { HttpMethod } from './router/types'
 import type { StandardSchemaV1 } from './standard-schema'
 import type { RouteSchema } from './validation'
@@ -238,7 +238,7 @@ export function generateOpenApi(
     ;(paths[path] as Record<string, unknown>)[route.method.toLowerCase()] = operation
   }
 
-  // A document with nothing in it is almost always a mistake: the plugin was installed before
+  // A document with nothing in it is almost always a mistake: the brick was installed before
   // any routes were registered, or `exclude` matched more than intended. The 3.1 spec permits an
   // empty `paths`, but strict validators reject a document with no entries anywhere, so this is
   // worth saying out loud rather than serving quietly.
@@ -357,11 +357,11 @@ function escapeHtml(value: string): string {
  * app.use(openapi({ info: { title: 'My API', version: '1.0.0' } }))
  * ```
  *
- * Generation is deferred to the first request rather than done at boot, because plugins
+ * Generation is deferred to the first request rather than done at boot, because bricks
  * registered after this one are still adding their routes while setup runs — generating early
  * would document a partial API.
  */
-export function openapi(options: OpenApiOptions = {}): OvenPlugin<'openapi', OpenApiService> {
+export function openapi(options: OpenApiOptions = {}): Brick<'openapi', OpenApiService> {
   const specPath = options.path ?? '/openapi.json'
   const uiPath = options.ui === false ? null : (options.ui ?? '/docs')
 

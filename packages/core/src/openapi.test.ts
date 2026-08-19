@@ -354,7 +354,7 @@ describe('non-Zod schemas', () => {
   })
 })
 
-describe('the plugin', () => {
+describe('the brick', () => {
   test('serves the document', async () => {
     const app = make().use(openapi({ info: { title: 'Test API', version: '1.0.0' } }))
     app.get('/users', { summary: 'List' }, () => [])
@@ -405,8 +405,8 @@ describe('the plugin', () => {
     expect((await send(app, '/docs')).status).toBe(404)
   })
 
-  // Plugins registered after this one are still adding routes while setup runs.
-  test('documents routes registered after the plugin', async () => {
+  // Bricks registered after this one are still adding routes while setup runs.
+  test('documents routes registered after the brick', async () => {
     const app = make().use(openapi())
     app.get('/registered-later', () => 'ok')
 
@@ -414,7 +414,7 @@ describe('the plugin', () => {
     expect(document.paths).toHaveProperty('/registered-later')
   })
 
-  test('merges security schemes contributed by other plugins', async () => {
+  test('merges security schemes contributed by other bricks', async () => {
     const app = make()
       .use({
         name: 'fakeAuth',

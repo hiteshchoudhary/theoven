@@ -16,7 +16,7 @@ export interface TemplateFile {
 
 export interface TemplateOptions {
   name: string
-  /** Include the OpenAPI plugin and a `/docs` reference. */
+  /** Include the OpenAPI brick and a `/docs` reference. */
   openapi: boolean
 }
 
@@ -92,7 +92,7 @@ function appModule(options: TemplateOptions): string {
     ? "import { createApp, loadRoutes, openapi, requestLogger, securityHeaders } from '@theoven/core'"
     : "import { createApp, loadRoutes, requestLogger, securityHeaders } from '@theoven/core'"
 
-  const plugins = options.openapi
+  const bricks = options.openapi
     ? `  .use(requestLogger())
   .use(securityHeaders())
   .use(openapi({ info: { title: '${options.name}', version: '0.1.0' } }))`
@@ -109,7 +109,7 @@ import { config } from './env'
  * can import it without starting a server. Listening happens in index.ts.
  */
 export const app = createApp({ logLevel: config.logLevel })
-${plugins}
+${bricks}
 
 await loadRoutes(app, \`\${import.meta.dir}/routes\`)
 

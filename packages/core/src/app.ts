@@ -1,17 +1,17 @@
 import type { Server } from 'bun'
 import type { BodyOptions } from './body'
+import {
+  type Brick,
+  type BrickHost,
+  type BrickSetupContext,
+  type OpenApiFragment,
+  orderBricks,
+} from './brick'
 import { Context, type ContextInit } from './context'
 import type { CookieJarInit } from './cookies'
 import { OvenError, toOvenError } from './errors'
 import { ConsoleLogger, type Logger, type LogLevel } from './logger'
 import { appliesTo, compose, type Middleware } from './middleware'
-import {
-  type OpenApiFragment,
-  type OvenPlugin,
-  orderPlugins,
-  type PluginHost,
-  type PluginSetupContext,
-} from './plugin'
 import type { QueryOptions } from './query'
 import { normalisePath, Router } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
@@ -26,8 +26,8 @@ import {
 /**
  * A route handler. Returns anything — the value is coerced into a `Response`.
  *
- * `Ext` carries whatever plugins have contributed, so `ctx.storage` exists exactly when the
- * storage plugin is registered. There is no `next`, no `res`, and no callback: a handler either
+ * `Ext` carries whatever bricks have contributed, so `ctx.storage` exists exactly when the
+ * storage brick is registered. There is no `next`, no `res`, and no callback: a handler either
  * returns a value or throws, and async throws are caught identically to synchronous ones.
  */
 export type Handler<Ext = unknown> = (ctx: Context & Ext) => unknown
@@ -107,7 +107,7 @@ interface RouteEntry {
  * run the identical pipeline, which is why the test suite never needs a real port — and why a
  * passing test means the served behaviour is genuinely covered.
  */
-export class App<Ext = unknown> implements PluginHost {
+export class App<Ext = unknown> implements BrickHost {
   private readonly router = new Router<RouteEntry>()
   /**
    * Resolved configuration.
@@ -147,7 +147,7 @@ export class App<Ext = unknown> implements PluginHost {
     response: [] as ResponseHook[],
   }
 
-  private readonly plugins: OvenPlugin[] = []
+  private readonly bricks: Brick[] = []
   /** Every registered route with its schemas — what OpenAPI generation reads. */
   private readonly registered: Array<{
     method: HttpMethod
@@ -156,7 +156,7 @@ export class App<Ext = unknown> implements PluginHost {
   }> = []
   private readonly openApi: Required<OpenApiFragment> = { securitySchemes: {}, tags: [] }
   private readonly resolved: Record<string, unknown> = {}
-  /** Context subclass carrying plugin values on its prototype; built once at boot. */
+  /** Context subclass carrying brick values on its prototype; built once at boot. */
   private ContextClass: new (
     req: Request,
     params: Record<string, string>,
@@ -205,22 +205,20 @@ export class App<Ext = unknown> implements PluginHost {
   // ---------------------------------------------------------------- extension
 
   /**
-   * Registers middleware or a plugin.
+   * Registers middleware or a brick.
    *
-   * A function is middleware; an object is a plugin. They share a name because they are the
+   * A function is middleware; an object is a brick. They share a name because they are the
    * same idea at two scales — "wrap the request" and "add a capability" — and the runtime can
    * tell them apart with no ambiguity.
    */
   use(middleware: Middleware): this
   use(prefix: string, middleware: Middleware): this
-  use<Name extends string, Value>(
-    plugin: OvenPlugin<Name, Value>,
-  ): App<Ext & { [K in Name]: Value }>
+  use<Name extends string, Value>(brick: Brick<Name, Value>): App<Ext & { [K in Name]: Value }>
   // The implementation signature must be compatible with every overload above, and no concrete
   // type is assignable to both `this` and `App<Ext & {...}>`. `any` here is confined to the
   // signature; callers only ever see the typed overloads.
   // biome-ignore lint/suspicious/noExplicitAny: overload implementation signature
-  use(first: Middleware | string | OvenPlugin<string, unknown>, second?: Middleware): any {
+  use(first: Middleware | string | Brick<string, unknown>, second?: Middleware): any {
     if (typeof first === 'string') {
       if (!second) throw new Error('use(prefix, middleware) needs a middleware function.')
       this.middleware.push({ prefix: first, handler: second })
@@ -236,15 +234,15 @@ export class App<Ext = unknown> implements PluginHost {
 
     if (this.readyPromise) {
       throw new Error(
-        `Plugin "${first.name}" was registered after the app started. Plugins must be added ` +
+        `Brick "${first.name}" was registered after the app started. Bricks must be added ` +
           'before the first request, because their setup runs at boot.',
       )
     }
-    if (this.plugins.some((plugin) => plugin.name === first.name)) {
-      throw new Error(`Plugin "${first.name}" is already registered.`)
+    if (this.bricks.some((brick) => brick.name === first.name)) {
+      throw new Error(`Brick "${first.name}" is already registered.`)
     }
 
-    this.plugins.push(first)
+    this.bricks.push(first)
     return this
   }
 
@@ -320,7 +318,7 @@ export class App<Ext = unknown> implements PluginHost {
   /**
    * Registers a handler, optionally with schemas.
    *
-   * File-based routing (§1.8) is the DX users see, but it compiles down to this, and plugins
+   * File-based routing (§1.8) is the DX users see, but it compiles down to this, and bricks
    * that contribute endpoints — `/auth/*`, the docs UI — call it directly.
    */
   route(method: HttpMethod, path: string, handler: Handler<Ext>): this
@@ -406,7 +404,7 @@ export class App<Ext = unknown> implements PluginHost {
     return this.router.routes()
   }
 
-  /** Every registered route with its schemas. Read lazily; see `PluginHost`. */
+  /** Every registered route with its schemas. Read lazily; see `BrickHost`. */
   routeTable(): ReadonlyArray<{
     method: HttpMethod
     pattern: string
@@ -415,13 +413,13 @@ export class App<Ext = unknown> implements PluginHost {
     return this.registered
   }
 
-  /** Merges an OpenAPI fragment contributed by a plugin. */
+  /** Merges an OpenAPI fragment contributed by a brick. */
   contributeOpenApi(fragment: OpenApiFragment): void {
     Object.assign(this.openApi.securitySchemes, fragment.securitySchemes ?? {})
     if (fragment.tags) this.openApi.tags.push(...fragment.tags)
   }
 
-  /** Everything plugins have contributed to the OpenAPI document. */
+  /** Everything bricks have contributed to the OpenAPI document. */
   openApiFragments(): Required<OpenApiFragment> {
     return this.openApi
   }
@@ -433,10 +431,10 @@ export class App<Ext = unknown> implements PluginHost {
   // ---------------------------------------------------------------- boot
 
   /**
-   * Sets up plugins. Idempotent, and awaited by both `listen()` and `fetch()`.
+   * Sets up bricks. Idempotent, and awaited by both `listen()` and `fetch()`.
    *
-   * Plugin values are installed on a `Context` subclass prototype rather than copied onto each
-   * context, so ten plugins cost nothing per request.
+   * Brick values are installed on a `Context` subclass prototype rather than copied onto each
+   * context, so ten bricks cost nothing per request.
    */
   async ready(): Promise<void> {
     this.readyPromise ??= this.boot()
@@ -444,22 +442,22 @@ export class App<Ext = unknown> implements PluginHost {
   }
 
   private async boot(): Promise<void> {
-    if (this.plugins.length === 0) return
+    if (this.bricks.length === 0) return
 
-    for (const plugin of orderPlugins(this.plugins)) {
+    for (const brick of orderBricks(this.bricks)) {
       // Colliding with a core property would shadow the real thing in a way that surfaces far
-      // from the plugin responsible, so it is rejected here, by name, at boot.
-      if (plugin.name in Context.prototype || plugin.name === 'req' || plugin.name === 'params') {
+      // from the brick responsible, so it is rejected here, by name, at boot.
+      if (brick.name in Context.prototype || brick.name === 'req' || brick.name === 'params') {
         throw new Error(
-          `Plugin "${plugin.name}" collides with a built-in context property. Choose another name.`,
+          `Brick "${brick.name}" collides with a built-in context property. Choose another name.`,
         )
       }
 
-      const setup: PluginSetupContext = {
+      const setup: BrickSetupContext = {
         resolved: this.resolved,
         route: (method, path, handler) => {
           if (!isHttpMethod(method)) {
-            throw new Error(`Plugin "${plugin.name}" registered an unsupported method: ${method}`)
+            throw new Error(`Brick "${brick.name}" registered an unsupported method: ${method}`)
           }
           this.route(method, path, handler as Handler<Ext>)
         },
@@ -467,7 +465,7 @@ export class App<Ext = unknown> implements PluginHost {
         app: this,
       }
 
-      this.resolved[plugin.name] = await plugin.setup(setup)
+      this.resolved[brick.name] = await brick.setup(setup)
     }
 
     const Extended = class extends Context {}
@@ -476,10 +474,10 @@ export class App<Ext = unknown> implements PluginHost {
     }
     this.ContextClass = Extended as unknown as typeof this.ContextClass
 
-    for (const plugin of this.plugins) {
-      const teardown = plugin.onShutdown
+    for (const brick of this.bricks) {
+      const teardown = brick.onShutdown
       if (teardown) {
-        const value = this.resolved[plugin.name]
+        const value = this.resolved[brick.name]
         this.onShutdown(() => teardown(value))
       }
     }
@@ -580,8 +578,8 @@ export class App<Ext = unknown> implements PluginHost {
 
     ctx.assignParams(match.params)
 
-    for (const plugin of this.plugins) {
-      if (plugin.onRequest) await plugin.onRequest(ctx)
+    for (const brick of this.bricks) {
+      if (brick.onRequest) await brick.onRequest(ctx)
     }
 
     const { handler, schema } = match.payload
@@ -860,19 +858,19 @@ export function createApp(options: AppOptions = {}): App {
 /**
  * A project's configuration in one declarative object.
  *
- * `defineConfig` is sugar over the same plugin mechanism `.use()` drives — the config surface
+ * `defineConfig` is sugar over the same brick mechanism `.use()` drives — the config surface
  * and the chaining surface are two views of one implementation, not two implementations.
  *
  * ```ts
  * export default defineConfig({
  *   trustProxy: 1,
  *   cookies: { secret: process.env.COOKIE_SECRET },
- *   plugins: [storage({ driver: 's3' }), queue({ driver: 'redis' })],
+ *   bricks: [storage({ driver: 's3' }), queue({ driver: 'redis' })],
  * })
  * ```
  */
 export interface OvenConfig extends AppOptions {
-  plugins?: OvenPlugin[]
+  bricks?: Brick[]
 }
 
 export function defineConfig(config: OvenConfig): OvenConfig {
@@ -882,15 +880,15 @@ export function defineConfig(config: OvenConfig): OvenConfig {
 /**
  * Builds an app from a config object.
  *
- * The returned app is typed as `App` rather than carrying each plugin's contribution, because
+ * The returned app is typed as `App` rather than carrying each brick's contribution, because
  * a runtime array cannot express that in the type system. Chain `.use()` directly when you
  * want `ctx.storage` typed at the call site; that is the whole reason both surfaces exist.
  */
 export function appFromConfig(config: OvenConfig): App {
-  const { plugins = [], ...options } = config
+  const { bricks = [], ...options } = config
   let app: App = createApp(options)
-  for (const plugin of plugins) {
-    app = app.use(plugin) as unknown as App
+  for (const brick of bricks) {
+    app = app.use(brick) as unknown as App
   }
   return app
 }

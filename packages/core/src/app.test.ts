@@ -492,7 +492,7 @@ describe('configuration', () => {
     expect(createApp({ logger: silentLogger })).toBeInstanceOf(App)
   })
 
-  test('exposes the base logger for plugins', () => {
+  test('exposes the base logger for bricks', () => {
     expect(make({ logger: silentLogger }).logger).toBe(silentLogger)
   })
 

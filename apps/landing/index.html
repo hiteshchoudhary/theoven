@@ -191,8 +191,8 @@
         <p>Onion-model middleware, five lifecycle hooks, plus CORS, security headers, rate limiting, logging and compression in the box.</p>
       </article>
       <article class="status done">
-        <header><span class="tick">&check;</span><h3>Plugins</h3></header>
-        <p>Typed <code>.use()</code> chaining. Register a plugin and it appears on the context, typed; leave it out and touching it is a compile error.</p>
+        <header><span class="tick">&check;</span><h3>Bricks</h3></header>
+        <p>Typed <code>.use()</code> chaining. Register a brick and it appears on the context, typed; leave it out and touching it is a compile error.</p>
       </article>
       <article class="status done">
         <header><span class="tick">&check;</span><h3>Validation</h3></header>
@@ -212,7 +212,7 @@
       </article>
       <article class="status next">
         <header><span class="tick">&rarr;</span><h3>Auth &amp; database</h3></header>
-        <p><code>@theoven/auth</code> on better-auth and <code>@theoven/db</code> on Drizzle. Next up &mdash; they land on the plugin system above.</p>
+        <p><code>@theoven/auth</code> on better-auth and <code>@theoven/db</code> on Drizzle. Next up &mdash; they land on the brick system above.</p>
       </article>
       <article class="status todo">
         <header><span class="tick">&middot;</span><h3>Storage, mail, queue</h3></header>
@@ -259,7 +259,7 @@
       </article>
       <article class="card">
         <h3>Token capture</h3>
-        <p><code>ctx.token</code> from the <code>Authorization</code> header, a cookie, or the query string — even with no auth plugin.</p>
+        <p><code>ctx.token</code> from the <code>Authorization</code> header, a cookie, or the query string — even with no auth brick.</p>
         <p class="replaces">replaces the snippet everyone rewrites</p>
       </article>
       <article class="card">
@@ -337,7 +337,7 @@
         <tbody>
           <tr><th scope="row">Runtime</th><td>Node</td><td>Node</td><td>Node</td><td>Python</td><td class="us">Bun</td></tr>
           <tr><th scope="row">Auth / DB / queue / mail / S3</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="part">partial</td><td class="part">partial</td><td class="us yes">&check;</td></tr>
-          <tr><th scope="row">Automatic OpenAPI</th><td class="no">&mdash;</td><td class="part">plugin</td><td class="part">plugin</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">Automatic OpenAPI</th><td class="no">&mdash;</td><td class="part">brick</td><td class="part">brick</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">Types inferred from schemas</th><td class="no">&mdash;</td><td class="part">partial</td><td class="part">partial</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">File-based routing</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">Body / cookies / uploads always on</th><td class="no">&mdash;</td><td class="part">partial</td><td class="yes">&check;</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
