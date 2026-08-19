@@ -1,6 +1,6 @@
 {
   "name": "@theoven/core",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Router, context, bricks, validation and OpenAPI for Oven",
   "keywords": [
     "bun",

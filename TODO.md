@@ -1,12 +1,14 @@
 # Oven — Task Tracker
 
-**Current state:** **Phases 0–4 complete and all thirteen packages published to npm at 0.1.0.**
-Two items are yours: buy the domain, and rotate the npm token that was pasted into chat.
+**Current state:** **Phases 0–5 complete**, and all fourteen packages published to npm at
+**0.1.2**. Two items are yours: point `theoven.app` at the Pages project, and launch.
 
 ```bash
-bun add @theoven/core
-bun add -d @theoven/cli
+bun create theoven my-app --db sqlite --auth basic
 ```
+
+Verified end to end against npm, from a cleared cache: create → install → `db:generate` →
+`db:migrate` → boot → signup → `/docs`.
 
 Shipped: router, server, context, errors, logger, response coercion, graceful shutdown, the
 always-on batteries, middleware, bricks, validation, file-based routing, OpenAPI, the CLI, and
@@ -647,7 +649,12 @@ development and production. Covered by tests now.
 
 ### 5.0 npm — done
 
-- [x] All thirteen packages published at **0.1.0**, in dependency order, with `bun publish`
+- [x] All fourteen packages published, in dependency order, with `bun publish`. Now at **0.1.2**:
+      0.1.1 added `routesFor`, `drizzleSqlite({ client })` and per-operation OpenAPI security;
+      0.1.2 fixed the scaffold shipping `^0.0.0` dependency ranges.
+- [x] `create-theoven` published, so `bun create theoven my-app` works. It needed a token that
+      can create **unscoped** packages — the original was granular-scoped to `@theoven`, which is
+      why the first attempt returned 403 on that one package alone.
 - [x] `scripts/check-publish.mjs` packs every package and checks what npm would actually receive:
       no `workspace:` ranges, no test files, README and LICENSE present, every `exports` and `bin`
       target actually in the tarball, and one version across the repo. Runs in CI and before a

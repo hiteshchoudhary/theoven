@@ -631,3 +631,46 @@ describe('top-level flags', () => {
     expect(out).toContain('Usage')
   })
 })
+
+/**
+ * The scaffolded manifest must actually install.
+ *
+ * It shipped pinning `@theoven/*` at `^0.0.0` — a literal that was correct until the first
+ * release and then produced projects that could not `bun install` at all. Only running
+ * `bun create` against the published CLI found it, so these assert the shape directly.
+ */
+describe('scaffolded dependency versions', () => {
+  async function manifest() {
+    const files = renderTemplate('api', {
+      name: 'demo',
+      openapi: true,
+      database: 'sqlite',
+      auth: 'basic',
+    })
+    return JSON.parse(files.find((file) => file.path === 'package.json')?.contents ?? '{}') as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+  }
+
+  test('no dependency is pinned at a placeholder version', async () => {
+    const { dependencies, devDependencies } = await manifest()
+    for (const [name, range] of Object.entries({ ...dependencies, ...devDependencies })) {
+      expect(range, `${name} must not be a placeholder`).not.toBe('^0.0.0')
+      expect(range, `${name} must not be a placeholder`).not.toBe('0.0.0')
+    }
+  })
+
+  // Read from the CLI's own manifest, so a release cannot leave them behind.
+  test('every @theoven dependency matches the CLI version', async () => {
+    const cli = (await Bun.file(new URL('../package.json', import.meta.url)).json()) as {
+      version: string
+    }
+    const { dependencies, devDependencies } = await manifest()
+
+    for (const [name, range] of Object.entries({ ...dependencies, ...devDependencies })) {
+      if (!name.startsWith('@theoven/')) continue
+      expect(range, `${name} should track the CLI`).toBe(`^${cli.version}`)
+    }
+  })
+})

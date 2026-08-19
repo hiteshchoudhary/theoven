@@ -57,6 +57,7 @@ const packages = readdirSync(join(ROOT, 'packages'))
 
 let published = 0
 let skipped = 0
+const failed = []
 
 for (const { directory, manifest } of order(packages)) {
   const { name, version } = manifest
@@ -80,10 +81,24 @@ for (const { directory, manifest } of order(packages)) {
 
   const result = Bun.spawnSync(['bun', 'publish'], { cwd: directory, stdio: ['inherit', 'inherit', 'inherit'] })
   if (result.exitCode !== 0) {
-    console.error(`\nPublishing ${name}@${version} failed. Re-run to continue from here.`)
-    process.exit(1)
+    /**
+     * Carry on rather than stopping.
+     *
+     * One package failing for its own reason — a credential that cannot create a new unscoped
+     * name, say — should not leave the packages after it in the order unpublished. Finding out
+     * about every failure in one run beats discovering them one re-run at a time, and the
+     * script is idempotent, so a fix is followed by a plain re-run.
+     */
+    failed.push(`${name}@${version}`)
+    continue
   }
   published++
 }
 
 console.log(`\n${published} published, ${skipped} already up to date.`)
+
+if (failed.length > 0) {
+  console.error(`\n${failed.length} failed: ${failed.join(', ')}`)
+  console.error('Fix the cause and re-run — anything already published is skipped.')
+  process.exit(1)
+}

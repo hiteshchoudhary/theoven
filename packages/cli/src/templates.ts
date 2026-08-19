@@ -14,6 +14,24 @@ export interface TemplateFile {
   contents: string
 }
 
+/**
+ * The version range scaffolded projects depend on.
+ *
+ * Read from this package's own manifest rather than written here. It was hardcoded as `^0.0.0`,
+ * which every published CLI then scaffolded — producing a project that could not `bun install`
+ * at all. A literal version in a template is one that is correct exactly until the first
+ * release.
+ */
+const OVEN_VERSION: string = `^${
+  (
+    (await Bun.file(new URL('../package.json', import.meta.url))
+      .json()
+      .catch(() => ({}))) as {
+      version?: string
+    }
+  ).version ?? '0.1.0'
+}`
+
 export type DatabaseChoice = 'none' | 'sqlite' | 'postgres'
 export type AuthChoice = 'none' | 'basic'
 
@@ -68,11 +86,11 @@ function packageJson(options: TemplateOptions): string {
   const hasAuth = options.auth === 'basic'
 
   const dependencies: Record<string, string> = {
-    '@theoven/core': '^0.0.0',
+    '@theoven/core': OVEN_VERSION,
     zod: '^4.0.0',
   }
   const devDependencies: Record<string, string> = {
-    '@theoven/cli': '^0.0.0',
+    '@theoven/cli': OVEN_VERSION,
     '@types/bun': 'latest',
     typescript: '^5.9.0',
   }
@@ -85,18 +103,18 @@ function packageJson(options: TemplateOptions): string {
   }
 
   if (hasDatabase) {
-    dependencies['@theoven/db'] = '^0.0.0'
-    dependencies['@theoven/db-drizzle'] = '^0.0.0'
-    dependencies['drizzle-orm'] = '^0.44.0'
+    dependencies['@theoven/db'] = OVEN_VERSION
+    dependencies['@theoven/db-drizzle'] = OVEN_VERSION
+    dependencies['drizzle-orm'] = '^0.45.0'
     devDependencies['drizzle-kit'] = '^0.31.0'
     scripts['db:generate'] = 'oven db generate'
     scripts['db:migrate'] = 'oven db migrate'
   }
 
   if (hasAuth) {
-    dependencies['@theoven/auth'] = '^0.0.0'
-    dependencies['@theoven/auth-basic'] = '^0.0.0'
-    dependencies['@theoven/mail'] = '^0.0.0'
+    dependencies['@theoven/auth'] = OVEN_VERSION
+    dependencies['@theoven/auth-basic'] = OVEN_VERSION
+    dependencies['@theoven/mail'] = OVEN_VERSION
   }
 
   return `${JSON.stringify(
