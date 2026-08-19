@@ -769,23 +769,39 @@ development and production. Covered by tests now.
 
 ## Regressions to chase
 
-- [ ] 🔴 **Dispatch got ~45% slower.** Re-measuring after removing Elysia showed Oven's dispatch
-      at 1664/1931/1826/1910 ns against a previously published 1089/1303/1236/1336 ns for the
-      same four scenarios. Hono, measured in the same runs on the same machine, is unchanged
-      (1069→1074, 1819→1829), so this is ours and not the machine. Three consecutive runs agreed
-      to within 1%.
+- [x] ✅ **Dispatch regression found and mostly fixed.** Bisected by checking out
+      `packages/core/src` at each commit and re-running the bench: it appeared in a single step at
+      `5a3ae12` ("middleware, lifecycle hooks and the plugin system") and was flat across the ten
+      commits after it. It was never a slow drift — the published numbers were taken at `3c03842`,
+      *before* middleware landed, and were simply never re-run.
 
-      At the socket it costs less but is still visible: Oven went from beating Hono by 9% on the
-      parameterised route to trailing it by 3.5%. Every published number has been updated to the
-      measured ones — the old figures flattered us and no longer reproduce.
+      **The cause.** That commit moved Context construction ahead of routing, so middleware could
+      wrap requests that match nothing — CORS preflights, 404s that still need logging and
+      headers. Routing then read `ctx.path`, and `ctx.path` was `this.url.pathname`, so every
+      request built a `URL` to answer a question a substring already answered: ~580 ns each.
 
-      **Not yet bisected.** The likely window is the Phase 2–3 work on the request path; the
-      brick `request()` hook and the per-request context contributions are the first places to
-      look, since neither existed when the original numbers were taken. `bun benchmarks/dispatch.bench.ts`
-      reproduces it in about ten seconds.
+      **Fixed by** scanning the path once in `dispatch` and handing it to the Context, so
+      `ctx.path` is a field read; caching `contextInit`, which was a getter rebuilding two objects
+      per request; guarding the empty hook/brick loops on `length` so they allocate no iterator;
+      and precomputing which bricks actually have an `onRequest`.
+
+      | scenario | before | now | baseline |
+      | --- | ---: | ---: | ---: |
+      | static root | 1664 ns | **1258 ns** | 1060 ns |
+      | param + json | 1931 ns | **1519 ns** | 1337 ns |
+      | deep static | 1826 ns | **1423 ns** | 1221 ns |
+      | 404 miss | 1910 ns | **1530 ns** | 1278 ns |
+
+      At the socket, Oven went from 3.5% behind Hono to **0.5%** — inside variance.
+
+- [ ] The remaining ~15% over the pre-middleware baseline is the design, not a defect: the Context
+      is built before routing, and `runRoute`/`finish` are separate async frames so middleware can
+      wrap routing. Closing it means inlining the response path, which duplicates the response-hook
+      logic — not worth it for ~80 ns until something measurable depends on it.
 
 - [ ] Re-run benchmarks before launch, on a quiet machine, and check the landing-page figures
-      against the result rather than against memory.
+      against the result rather than against memory. (All published figures were re-measured
+      after the fix: socket the mean of two runs, dispatch the mean of three.)
 
 **Also found:** the Astro docs build was silently depending on `elysia` hoisting `cookie@1.1.1`
 to the root. Removing Elysia hoisted express's `cookie@0.7.2` instead — CJS, no named exports —

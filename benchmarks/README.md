@@ -20,13 +20,13 @@ routes and is driven by the same load generator (`autocannon`).
 
 | framework | runtime | static text req/s | param + json req/s | p99 |
 | --- | --- | ---: | ---: | ---: |
-| hono | bun | 114,348 | 109,920 | <1 ms |
-| **oven** | **bun** | **109,261** | **106,163** | **<1 ms** |
-| fastify | node | 84,230 | 81,171 | 1 ms |
-| express | node | 18,482 | 18,339 | 5 ms |
+| hono | bun | 114,874 | 108,845 | <1 ms |
+| **oven** | **bun** | **110,316** | **108,250** | **<1 ms** |
+| fastify | node | 85,120 | 80,896 | 1 ms |
+| express | node | 18,570 | 18,389 | 5 ms |
 
-**Oven is ~5.8× Express and ~1.3× Fastify. Hono is ~3.5% ahead of us on the parameterised route
-and ~4.7% ahead on static text.**
+**Oven is ~5.9× Express and ~1.34× Fastify, and level with Hono on the parameterised route
+(0.5%, inside run-to-run variance). Hono is ~4% ahead on plain static text.**
 
 Each framework runs on the runtime it is actually deployed on: Oven and Hono on Bun; Express and
 Fastify on Node. Running the Node frameworks on Bun's `node:http` shim would
@@ -40,10 +40,10 @@ coercion. No socket, no kernel, no load generator.
 
 | scenario | oven | hono |
 | --- | ---: | ---: |
-| static root | 1664 ns | 1074 ns |
-| param + json | 1931 ns | 1829 ns |
-| deep static | 1826 ns | 1194 ns |
-| 404 miss | 1910 ns | 1901 ns |
+| static root | 1258 ns | 1086 ns |
+| param + json | 1519 ns | 1838 ns |
+| deep static | 1423 ns | 1193 ns |
+| 404 miss | 1530 ns | 1922 ns |
 
 Express and Fastify are absent here because they have no `Request` entry point — including them
 would compare two different things.
@@ -55,11 +55,13 @@ in `TODO.md`.
 
 ### Read the two tables together
 
-This is the whole lesson, and it currently runs against us.
+This is the whole lesson, and the two tables genuinely do not rank the same way.
 
-On `static root` Hono dispatches **1.55× faster** than Oven — 590 ns of advantage. At the socket
-that same pair is **4.7%** apart, not 55%. Once a real connection exists, syscalls and TCP
-dominate and a few hundred nanoseconds of framework overhead compresses into near-nothing.
+Hono dispatches **1.16× faster** on a static root; Oven dispatches **1.21× faster** on a
+parameterised route and **1.26× faster** on a 404. At the socket both of those advantages
+collapse to **under 1%** on the parameterised route and about 4% on static text. Once a real
+connection exists, syscalls and TCP dominate and a few hundred nanoseconds of framework overhead
+compresses into near-nothing.
 
 So: the dispatch table is a useful engineering signal about where our own overhead lives, and a
 **bad** basis for choosing a framework. We publish both because publishing only the flattering

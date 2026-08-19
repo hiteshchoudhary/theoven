@@ -21,13 +21,13 @@ runtime it is actually deployed on.
 
 | framework | runtime | static text req/s | param + json req/s | p99 |
 | --- | --- | ---: | ---: | ---: |
-| hono | bun | 114,348 | 109,920 | &lt;1 ms |
-| **oven** | **bun** | **109,261** | **106,163** | **&lt;1 ms** |
-| fastify | node | 84,230 | 81,171 | 1 ms |
-| express | node | 18,482 | 18,339 | 5 ms |
+| hono | bun | 114,874 | 108,845 | &lt;1 ms |
+| **oven** | **bun** | **110,316** | **108,250** | **&lt;1 ms** |
+| fastify | node | 85,120 | 80,896 | 1 ms |
+| express | node | 18,570 | 18,389 | 5 ms |
 
-Oven is about **5.8× Express** and **1.3× Fastify**. Hono is currently ahead of us — 3.5% on the
-parameterised route, 4.7% on static text.
+Oven is about **5.9× Express** and **1.34× Fastify**, and level with Hono on the parameterised
+route — 0.5%, inside run-to-run variance. Hono is about 4% ahead on plain static text.
 
 ## Dispatch overhead
 
@@ -36,9 +36,9 @@ they are built on Node's `req`/`res` and have no `Request` entry point.
 
 | scenario | oven | hono |
 | --- | ---: | ---: |
-| static root | 1664 ns | 1074 ns |
-| param + json | 1931 ns | 1829 ns |
-| 404 miss | 1910 ns | 1901 ns |
+| static root | 1258 ns | 1086 ns |
+| param + json | 1519 ns | 1838 ns |
+| 404 miss | 1530 ns | 1922 ns |
 
 <Aside type="caution" title="This is not the ceiling">
   A framework that compiles each route into a specialised function at boot — with `new Function`,
@@ -50,11 +50,12 @@ they are built on Node's `req`/`res` and have no `Request` entry point.
 
 ## Read both tables together
 
-This is the point, and it currently runs against us.
+This is the point: the two tables do not rank the same way.
 
-On `static root` Hono dispatches **1.55× faster** than Oven — 590 ns of advantage. At the socket
-that same pair is **4.7%** apart, not 55%. Once a real connection exists, syscalls and TCP
-dominate and a few hundred nanoseconds of framework overhead compresses into near-nothing.
+Hono dispatches **1.16× faster** on a static root. Oven dispatches **1.21× faster** on a
+parameterised route and **1.26× faster** on a 404. At the socket both advantages collapse — to
+under 1% on the parameterised route, about 4% on static text. Once a real connection exists,
+syscalls and TCP dominate and a few hundred nanoseconds of framework overhead vanishes.
 
 The dispatch table is a useful signal about where our own overhead lives, and a bad basis for
 choosing a framework. We publish both, because publishing only the flattering one would be

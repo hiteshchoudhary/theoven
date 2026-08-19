@@ -18,6 +18,7 @@ import type { QueryOptions } from './query'
 import { normalisePath, Router } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
 import type { TokenOptions } from './token'
+import { pathnameOf } from './url'
 import {
   type RouteSchema,
   type ValidatedHandler,
@@ -100,6 +101,9 @@ export interface AppOptions {
 const PROBLEM_TYPE = 'application/problem+json; charset=utf-8'
 
 /** Shared by every context until routing resolves; frozen so nothing can mutate it. */
+/** Distinguishes "never cached" from "cached with no server". */
+const UNSET = Symbol('unset')
+
 const EMPTY_PARAMS: Record<string, string> = Object.freeze({})
 
 /** What the router stores: the handler plus the schemas declared alongside it, if any. */
@@ -169,6 +173,14 @@ export class App<Ext = unknown> implements BrickHost {
   private readonly bricks: Brick[] = []
   /** Bricks with a `request()` hook, in dependency order. Empty for most apps. */
   private contributors: RequestContributor[] = []
+  /**
+   * Bricks with an `onRequest` hook, filtered at boot.
+   *
+   * Most bricks contribute a service and nothing per request. Walking every brick to ask each one
+   * whether it has a hook is work proportional to how many features an app installs, paid on
+   * every request — which is exactly the wrong way round.
+   */
+  private requestBricks: Array<Brick & { onRequest: NonNullable<Brick['onRequest']> }> = []
   /** Every registered route with its schemas — what OpenAPI generation reads. */
   private readonly registered: Array<{
     method: HttpMethod
@@ -182,6 +194,7 @@ export class App<Ext = unknown> implements BrickHost {
     req: Request,
     params: Record<string, string>,
     init: ContextInit,
+    path?: string,
   ) => Context = Context
   private readyPromise: Promise<void> | undefined
 
@@ -209,8 +222,23 @@ export class App<Ext = unknown> implements BrickHost {
     this.baseLogger = options.logger ?? new ConsoleLogger({ level: this.settings.logLevel })
   }
 
-  private get contextInit(): Omit<ContextInit, 'server'> {
-    return {
+  /**
+   * The context init, built once.
+   *
+   * This was a getter, so every request rebuilt it — the outer object, the nested `cookies`
+   * spread, and then a third object for the `{ ...contextInit, server }` in dispatch. Three
+   * allocations per request for values that cannot change after construction.
+   *
+   * Keyed on the server because that is the only part that varies, and it varies once: `undefined`
+   * for a directly dispatched `Request`, and the `Server` after `listen()`.
+   */
+  private cachedInit: ContextInit | undefined
+  private cachedInitServer: Server<unknown> | undefined | typeof UNSET = UNSET
+
+  private initFor(server: Server<unknown> | undefined): ContextInit {
+    if (this.cachedInit !== undefined && this.cachedInitServer === server) return this.cachedInit
+
+    this.cachedInit = {
       logger: this.baseLogger,
       requestIdHeader: this.settings.requestIdHeader,
       body: this.rawOptions.body,
@@ -220,7 +248,10 @@ export class App<Ext = unknown> implements BrickHost {
       cookies: { secureByDefault: !this.settings.development, ...this.rawOptions.cookies },
       token: this.rawOptions.token,
       trustProxy: this.settings.trustProxy,
+      server,
     }
+    this.cachedInitServer = server
+    return this.cachedInit
   }
 
   // ---------------------------------------------------------------- extension
@@ -559,6 +590,11 @@ export class App<Ext = unknown> implements BrickHost {
         request: brick.request as RequestContributor['request'],
       }))
 
+    this.requestBricks = this.bricks.filter(
+      (brick): brick is Brick & { onRequest: NonNullable<Brick['onRequest']> } =>
+        typeof brick.onRequest === 'function',
+    )
+
     for (const brick of this.bricks) {
       const teardown = brick.onShutdown
       if (teardown) {
@@ -605,15 +641,27 @@ export class App<Ext = unknown> implements BrickHost {
    * and getting it wrong makes CORS impossible to configure correctly.
    */
   private async dispatch(request: Request, server: Server<unknown> | undefined): Promise<Response> {
-    const ctx = new this.ContextClass(request, EMPTY_PARAMS, { ...this.contextInit, server })
+    /**
+     * Scanned once, here, and shared by everything downstream.
+     *
+     * Middleware prefix-matching and routing must agree on what the path *is*. When they did
+     * not — `chainFor` scanning while `runRoute` read a `URL`-parsed `ctx.path` — a request whose
+     * two readings differed would have been matched by one and not the other, which is how a
+     * guard mounted on a prefix gets skipped on a route that still resolves. They cannot
+     * disagree now because there is only one value.
+     */
+    const path = pathnameOf(request.url)
+    const ctx = new this.ContextClass(request, EMPTY_PARAMS, this.initFor(server), path)
 
     try {
-      for (const hook of this.hooks.request) {
-        const result = await hook(ctx)
-        if (result !== undefined) return await this.finish(ctx, result)
+      if (this.hooks.request.length > 0) {
+        for (const hook of this.hooks.request) {
+          const result = await hook(ctx)
+          if (result !== undefined) return await this.finish(ctx, result)
+        }
       }
 
-      const chain = this.chainFor(pathnameOf(request.url))
+      const chain = this.chainFor(path)
       return await this.finish(ctx, await chain(ctx))
     } catch (thrown) {
       return this.handleError(thrown, ctx)
@@ -663,8 +711,8 @@ export class App<Ext = unknown> implements BrickHost {
 
     ctx.assignParams(match.params)
 
-    for (const brick of this.bricks) {
-      if (brick.onRequest) await brick.onRequest(ctx)
+    if (this.requestBricks.length > 0) {
+      for (const brick of this.requestBricks) await brick.onRequest?.(ctx)
     }
 
     const { handler, schema, pattern } = match.payload
@@ -690,9 +738,11 @@ export class App<Ext = unknown> implements BrickHost {
 
     // Validation runs after beforeHandle would have a chance to reject cheaply, but before the
     // handler — a handler should never see input it did not ask for.
-    for (const hook of this.hooks.beforeHandle) {
-      const short = await hook(ctx)
-      if (short !== undefined) return short
+    if (this.hooks.beforeHandle.length > 0) {
+      for (const hook of this.hooks.beforeHandle) {
+        const short = await hook(ctx)
+        if (short !== undefined) return short
+      }
     }
 
     if (schema) await validateRequest(ctx, schema)
@@ -718,9 +768,11 @@ export class App<Ext = unknown> implements BrickHost {
       }
     }
 
-    for (const hook of this.hooks.afterHandle) {
-      const transformed = await hook(ctx, result)
-      if (transformed !== undefined) result = transformed
+    if (this.hooks.afterHandle.length > 0) {
+      for (const hook of this.hooks.afterHandle) {
+        const transformed = await hook(ctx, result)
+        if (transformed !== undefined) result = transformed
+      }
     }
 
     if (headOfGet) {
@@ -762,9 +814,11 @@ export class App<Ext = unknown> implements BrickHost {
   private async finish(ctx: Context, result: unknown): Promise<Response> {
     let response = ctx.respond(result)
 
-    for (const hook of this.hooks.response) {
-      const replacement = await hook(ctx, response)
-      if (replacement instanceof Response) response = replacement
+    if (this.hooks.response.length > 0) {
+      for (const hook of this.hooks.response) {
+        const replacement = await hook(ctx, response)
+        if (replacement instanceof Response) response = replacement
+      }
     }
 
     this.stampRequestId(response, ctx)
@@ -934,26 +988,6 @@ export class App<Ext = unknown> implements BrickHost {
   }
 }
 
-/**
- * Extracts the pathname without constructing a `URL`.
- *
- * `new URL()` is one of the most expensive things a router can do per request, and the path is
- * needed on every single one. Scanning for the third slash and stopping at `?` or `#` is
- * roughly an order of magnitude cheaper; `ctx.url` still gives handlers the full parse.
- */
-export function pathnameOf(url: string): string {
-  const start = url.indexOf('/', url.indexOf('//') + 2)
-  if (start === -1) return '/'
-
-  let end = url.length
-  const query = url.indexOf('?', start)
-  if (query !== -1) end = query
-  const hash = url.indexOf('#', start)
-  if (hash !== -1 && hash < end) end = hash
-
-  return start === end ? '/' : url.slice(start, end)
-}
-
 /** Creates an Oven application. */
 export function createApp(options: AppOptions = {}): App {
   return new App(options)
@@ -996,3 +1030,5 @@ export function appFromConfig(config: OvenConfig): App {
   }
   return app
 }
+
+export { pathnameOf } from './url'

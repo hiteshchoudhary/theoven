@@ -87,8 +87,8 @@
     </button>
 
     <dl class="stats">
-      <div><dt>106k</dt><dd>req/s on Bun</dd></div>
-      <div><dt>5.8&times;</dt><dd>faster than Express</dd></div>
+      <div><dt>108k</dt><dd>req/s on Bun</dd></div>
+      <div><dt>5.9&times;</dt><dd>faster than Express</dd></div>
       <div><dt>1331</dt><dd>tests, all green</dd></div>
       <div><dt>14</dt><dd>packages on npm</dd></div>
     </dl>
@@ -322,18 +322,18 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
     </header>
 
     <div class="bars reveal" id="bars">
-      <div class="bar-row" style="--pct:97"><span class="bar-name">Hono <em>bun</em></span><div class="bar"><span></span></div><span class="bar-val">109,920</span></div>
-      <div class="bar-row is-us" style="--pct:93.7"><span class="bar-name">Oven <em>bun</em></span><div class="bar"><span></span></div><span class="bar-val">106,163</span></div>
-      <div class="bar-row" style="--pct:71.6"><span class="bar-name">Fastify <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">81,171</span></div>
-      <div class="bar-row" style="--pct:16.2"><span class="bar-name">Express <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">18,339</span></div>
+      <div class="bar-row" style="--pct:97"><span class="bar-name">Hono <em>bun</em></span><div class="bar"><span></span></div><span class="bar-val">108,845</span></div>
+      <div class="bar-row is-us" style="--pct:96.5"><span class="bar-name">Oven <em>bun</em></span><div class="bar"><span></span></div><span class="bar-val">108,250</span></div>
+      <div class="bar-row" style="--pct:72.1"><span class="bar-name">Fastify <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">80,896</span></div>
+      <div class="bar-row" style="--pct:16.4"><span class="bar-name">Express <em>node</em></span><div class="bar"><span></span></div><span class="bar-val">18,389</span></div>
     </div>
     <p class="bars-note">requests/second — parameterised JSON route, higher is better</p>
 
     <aside class="note reveal">
-      <strong>Where we lose.</strong> Hono is currently ahead of us — 3.5% on this route, 4.7%
-      on plain static text — and further ahead on raw dispatch. These are also empty handlers on
-      loopback with the load generator sharing a CPU, so treat anything above 100k as “at the
-      ceiling”. Every framework here is fast next to a 2&nbsp;ms database query.
+      <strong>Where we lose.</strong> Hono is ~4% ahead on plain static text, and faster on raw
+      dispatch for static routes. These are also empty handlers on loopback with the load
+      generator sharing a CPU, so treat anything above 100k as “at the ceiling”. Every framework
+      here is fast next to a 2&nbsp;ms database query.
       <a href="/docs/guides/benchmarks/">Read the full methodology &rarr;</a>
     </aside>
   </div>

@@ -6,6 +6,7 @@ import { type ParsedQuery, parseQuery, type QueryOptions } from './query'
 import { toResponse } from './response'
 import type { RouteParams } from './router/types'
 import { type CapturedToken, captureToken, decodeBasic, type TokenOptions } from './token'
+import { pathnameOf } from './url'
 
 export interface ContextInit {
   /** Base logger; the request-scoped child is derived lazily from it. */
@@ -57,17 +58,19 @@ export class Context {
   private cachedId: string | undefined
   private cachedLog: Logger | undefined
   private cachedUrl: URL | undefined
+  private cachedPath: string | undefined
   private cachedQuery: ParsedQuery | undefined
   private cachedCookies: Cookies | undefined
   private cachedBody: Promise<unknown> | undefined
   private cachedRaw: Promise<ArrayBuffer> | undefined
   private cachedToken: CapturedToken | undefined | null = null
 
-  constructor(req: Request, params: RouteParams, init: ContextInit) {
+  constructor(req: Request, params: RouteParams, init: ContextInit, path?: string) {
     this.req = req
     this.mutableParams = params
     this.init = init
     this.status = undefined
+    this.cachedPath = path
   }
 
   /** Path parameters from the matched route. Frozen and shared when the route has none. */
@@ -96,9 +99,24 @@ export class Context {
     return this.cachedUrl
   }
 
-  /** The request path. */
+  /**
+   * The request path.
+   *
+   * Deliberately **not** `this.url.pathname`: reading it used to force `new URL()` on every
+   * request, because routing reads `ctx.path`. That was ~580 ns of parsing per request to answer
+   * a question a substring already answers — and it was the framework's own dispatch paying it,
+   * not the application.
+   *
+   * The router computes this once with a scan and hands it to the constructor, so this is
+   * usually just a field read. When it is not — a Context built directly in a test — the same
+   * scan runs lazily. `ctx.url` stays available and lazy for anything that genuinely needs a
+   * parsed URL.
+   */
   get path(): string {
-    return this.url.pathname
+    // A URL built for some other reason is authoritative; using it keeps the two in step.
+    if (this.cachedUrl !== undefined) return this.cachedUrl.pathname
+    this.cachedPath ??= pathnameOf(this.req.url)
+    return this.cachedPath
   }
 
   /** The request method. */
