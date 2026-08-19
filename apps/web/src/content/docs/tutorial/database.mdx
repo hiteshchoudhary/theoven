@@ -1,0 +1,171 @@
+---
+title: 4. A database
+description: Add a brick, get a typed client on the context — and keep writing ordinary Drizzle.
+sidebar:
+  order: 4
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+So far the routes have stored things in a `Map`. Time to make them real.
+
+## Add the brick
+
+```bash
+bun add @theoven/db @theoven/db-drizzle drizzle-orm
+bun add -d drizzle-kit
+```
+
+```ts title="src/schema.ts"
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const notes = sqliteTable('notes', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  body: text('body'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+})
+```
+
+```ts title="src/app.ts"
+import { db } from '@theoven/db'
+import { drizzleSqlite } from '@theoven/db-drizzle'
+import * as schema from './schema'
+
+export const app = createApp().use(db(drizzleSqlite({ url: './data.db', schema })))
+```
+
+```bash
+oven db generate    # writes a migration from the schema
+oven db migrate     # applies it
+```
+
+That is the whole setup. No connection code, no pool to manage, no shutdown hook to remember.
+
+## `ctx.db` is Drizzle
+
+```ts title="src/route.ts"
+import { routesFor } from '@theoven/core'
+import type { app } from './app'
+
+export const route = routesFor<typeof app>()
+```
+
+Declare that once, and every route file can see what the app registered. Then:
+
+```ts title="src/routes/notes/index.get.ts"
+import { desc } from 'drizzle-orm'
+import { z } from 'zod'
+import { route } from '../../route'
+import { notes } from '../../schema'
+
+export default route(
+  { query: z.object({ limit: z.coerce.number().int().max(100).default(20) }) },
+  (ctx) => ctx.db.select().from(notes).orderBy(desc(notes.createdAt)).limit(ctx.query.limit),
+)
+```
+
+`ctx.db` **is** the Drizzle client, typed from your schema. Not a wrapper, not a repository, not
+an Oven query API. Autocomplete on it is Drizzle's autocomplete; an error from it is Drizzle's
+error; a question about it is answerable from Drizzle's documentation.
+
+<Aside type="note" title="Why not a unified query API?">
+  Because it would be permanently behind every ORM and worse than all of them. It would also
+  throw away the thing that makes this pleasant to write with a coding agent: a model knows
+  Drizzle cold, and would know an invented Oven API not at all.
+</Aside>
+
+## Writing
+
+```ts title="src/routes/notes/index.post.ts"
+import { z } from 'zod'
+import { route } from '../../route'
+import { notes } from '../../schema'
+
+export default route(
+  { body: z.object({ title: z.string().min(1).max(200), body: z.string().optional() }) },
+  async (ctx) => {
+    const [note] = await ctx.db
+      .insert(notes)
+      .values({
+        id: crypto.randomUUID(),
+        title: ctx.body.title,
+        body: ctx.body.body ?? null,
+        createdAt: new Date(),
+      })
+      .returning()
+
+    ctx.status = 201
+    return note
+  },
+)
+```
+
+## Not found is thrown, not returned
+
+```ts title="src/routes/notes/[id].get.ts"
+import { NotFound } from '@theoven/core'
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { route } from '../../route'
+import { notes } from '../../schema'
+
+export default route({ params: z.object({ id: z.uuid() }) }, async (ctx) => {
+  const [note] = await ctx.db.select().from(notes).where(eq(notes.id, ctx.params.id))
+  if (!note) throw new NotFound(`No note with id ${ctx.params.id}.`)
+  return note
+})
+```
+
+A malformed id never reaches the query: `z.uuid()` rejects it as a `422` first. The handler only
+ever runs on input that already type-checks at runtime.
+
+## Transactions
+
+```ts
+import { transaction } from '@theoven/db'
+
+await transaction(ctx.db, async (tx) => {
+  await tx.insert(notes).values(note)
+  await tx.update(counters).set({ total: next })
+})
+```
+
+Portable across providers. Drizzle's own `ctx.db.transaction(...)` works too, and you should use
+it when you want Drizzle's options.
+
+For a route where a half-written request is worse than a failed one, wrap the whole thing:
+
+```ts
+import { transactional } from '@theoven/db'
+
+app.use('/admin', transactional())
+```
+
+<Aside type="caution" title="Scope it">
+  Applied globally, that holds a transaction open for the length of every request — including the
+  slow ones calling an external API, which is how a connection pool runs out. Put it on the routes
+  that write.
+</Aside>
+
+## Moving to Postgres
+
+```ts
+import { drizzlePostgres } from '@theoven/db-drizzle'
+
+export const app = createApp().use(
+  db(drizzlePostgres({ url: env.string('DATABASE_URL'), schema })),
+)
+```
+
+Change the import, change the line, change `dialect` in `drizzle.config.ts`. **Every query above
+is unchanged** — that is the entire reason the default is Drizzle over `bun:sqlite` rather than
+raw SQL. Raw SQL strings are dialect-bound, and a raw default would mean rewriting every query
+the day you outgrow SQLite.
+
+Prefer MongoDB? [`db-mongoose`](/docs/bricks/db-mongoose/) puts a Mongoose `Connection` on
+`ctx.db` through the same contract.
+
+## Next
+
+[Auth →](/docs/tutorial/auth/) — signup, login and guarded routes, without writing any of it.

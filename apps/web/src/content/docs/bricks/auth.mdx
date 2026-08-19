@@ -132,6 +132,7 @@ password handling: a security fix landing in one and not the other is the bug no
 ## Limitations
 
 - **No roles or permissions in `Identity`.** Deliberate; use policies.
-- **`ctx.user` is `Identity | null` even inside a guarded route.** The guard makes it present at
-  runtime, but the type is not yet narrowed by the `auth` key. Use `requireUser(ctx.user)` where
-  you want a non-null type.
+- **Narrowing needs the route's schema.** Inside a route declaring `auth: true` or a policy name,
+  `ctx.user` **is** narrowed to non-null — delete the guard and the code stops compiling. On a
+  route with no guard it stays `Identity | null`, correctly, because an anonymous request can
+  reach it. In a plain middleware, where there is no schema to read, use `requireUser(ctx.user)`.

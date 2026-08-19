@@ -203,7 +203,9 @@ const debug = env.bool('DEBUG', false)   // DEBUG=false is false, not truthy
 `oven doctor` checks that a `.env` and `.env.example` agree. See
 [Environment variables](/docs/reference/env/) for the full reader and for `defineEnv`.
 
-## Not built yet
+## Commands that need a brick
 
-`oven db` and `oven worker` need `@theoven/db` and `@theoven/queue`. They report that rather
-than looking like a typo you made.
+`oven db` needs a migration toolchain in the project and `oven worker` needs the
+[`queue`](/docs/bricks/queue/) brick registered. Neither guesses: a project without one gets a
+sentence saying what is missing and what to add, rather than an error that looks like a typo you
+made.

@@ -1,0 +1,161 @@
+---
+title: Deployment
+description: Build it, put it in a container, and know what to check before you call it done.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+## Build
+
+```bash
+oven build
+```
+
+Two things happen, in this order:
+
+<Steps>
+
+1. A **route manifest** is written to `.oven/routes.ts` with a static import per route file, so
+   production neither walks the filesystem at boot nor imports anything dynamically.
+
+2. `Bun.build` bundles the app, targeting Bun. Output is a single `dist/index.js` — dependencies
+   included.
+
+</Steps>
+
+```bash
+oven start          # runs dist/index.js
+bun dist/index.js   # the same thing, no CLI needed at runtime
+```
+
+That second line is the useful one for a container: the built output has no dependency on
+`@theoven/cli`, so a production image does not need it.
+
+## Dockerfile
+
+```dockerfile
+FROM oven/bun:1 AS build
+WORKDIR /app
+
+# Dependencies first, so a code change does not re-download them.
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY . .
+RUN bunx oven build
+
+FROM oven/bun:1-slim
+WORKDIR /app
+
+# Only the bundle. No node_modules, no sources, no CLI.
+COPY --from=build /app/dist ./dist
+
+# Never run as root.
+USER bun
+EXPOSE 3000
+CMD ["bun", "dist/index.js"]
+```
+
+<Aside type="note" title="`oven/bun` is Bun's image, not ours">
+  The naming collision is unfortunate and entirely coincidental — `oven-sh` is Bun's GitHub
+  organisation. `oven/bun:1` is the official Bun image.
+</Aside>
+
+If your app uses `bun:sqlite` with a file, mount a volume for it. A database inside the image is
+a database that resets on every deploy.
+
+## Configuration
+
+Read everything through [`env`](/docs/reference/env/), in one module, at boot:
+
+```ts title="src/env.ts"
+export const config = {
+  port: env.port('PORT', 3000),
+  databaseUrl: env.string('DATABASE_URL'),
+  authSecret: env.string('AUTH_SECRET'),
+}
+```
+
+A missing variable then fails at **startup**, with a message naming it — instead of at 3am as
+`undefined` somewhere unrelated. That is the whole reason the readers throw rather than returning
+a default.
+
+`oven doctor` checks the same things before you deploy, and says what to do about each.
+
+## Production refuses development defaults
+
+Three bricks deliberately fail to boot outside development rather than working badly:
+
+| Brick | Refused | Because |
+| --- | --- | --- |
+| [`mail`](/docs/bricks/mail/) | the `console` driver | reset links printed to a log look healthy while nobody can reset their password |
+| [`storage`](/docs/bricks/storage/) | the `disk` driver | uploads on a container filesystem vanish on the next deploy |
+| [`queue`](/docs/bricks/queue/) | the `memory` driver | a deploy silently drops every queued email |
+
+Each takes an explicit `allow…InProduction` escape hatch. Each failure names itself and says what
+to configure. This is the shape of bug that is invisible until it is expensive, so it is a boot
+error instead.
+
+Oven is in production mode when `NODE_ENV=production`, or when you pass
+`createApp({ development: false })`.
+
+## Health checks and shutdown
+
+```ts title="src/routes/health.get.ts"
+export default () => ({ status: 'healthy' })
+```
+
+For a check that means something, ask the database:
+
+```ts
+import { checkHealth } from '@theoven/db'
+
+export default async (ctx) => {
+  const database = await checkHealth(ctx.db)
+  ctx.status = database ? 200 : 503
+  return { status: database ? 'healthy' : 'degraded', database }
+}
+```
+
+`checkHealth` issues a real query. A check that reports whether a pool *object* exists cannot
+fail, and a health check that cannot fail is not a health check.
+
+**Shutdown is already handled.** SIGTERM stops accepting connections, waits for in-flight requests,
+drains the queue worker, then closes every brick's resources. Give your platform a grace period
+longer than your slowest request — 30 seconds is a reasonable default — or it will `SIGKILL`
+mid-drain and undo the point.
+
+## Workers
+
+The queue worker runs in your app process in development and not in production, so scale them
+separately:
+
+```dockerfile
+# Same image, different command.
+CMD ["bunx", "oven", "worker", "--concurrency", "20"]
+```
+
+That one needs `@theoven/cli` in the image, since it imports your app module rather than the
+bundle. `oven worker --once` drains and exits, which is what a cron container wants.
+
+## Platforms
+
+**Fly.io** — `fly launch` detects the Dockerfile. Set secrets with `fly secrets set`, and put
+`[[services]]` health checks on `/health`.
+
+**Railway / Render** — point them at the Dockerfile. Both send SIGTERM and wait, which is what
+graceful shutdown needs.
+
+**Anywhere with a container runtime** works. There is no serverless adapter: Oven assumes a
+long-lived process with a real filesystem, brick lifecycles and a queue worker, and pretending
+otherwise would mean a second set of semantics for the same API.
+
+## Before you call it done
+
+- `oven doctor` passes
+- `NODE_ENV=production` is set — several safety checks are keyed on it
+- `AUTH_SECRET` comes from a secret store, not the image
+- Migrations run as a release step, not at boot from every replica at once
+- Health check points at a route that actually queries something
+- Shutdown grace period exceeds your slowest request
+- A volume is mounted for any SQLite file

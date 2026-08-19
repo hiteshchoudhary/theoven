@@ -1,0 +1,43 @@
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+    # Only when the site or what builds it changes. A package-only commit does not need a deploy.
+    paths:
+      - 'apps/web/**'
+      - 'apps/landing/**'
+      - 'scripts/build-site.sh'
+      - 'scripts/check-links.mjs'
+      - 'scripts/check-docs.mjs'
+      - 'scripts/generate-llms.mjs'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+# A second push while a deploy is running should supersede it, not queue behind it.
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # Builds the landing page and docs into ./dist, generates llms.txt, checks every code
+      # sample and every internal link. A broken link fails here rather than in production.
+      - name: Build the site
+        run: bash scripts/build-site.sh
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=theoven --branch=main

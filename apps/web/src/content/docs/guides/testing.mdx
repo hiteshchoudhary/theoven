@@ -1,0 +1,202 @@
+---
+title: Testing
+description: Test an Oven app the way a client uses it — no server, no port, no mocks.
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+`app.fetch(request)` runs the whole pipeline — routing, middleware, brick hooks, validation,
+guards, the handler, serialisation — and returns a `Response`. No port is bound and nothing is
+mocked.
+
+```ts title="src/app.test.ts"
+import { expect, test } from 'bun:test'
+import app from './app'
+
+test('it answers', async () => {
+  const response = await app.fetch(new Request('http://localhost/health'))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ ok: true })
+})
+```
+
+That is the whole idea. Everything below is detail.
+
+## Set the app up once
+
+```ts
+import { afterAll, beforeAll } from 'bun:test'
+import app from './app'
+
+beforeAll(() => app.ready())
+afterAll(() => app.close({ timeout: 1000 }))
+
+const send = (path: string, init?: RequestInit) =>
+  app.fetch(new Request(`http://localhost${path}`, init))
+```
+
+`ready()` runs every brick's `setup()` — connecting the database, compiling models, mounting auth
+routes. `close()` releases them, which matters in a watcher: without it each re-run leaks a
+connection until the database refuses new ones.
+
+<Aside type="caution" title="Keep listen() out of app.ts">
+  The scaffold splits `app.ts` (builds and exports) from `index.ts` (calls `listen`) precisely so
+  a test can import the app without binding a port. If your app listens on import, every test file
+  fights for port 3000.
+</Aside>
+
+## Test through the pipeline, not around it
+
+```ts
+// This tests your application.
+const response = await send('/notes', { method: 'POST', body })
+
+// This tests a function, and skips routing, validation, the guard and serialisation.
+const result = await handler(fakeContext)
+```
+
+The second is where "it worked in the test" comes from. Validation, guards and error mapping are
+the parts most likely to be wrong, and calling a handler directly is exactly the shape that
+misses them.
+
+## Bodies
+
+```ts
+function json(path: string, body: unknown, token?: string) {
+  return send(path, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+}
+```
+
+Uploads are `FormData`, with no special handling:
+
+```ts
+const form = new FormData()
+form.set('title', 'With a file')
+form.set('file', new File(['bytes'], 'note.txt', { type: 'text/plain' }))
+
+const response = await send('/notes', { method: 'POST', body: form })
+```
+
+## Assert on failures, not only successes
+
+The interesting assertions are the refusals:
+
+```ts
+test('an invalid body is a 422 naming the field', async () => {
+  const response = await json('/users', { name: '' })
+
+  expect(response.status).toBe(422)
+  const problem = await response.json()
+  expect(problem.errors[0]).toMatchObject({ location: 'body', path: 'name' })
+})
+
+test('a guarded route refuses an anonymous request', async () => {
+  expect((await send('/me')).status).toBe(401)
+})
+```
+
+Errors are [RFC 9457](/docs/tutorial/errors/), so `content-type` is `application/problem+json` and
+the body has `type`, `title`, `status` and `detail`. Assert on the field name, not on the message
+text — messages get reworded, and a test that breaks when prose changes gets deleted.
+
+## A database per test file
+
+`bun:sqlite` in memory is fast enough that a test file can have its own database:
+
+```ts
+import { Database } from 'bun:sqlite'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import * as schema from './schema'
+
+const sqlite = new Database(':memory:')
+sqlite.exec(MIGRATION)
+
+const client = drizzle(sqlite, { schema })
+```
+
+<Aside type="caution" title="Two `:memory:` connections are two databases">
+  If something needs a client before the app exists — `auth-basic` does — hand the brick your
+  connection with `drizzleSqlite({ client: sqlite })` rather than letting it open its own. Two
+  connections to a file merely waste a handle; two to `:memory:` are two separate databases, and
+  the symptom is `no such table` on a schema you can watch being created.
+</Aside>
+
+## Mail, without sending mail
+
+```ts
+import { mail, memoryMail } from '@theoven/mail'
+
+const driver = memoryMail()
+const app = createApp().use(mail(driver))
+
+await send('/auth/forgot-password', { method: 'POST', body })
+
+expect(driver.sent[0]?.to).toBe('ada@example.com')
+expect(driver.sent[0]?.text).toContain('/reset?token=')
+```
+
+`memoryMail()` collects messages instead of sending them. That is how you test a password-reset
+flow end to end — including the token in the link — with no mail server.
+
+## Jobs, run on demand
+
+```ts
+import { createWorker } from '@theoven/queue'
+
+const worker = createWorker(
+  app.service('queue').raw,
+  app.service('queue').jobs,
+  { logger: app.logger },
+)
+
+await send('/notes', { method: 'POST', body })   // enqueues
+await worker.drain()                             // runs everything currently runnable
+
+expect(await app.service('queue').dead(10)).toHaveLength(0)
+```
+
+`drain()` runs until nothing more is runnable and returns how many jobs it processed — so a job
+that enqueues another is handled in the same call. Nothing polls, so a test never waits on a
+timer.
+
+## Silence the logger
+
+```ts
+import { createApp, silentLogger } from '@theoven/core'
+
+const app = createApp({ logger: silentLogger })
+```
+
+Worth doing for any test that deliberately triggers an error, or your passing suite prints a wall
+of red stack traces.
+
+## Reaching a brick outside a request
+
+```ts
+await app.ready()
+
+const db = app.service('db')       // the same client a request sees
+const queue = app.service('queue')
+```
+
+Seeding a database or asserting on stored rows does not need a request. `app.service()` is typed
+from what `.use()` contributed, so a name you never registered is a compile error.
+
+## What Oven's own suite does
+
+The repository's `examples/kitchen-sink` registers **every** brick in one app and drives it
+through `fetch`. Unit tests in each package prove each brick works; that one proves they compose,
+and it has caught three bugs no unit test could have — including guarded routes being documented
+as public, and two bricks silently opening separate in-memory databases.
+
+If you take one habit from it: **verify that a test can fail.** Break the thing on purpose and
+watch the assertion go red. A test that cannot fail is a comment with a runtime cost, and every
+suite has a few.

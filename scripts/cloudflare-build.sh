@@ -15,6 +15,11 @@
 # So we set SKIP_DEPENDENCY_INSTALL=1 in the Pages environment and drive Bun ourselves here.
 # Keeping it in the repo means the fix is reviewable and survives someone editing the dashboard.
 #
+# SUPERSEDED by .github/workflows/deploy.yml, which builds on a GitHub runner and publishes with
+# Wrangler. That removes the dependency on a dashboard setting entirely — the reason this script
+# existed was a Pages build-image behaviour we could only work around from inside it. Kept so the
+# Pages-native path still works if the Wrangler credentials are ever unavailable.
+#
 # Pages settings that go with this file:
 #   Build command:           bash scripts/cloudflare-build.sh
 #   Build output directory:  dist

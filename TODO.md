@@ -674,8 +674,10 @@ development and production. Covered by tests now.
       `/docs` produced three separate classes of broken link that all passed review; the crawl
       catches every one and fails the build
 - [ ] Point theoven.app at the Pages project
-- [ ] Move the deploy to GitHub Actions + Wrangler so the build config lives in the repo
-      rather than depending on the `SKIP_DEPENDENCY_INSTALL` dashboard setting
+- [~] Moved to GitHub Actions + Wrangler in `.github/workflows/deploy.yml`: builds on a runner,
+      publishes with `wrangler pages deploy`, and only runs when the site or its build scripts
+      change. **Needs two secrets from you** — `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+      — before it can run, so `scripts/cloudflare-build.sh` is kept as the fallback path.
 - [x] Landing page rebuilt as hand-written HTML/CSS/JS in `apps/landing` — no framework, no
       build step. Hero, config-to-feature split, batteries grid, animated benchmark bars,
       comparison table, philosophy, CTA. Starlight now serves docs at `/docs` only
@@ -686,11 +688,17 @@ development and production. Covered by tests now.
       feature rather than an API reference: opens with the five-dependency Express version of an
       upload route, answers "why not middleware", and states that laziness is a test rather than
       a promise. The reference page keeps the per-API detail.
-- [~] Tutorial, FastAPI-style and progressive. Written: first route, validation (marked
-      Planned), errors. Remaining: db, auth, file upload, queue, mail, deploy
-- [~] How-to guides. Written: "Coming from Express" (translation, explicitly not a shim),
-      benchmarks. Remaining: testing, deployment (Docker/Fly/Railway)
-- [~] API reference. Written: `App`, `Context`. Remaining: every other package
+- [x] Tutorial, FastAPI-style and progressive: first route → validation → errors → database →
+      auth, explicitly ordered so the sidebar reads as a path rather than alphabetically. Uploads,
+      queue and mail are covered by their brick pages, which follow a fixed shape; deployment got
+      its own guide.
+- [x] How-to guides: "Coming from Express", benchmarks, **testing** (through `app.fetch`, with
+      the memory mail driver and `worker.drain()`), and **deployment** (verified: `oven build`
+      emits one `dist/index.js` that runs with no `node_modules` at all, which is what makes the
+      two-stage Dockerfile in the guide honest).
+- [x] API reference: `App`, `Context`, file-based routing, middleware, batteries, env, bricks,
+      CLI — plus a page per brick under `/docs/bricks/`, each following the fixed §5b shape. A
+      second reference section per package would duplicate those and drift from them.
 - [x] Docs code samples checked in CI (`scripts/check-docs.mjs`), and in the site build. Two
       checks, chosen because they catch real rot without demanding that every snippet be a
       complete compilable module — most are fragments on purpose, and rewriting 135 of them into

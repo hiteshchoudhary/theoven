@@ -1,0 +1,171 @@
+---
+title: 5. Auth
+description: Signup, login and guarded routes — eight endpoints you do not write.
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+Authentication is the part of a project most likely to be written badly, because it is the part
+everyone writes from memory at the end of a long day. So Oven ships it.
+
+## Add the brick
+
+```bash
+bun add @theoven/auth @theoven/auth-basic
+```
+
+```ts title="src/app.ts"
+import { auth } from '@theoven/auth'
+import { basicAuth } from '@theoven/auth-basic'
+import { db } from '@theoven/db'
+import { drizzleSqlite } from '@theoven/db-drizzle'
+import { Database } from 'bun:sqlite'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import * as schema from './schema'
+
+// One connection, shared: auth-basic builds its store before the app exists, and two
+// connections to `:memory:` would be two separate databases.
+const sqlite = new Database('./data.db')
+const client = drizzle(sqlite, { schema })
+
+export const app = createApp()
+  .use(db(drizzleSqlite({ client: sqlite, schema })))
+  .use(auth(basicAuth({ db: client, secret: env.string('AUTH_SECRET') })))
+```
+
+```ts title="src/schema.ts"
+// Your tables, plus the three auth-basic owns — so `oven db generate` writes migrations for
+// them too. Without this line, signup fails at runtime with "no such table: auth_users".
+export * from '@theoven/auth-basic/schema'
+```
+
+```bash
+oven db generate && oven db migrate
+```
+
+## What you just got
+
+Eight endpoints, mounted at `/auth`:
+
+| | |
+| --- | --- |
+| `POST /auth/signup` | name, email, password |
+| `POST /auth/login` | returns an access token, sets a refresh cookie |
+| `POST /auth/refresh` | rotates both |
+| `POST /auth/logout` | genuinely revokes the session |
+| `GET /auth/me` | the signed-in user |
+| `POST /auth/change-password` | signs every other session out |
+| `POST /auth/forgot-password` | emails a single-use link |
+| `POST /auth/reset-password` | redeems it |
+
+```bash
+curl -X POST localhost:3000/auth/signup \
+  -H 'content-type: application/json' \
+  -d '{"name":"Ada","email":"ada@example.com","password":"correct-horse"}'
+```
+
+There is no `AUTH_SECRET` default, and the brick refuses to construct without one. A framework
+that invents a signing secret has invented a secret every deployment shares.
+
+## Guarding a route
+
+```ts title="src/routes/notes/index.post.ts"
+export default route(
+  { auth: true, body: z.object({ title: z.string().min(1) }) },
+  async (ctx) => {
+    const [note] = await ctx.db
+      .insert(notes)
+      .values({ id: crypto.randomUUID(), authorId: ctx.user.id, title: ctx.body.title, createdAt: new Date() })
+      .returning()
+
+    ctx.status = 201
+    return note
+  },
+)
+```
+
+Two things worth noticing.
+
+`ctx.user.id` — no null check. The guard runs before the handler, so a route declaring
+`auth: true` is unreachable anonymously, and TypeScript **narrows `ctx.user` to non-null inside
+it**. Delete `auth: true` and that line stops compiling.
+
+The route says nothing about tokens. Where the credential came from — `Authorization`, a cookie,
+`?token=` — is core's business, and which provider validated it is the brick's.
+
+## More than "signed in"
+
+```ts title="src/app.ts"
+const policies = {
+  admin: (user) => user.raw.role === 'admin',
+  owner: (user, ctx) => ctx.params.id === user.id,
+}
+
+app.use(auth(basicAuth({ db: client, secret }), { policies }))
+```
+
+```ts
+export default route({ auth: 'admin' }, (ctx) => deleteEverything())
+```
+
+A policy is a plain function: testable, greppable, and named in the OpenAPI document — a guarded
+operation carries `security`, a `401`, and for a named policy its name and a `403`.
+
+<Aside type="note" title="Why not `role: 'admin'`?">
+  Because roles are not normalised across providers. A portable `role` guard would fail silently
+  on Clerk, or on any provider that models permissions differently. A function you wrote cannot
+  fail that way — and when it does fail, you can read it.
+</Aside>
+
+## Password reset, working today
+
+```ts
+basicAuth({
+  db: client,
+  secret: env.string('AUTH_SECRET'),
+  sendResetEmail: async (to, token) => {
+    await mailer.send({ to, subject: 'Reset your password', text: `${config.appUrl}/reset?token=${token}` })
+  },
+})
+```
+
+With the [`mail`](/docs/bricks/mail/) brick registered and no provider configured, the link prints
+to your terminal — so the whole flow works before you have signed up for anything. Read it at
+`/_oven/mail`.
+
+## What it does that you would have forgotten
+
+- **Login does not reveal which emails exist.** A wrong password and an unknown address return
+  identical bodies, identical statuses, and comparable timing — an unknown email still pays a
+  full argon2 verification against a decoy hash.
+- **Logout genuinely revokes.** The access token is short-lived; the refresh token is a database
+  row that gets deleted. A stateless-only design would make logout a suggestion.
+- **Reset tokens are single-use, expiring, and stored hashed.** Redeeming one signs every session
+  out.
+- **Changing a password signs every other session out**, because someone changing a password
+  usually believes an account is compromised.
+- **Login, signup and reset are rate limited** by default, on both IP *and* email — either key
+  alone leaves a hole.
+
+Each of those has a test, including the enumeration and token-reuse cases.
+
+## A different provider
+
+The contract is the same whichever you pick:
+
+| | |
+| --- | --- |
+| [`auth-basic`](/docs/bricks/auth-basic/) | email and password, on Drizzle |
+| [`auth-mongo`](/docs/bricks/auth-mongo/) | the same flows, on Mongoose |
+| [`auth-clerk`](/docs/bricks/auth-clerk/) | Clerk-hosted sign-in; mounts nothing |
+| [`auth-better`](/docs/bricks/auth-better/) | better-auth, with all its own routes |
+
+`auth: true` and your policies keep working across all four. What changes is one line in
+`app.ts`.
+
+## Next
+
+- [Testing](/docs/guides/testing/) — including a password-reset flow, token and all
+- [Deployment](/docs/guides/deployment/) — and what production refuses to boot with
