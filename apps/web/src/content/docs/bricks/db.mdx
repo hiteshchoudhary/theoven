@@ -94,6 +94,29 @@ Portable across providers. You can equally use the ORM's own form — `ctx.db.tr
 A provider without transaction support **refuses** rather than running the work unwrapped. Work
 that silently escapes its transaction is the failure nobody notices until the data is wrong.
 
+### One transaction per request
+
+For endpoints where a half-written request is worse than a failed one, wrap the whole thing:
+
+```ts
+import { transactional } from '@theoven/db'
+
+app.use('/admin', transactional())
+```
+
+`ctx.db` becomes the transaction-scoped client for the duration, so handlers need no change. A
+request that throws — from a handler, from validation, from another middleware inside it — rolls
+back everything it wrote.
+
+<Aside type="caution" title="Scope it">
+  This is middleware rather than a `db()` option so the scope is explicit. Applied globally it
+  holds a transaction open for the length of every request, including the slow ones that call an
+  external API, which is how a connection pool runs out. Put it on the routes that write.
+</Aside>
+
+Added to an app with no database brick, it does nothing rather than failing — so the line is
+safe to leave in a template.
+
 ## Writing a provider
 
 Four methods:

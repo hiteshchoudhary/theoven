@@ -43,6 +43,7 @@
       "version": "0.0.0",
       "devDependencies": {
         "@theoven/core": "workspace:*",
+        "zod": "^4.4.3",
       },
       "peerDependencies": {
         "@theoven/core": "workspace:*",

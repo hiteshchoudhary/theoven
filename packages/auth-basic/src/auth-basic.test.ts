@@ -431,6 +431,123 @@ describe('password reset', () => {
   })
 })
 
+/**
+ * These are the endpoints that actually get attacked, so the limits are on by default. Keyed by
+ * both IP and email: by IP alone a distributed attempt on one account walks through, and by
+ * email alone one host can spray the whole user table.
+ */
+describe('rate limiting', () => {
+  async function limited(overrides = {}) {
+    const sqlite = new Database(':memory:')
+    sqlite.exec(MIGRATION)
+    const client = drizzle(sqlite, { schema: authSchema })
+
+    const app = createApp({ logger: silentLogger, development: true }).use(
+      auth(
+        basicAuth({
+          db: client,
+          secret: 'rate-limit-secret',
+          rateLimit: { login: 3, signup: 2, forgotPassword: 2, window: 60_000, ...overrides },
+        }),
+      ),
+    )
+    opened.push(app)
+    await app.ready()
+    return app
+  }
+
+  test('login is throttled after repeated failures', async () => {
+    const app = await limited()
+    await post(app, '/auth/signup', CREDENTIALS)
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await post(app, '/auth/login', {
+        email: CREDENTIALS.email,
+        password: 'wrong',
+      })
+      expect(response.status).toBe(401)
+    }
+
+    const blocked = await post(app, '/auth/login', {
+      email: CREDENTIALS.email,
+      password: 'wrong',
+    })
+    expect(blocked.status).toBe(429)
+    expect(blocked.headers.get('retry-after')).toBeTruthy()
+  })
+
+  // Otherwise one host walks through the user table one account at a time.
+  test('the limit follows the email, not only the caller', async () => {
+    const app = await limited()
+    await post(app, '/auth/signup', CREDENTIALS)
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await post(app, '/auth/login', { email: CREDENTIALS.email, password: 'wrong' })
+    }
+
+    // Even the correct password is refused while the window is open.
+    const correct = await post(app, '/auth/login', {
+      email: CREDENTIALS.email,
+      password: CREDENTIALS.password,
+    })
+    expect(correct.status).toBe(429)
+  })
+
+  test('signup is throttled', async () => {
+    const app = await limited()
+    await post(app, '/auth/signup', { ...CREDENTIALS, email: 'one@example.com' })
+    await post(app, '/auth/signup', { ...CREDENTIALS, email: 'two@example.com' })
+
+    const third = await post(app, '/auth/signup', { ...CREDENTIALS, email: 'three@example.com' })
+    expect(third.status).toBe(429)
+  })
+
+  test('password-reset requests are throttled', async () => {
+    const app = await limited()
+    await post(app, '/auth/signup', CREDENTIALS)
+
+    await post(app, '/auth/forgot-password', { email: CREDENTIALS.email })
+    await post(app, '/auth/forgot-password', { email: CREDENTIALS.email })
+
+    const third = await post(app, '/auth/forgot-password', { email: CREDENTIALS.email })
+    expect(third.status).toBe(429)
+  })
+
+  test('a generous limit does not interfere with normal use', async () => {
+    const app = await limited({ login: 50 })
+    await post(app, '/auth/signup', CREDENTIALS)
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const response = await post(app, '/auth/login', {
+        email: CREDENTIALS.email,
+        password: CREDENTIALS.password,
+      })
+      expect(response.status).toBe(200)
+    }
+  })
+
+  test('it can be turned off', async () => {
+    const sqlite = new Database(':memory:')
+    sqlite.exec(MIGRATION)
+    const client = drizzle(sqlite, { schema: authSchema })
+
+    const app = createApp({ logger: silentLogger, development: true }).use(
+      auth(basicAuth({ db: client, secret: 'no-limit', rateLimit: false })),
+    )
+    opened.push(app)
+    await app.ready()
+    await post(app, '/auth/signup', CREDENTIALS)
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const response = await post(app, '/auth/login', {
+        email: CREDENTIALS.email,
+        password: 'wrong',
+      })
+      expect(response.status).toBe(401)
+    }
+  })
+})
+
 describe('storage', () => {
   test('tokens are stored hashed, never in the clear', async () => {
     const sqlite = new Database(':memory:')

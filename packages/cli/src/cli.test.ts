@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { boolFlag, parseArgs, stringFlag } from './args'
 import { checkTarget, validateProjectName } from './commands/create'
+import { detectToolchain, isSubcommand } from './commands/db'
 import {
   checkAppModule,
   checkBunVersion,
@@ -382,5 +383,48 @@ describe('routeTable rendering', () => {
 
   test('says so when there are none', () => {
     expect(routeTable([])).toContain('no routes')
+  })
+})
+
+/**
+ * `oven db` delegates to whatever migration tool the project already uses. The part worth
+ * testing is the detection and the name translation — spawning drizzle-kit is drizzle-kit's job.
+ */
+describe('database toolchain detection', () => {
+  test('a drizzle config is recognised', async () => {
+    const root = await project({ 'drizzle.config.ts': 'export default {}' })
+    expect(detectToolchain(root)?.name).toBe('drizzle')
+  })
+
+  test('a prisma schema is recognised', async () => {
+    const root = await project({ 'prisma/schema.prisma': 'datasource db {}' })
+    expect(detectToolchain(root)?.name).toBe('prisma')
+  })
+
+  test('a project with neither is reported rather than guessed at', async () => {
+    const root = await project({ 'package.json': '{}' })
+    expect(detectToolchain(root)).toBeUndefined()
+  })
+
+  // The same command name has to reach two tools that spell it differently.
+  test('subcommands translate per toolchain', async () => {
+    const drizzle = detectToolchain(await project({ 'drizzle.config.ts': '' }))
+    const prisma = detectToolchain(await project({ 'prisma/schema.prisma': '' }))
+
+    expect(drizzle?.translate('migrate')).toBe('migrate')
+    expect(prisma?.translate('migrate')).toBe('migrate deploy')
+    expect(prisma?.translate('push')).toBe('db push')
+  })
+
+  // Better to say so than to run something that looks similar.
+  test('a subcommand with no equivalent translates to null', async () => {
+    const prisma = detectToolchain(await project({ 'prisma/schema.prisma': '' }))
+    expect(prisma?.translate('drop')).toBeNull()
+  })
+
+  test('unknown subcommands are rejected', () => {
+    expect(isSubcommand('migrate')).toBe(true)
+    expect(isSubcommand('mgrate')).toBe(false)
+    expect(isSubcommand(undefined)).toBe(false)
   })
 })

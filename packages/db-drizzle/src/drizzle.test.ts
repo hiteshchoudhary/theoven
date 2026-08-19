@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createApp, silentLogger } from '@theoven/core'
-import { checkHealth, db, transaction } from '@theoven/db'
+import { checkHealth, db, transaction, transactional } from '@theoven/db'
 import { sql } from 'drizzle-orm'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { drizzleSqlite } from './sqlite'
@@ -239,5 +239,79 @@ describe('sqlite tuning', () => {
     }))
 
     expect(await (await send(app, '/fk')).json()).toEqual({ foreignKeys: 0 })
+  })
+})
+
+/**
+ * Wrapping a whole request in a transaction: handlers are unchanged, and a request that throws
+ * leaves nothing behind.
+ */
+describe('transactional middleware', () => {
+  test('a failed request rolls back everything it wrote', async () => {
+    const app = await withDatabase()
+    app.use(transactional())
+
+    app.post('/setup', (ctx) => {
+      ctx.db.run(sql`create table users (id text primary key, name text not null, age integer)`)
+      return null
+    })
+    app.post('/fail', async (ctx) => {
+      await ctx.db.insert(users).values({ id: '1', name: 'Ada' })
+      throw new Error('something went wrong after the write')
+    })
+    app.get('/count', async (ctx) => ctx.db.select().from(users))
+
+    await send(app, '/setup', { method: 'POST' })
+    expect((await send(app, '/fail', { method: 'POST' })).status).toBe(500)
+    expect(await (await send(app, '/count')).json()).toEqual([])
+  })
+
+  test('a successful request commits', async () => {
+    const app = await withDatabase()
+    app.use(transactional())
+
+    app.post('/setup', (ctx) => {
+      ctx.db.run(sql`create table users (id text primary key, name text not null, age integer)`)
+      return null
+    })
+    app.post('/ok', async (ctx) => {
+      await ctx.db.insert(users).values({ id: '1', name: 'Ada' })
+      return { written: true }
+    })
+    app.get('/count', async (ctx) => ctx.db.select().from(users))
+
+    await send(app, '/setup', { method: 'POST' })
+    await send(app, '/ok', { method: 'POST' })
+    expect(await (await send(app, '/count')).json()).toHaveLength(1)
+  })
+
+  test('it can be scoped to a path', async () => {
+    const app = await withDatabase()
+    app.use('/admin', transactional())
+
+    app.post('/setup', (ctx) => {
+      ctx.db.run(sql`create table users (id text primary key, name text not null, age integer)`)
+      return null
+    })
+    // Outside the prefix, so no transaction wraps it and the write survives the throw.
+    app.post('/public/fail', async (ctx) => {
+      await ctx.db.insert(users).values({ id: '2', name: 'Grace' })
+      throw new Error('failed')
+    })
+    app.get('/count', async (ctx) => ctx.db.select().from(users))
+
+    await send(app, '/setup', { method: 'POST' })
+    await send(app, '/public/fail', { method: 'POST' })
+    expect(await (await send(app, '/count')).json()).toHaveLength(1)
+  })
+
+  // Adding the line optimistically should not break an app that has no database.
+  test('it does nothing when no database brick is registered', async () => {
+    const app = createApp({ logger: silentLogger })
+    opened.push(app)
+    app.use(transactional())
+    app.get('/x', () => 'ok')
+
+    expect(await (await send(app, '/x')).text()).toBe('ok')
   })
 })

@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, expectTypeOf, test } from 'bun:test'
 import { createApp, silentLogger } from '@theoven/core'
+import { z } from 'zod'
 import { AuthConfigurationError, auth, requireUser } from './brick'
 import {
   hashPassword,
@@ -479,6 +480,8 @@ function send(
 
 const ada: Identity<FakeUser> = { id: 'u1', email: 'ada@example.com', raw: { role: 'admin' } }
 
+const zObject = z.object({ title: z.string() })
+
 describe('the brick', () => {
   test('puts the identity on the context', async () => {
     const app = makeApp(ada)
@@ -639,6 +642,60 @@ describe('capabilities', () => {
     )
     opened.push(app)
     expect((await send(app, '/identity/status')).status).toBe(200)
+  })
+})
+
+/**
+ * A guarded route is unreachable while anonymous, so `ctx.user` cannot be null inside it.
+ * Making every guarded handler write `ctx.user!.id` would be the type system lying in the safe
+ * direction.
+ */
+describe('user narrowing', () => {
+  test('a guarded route sees a non-null user', () => {
+    const app = createApp({ logger: silentLogger }).use(auth(fakeProvider(ada)))
+
+    app.get('/private', { auth: true }, (ctx) => {
+      // No `?.` and no `!` — this is the point of the narrowing.
+      expectTypeOf(ctx.user.id).toEqualTypeOf<string>()
+      return null
+    })
+  })
+
+  test('a policy route narrows too', () => {
+    const app = createApp({ logger: silentLogger }).use(auth(fakeProvider(ada)))
+
+    app.get('/admin', { auth: 'admin' }, (ctx) => {
+      expectTypeOf(ctx.user.id).toEqualTypeOf<string>()
+      return null
+    })
+  })
+
+  test('an unguarded route keeps user nullable', () => {
+    const app = createApp({ logger: silentLogger }).use(auth(fakeProvider(ada)))
+
+    app.get('/public', { summary: 'open' }, (ctx) => {
+      expectTypeOf(ctx.user).toEqualTypeOf<Identity<FakeUser> | null>()
+      return null
+    })
+  })
+
+  test('auth: false keeps user nullable', () => {
+    const app = createApp({ logger: silentLogger }).use(auth(fakeProvider(ada)))
+
+    app.get('/public', { auth: false }, (ctx) => {
+      expectTypeOf(ctx.user).toEqualTypeOf<Identity<FakeUser> | null>()
+      return null
+    })
+  })
+
+  test('narrowing composes with body validation', () => {
+    const app = createApp({ logger: silentLogger }).use(auth(fakeProvider(ada)))
+
+    app.post('/posts', { auth: true, body: zObject }, (ctx) => {
+      expectTypeOf(ctx.user.id).toEqualTypeOf<string>()
+      expectTypeOf(ctx.body).toEqualTypeOf<{ title: string }>()
+      return null
+    })
   })
 })
 

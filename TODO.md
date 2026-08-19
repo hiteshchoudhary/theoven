@@ -140,8 +140,10 @@ shadowed the method on the instance. Renamed to `settings`, with a comment so it
 - [x] Per-file limit, total limit, file-count limit, MIME allowlist with `image/*` wildcards
       → `413`/`415`
 - [x] Tests including a path-traversal filename, which is preserved verbatim and never resolved
-- [ ] Zod integration (`z.file()`) — waits on §1.6
-- [ ] Direct handoff to `@theoven/storage` without a round trip through memory — waits on §3.1
+- [x] Zod integration: `z.file()` validates a real multipart upload end to end, including
+      size constraints and a text field sent where a file was declared
+- [ ] Direct handoff to `@theoven/storage` without a round trip through memory — genuinely
+      blocked: the storage brick does not exist yet (§3.1)
 
 **Cookies** (replaces `cookie-parser`)
 - [x] `ctx.cookies.get/has/all/set/delete`, lazily parsed
@@ -199,7 +201,7 @@ arrived as the bare word `Bearer` and was captured as a token whose value was li
 - [x] Async errors caught automatically (§1.2)
 - [x] Built-ins, configured not installed: CORS, security headers, rate limiting, request
       logging, compression
-- [ ] Directory-scoped `_middleware.ts` — belongs with file-based routing in §1.8
+- [x] Directory-scoped `_middleware.ts` — landed with §1.8, outermost first, boundary-safe
 
 **Note:** Bun has no `CompressionStream`, so compression uses `Bun.gzipSync` and deliberately
 passes streaming responses through untouched. Buffering a stream to compress it would stop
@@ -256,12 +258,16 @@ silently breaks a `z.string()` field that legitimately holds digits — an order
 code, a phone number. Every Standard Schema library ships coercion of its own, so the framework
 guessing adds risk without adding capability.
 
-### 1.7 Errors
-- [ ] `OvenError` base + `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Payload TooLarge`, `UnsupportedMediaType`, `TooManyRequests`, `Internal`
-- [ ] RFC 9457 problem+json serialisation
-- [ ] Dev vs prod output — stack traces and internal messages never leak in prod
-- [ ] Global `onError` override
-- [ ] Tests, including a redaction test for tokens/passwords/cookies in error output
+### 1.7 Errors ✅
+
+Landed with §1.2 and verified here rather than assumed.
+
+- [x] `OvenError` base plus twelve subclasses — `BadRequest` through `ServiceUnavailable`
+- [x] RFC 9457 problem+json serialisation, with extension members for validation detail
+- [x] Dev vs prod output: internal messages and stacks never reach the client in production,
+      asserted by a test that a connection string cannot appear in a 500
+- [x] Global `onError` override that cannot mask the original failure when it throws itself
+- [x] Redaction tests: neither a bearer token nor a session cookie can reach an error response
 
 ### 1.8 File-based routing ✅
 
@@ -278,8 +284,8 @@ guessing adds risk without adding capability.
       catch-all (`[..path]`), an unmatched bracket, a non-function default export
 - [x] Build-time manifest with static imports (`generateManifest`), so production neither scans
       the filesystem at boot nor hides route modules from the bundler
-- [ ] Dev hot reload — deferred to `oven dev` in Phase 4, where the process supervisor lives.
-      `loadRoutes` already accepts a `cacheBust` option for it
+- [x] Dev reload — `oven dev` runs the app under a watcher and restarts on change. Restart
+      rather than in-place patching: see Phase 4 for why correctness beats the milliseconds
 
 ### 1.9 OpenAPI + docs UI ✅
 
@@ -295,7 +301,7 @@ guessing adds risk without adding capability.
 - [x] Non-Zod schemas documented permissively with a warning naming the vendor, rather than
       wrongly or not at all
 - [x] **Generated documents validated by `@readme/openapi-parser` in the test suite**
-- [ ] `oven openapi` CLI command — Phase 4
+- [x] `oven openapi` CLI command — landed with Phase 4; stdout by default so it pipes
 
 **Two bugs the real parser caught that structural tests missed:**
 
@@ -343,13 +349,18 @@ the required shape. A brick without a page is not done.
 ### 2.1 `@theoven/db` — the contract ✅
 - [x] `DatabaseProvider<Client>`: `connect`, `health`, `close`, `transaction`
 - [x] `ctx.db` is the **native client**, fully typed from the user's own schema (D16)
-- [ ] Per-request transaction opt-in via the `request()` hook
+- [x] Per-request transaction opt-in — shipped as `transactional()` middleware rather than a
+      `request()` hook, because a transaction has to *wrap* the handler and `request()` returns
+      before it runs. Being middleware also makes the scope explicit, which matters: applied
+      globally it holds a transaction open across every slow external call in the app.
 - [x] Graceful close wired to `app.close()`
 
 ### 2.2 `@theoven/db-drizzle` ✅
 - [x] SQLite via `bun:sqlite` (the default), Postgres, MySQL
 - [x] Pooling and health check
-- [ ] `oven db generate | migrate | push | studio` — drizzle-kit passthrough, replacing the
+- [x] `oven db generate | migrate | push | studio | drop` — delegates to the project's own
+      migration tool, detected from its config file (`drizzle.config.ts` → drizzle-kit,
+      `prisma/schema.prisma` → Prisma CLI), translating names where the two disagree. Replacing the
       stub that currently reports the module is missing
 - [ ] Tests against real SQLite and Postgres
 
@@ -365,7 +376,8 @@ the required shape. A brick without a page is not done.
       naming the brick and the feature
 - [x] `auth: true` guard and **named policies** (D18), with policies appearing as named
       security requirements in the OpenAPI document
-- [ ] `ctx.user` narrowed to non-null inside a guarded route
+- [x] `ctx.user` narrowed to non-null inside a guarded route (`NarrowUser`), with a type-level
+      test verified to fail when the narrowing is reverted
 - [x] **The security-critical half, written once:** argon2id via `Bun.password`, JWT signing and
       verification, single-use hashed reset tokens, refresh rotation
 - [x] `AuthStore` — seven methods, shaped for these flows. Not a general ORM abstraction, and
@@ -380,7 +392,10 @@ The reason `oven create` gives you a working signup before you have provisioned 
 - [x] Change password while signed in; **invalidates every other session**
 - [x] Forgot password → single-use, expiring, hashed reset token sent by email
 - [x] Passwords hashed with `Bun.password` (argon2id); timing-safe comparisons throughout
-- [ ] Rate limiting on login, signup and reset, since these are the endpoints that get attacked
+- [x] Rate limiting on login, signup and reset, on by default. Login and reset key on **both**
+      IP and email: by IP alone a distributed attempt on one account walks through, by email alone
+      one host sprays the whole user table. Fixed-window, in memory, per process — enough to blunt
+      credential stuffing, not a precise quota, and the brick page says so.
 - [x] Drizzle schema and migrations shipped for its own tables
 - [ ] `@theoven/auth-mongo` — the same flows over Mongoose, which is what proves `AuthStore`
       is real rather than a Drizzle interface wearing a disguise (D25)

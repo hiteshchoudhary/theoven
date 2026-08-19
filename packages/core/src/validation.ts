@@ -55,6 +55,27 @@ type Output<Schema, Fallback> = Schema extends StandardSchemaV1
   : Fallback
 
 /**
+ * Narrows `user` to non-null on a guarded route.
+ *
+ * A route declaring `auth: true` is unreachable while anonymous — the auth brick rejects the
+ * request before the handler runs — so `ctx.user` cannot be null inside it, and forcing every
+ * guarded handler to write `ctx.user!.id` would be the type system lying in the safe direction.
+ *
+ * This is the one auth-shaped name core knows, and it is knowledge at the type level only:
+ * nothing here imports from an auth package, and an app with no auth brick is untouched because
+ * `Ext` has no `user` to narrow. Core still never interprets what `auth: 'admin'` *means* — see
+ * `RouteSchema.auth`.
+ */
+type NarrowUser<Schema extends RouteSchema, Ext> = Schema['auth'] extends
+  | true
+  | string
+  | readonly string[]
+  ? Ext extends { user: infer User }
+    ? Omit<Ext, 'user'> & { user: NonNullable<User> }
+    : Ext
+  : Ext
+
+/**
  * The context a validated handler receives.
  *
  * `params`, `query`, `body` and `headers` are replaced by their validated, typed forms. Note
@@ -65,7 +86,7 @@ export type ValidatedContext<Schema extends RouteSchema, Ext> = Omit<
   Context,
   'params' | 'query' | 'body'
 > &
-  Ext & {
+  NarrowUser<Schema, Ext> & {
     params: Output<Schema['params'], RouteParams>
     query: Output<Schema['query'], ParsedQuery>
     body: Schema['body'] extends StandardSchemaV1

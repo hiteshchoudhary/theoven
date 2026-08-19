@@ -10,6 +10,7 @@ oven create my-app     # scaffold a project
 oven dev               # run with a watcher
 oven build             # bundle and write a route manifest
 oven start             # run the build
+oven db migrate        # run schema and migration commands
 oven routes            # print the route table
 oven openapi           # emit the OpenAPI document
 oven doctor            # check the project for common problems
@@ -82,6 +83,38 @@ the entry, asking for a route table would bind a port.
 
 With no `--out`, `oven openapi` writes only JSON to stdout, so it can be piped straight into a
 client generator.
+
+## `oven db`
+
+```bash
+oven db generate       # write a migration from the current schema
+oven db migrate        # apply pending migrations
+oven db push           # push the schema straight to the database (development)
+oven db studio         # open the database browser
+oven db drop           # drop a generated migration
+```
+
+These delegate to whatever migration tool your project already uses, detected from its config
+file — `drizzle.config.ts` means drizzle-kit, `prisma/schema.prisma` means the Prisma CLI. Oven
+does not reimplement migration generation; a wrapper around it would drift from the real tool
+within a release.
+
+What you get instead is one set of command names whatever adapter you chose, and translation
+where the tools disagree — `oven db push` runs `drizzle-kit push` in one project and
+`prisma db push` in another. A command with no equivalent says so rather than running something
+that looks similar.
+
+Anything after `--` is passed through unchanged:
+
+```bash
+oven db generate -- --name add_orders_table
+```
+
+<Aside type="note" title="push versus migrate">
+  `push` rewrites the schema in place with no migration to review or roll back. That is what you
+  want against a development database and not what you want in a deploy — `oven db push` warns
+  when `NODE_ENV=production`.
+</Aside>
 
 ## `oven doctor`
 

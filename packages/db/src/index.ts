@@ -7,3 +7,4 @@ export {
   rememberProvider,
   transaction,
 } from './provider'
+export { transactional } from './transactional'

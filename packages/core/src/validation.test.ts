@@ -156,6 +156,62 @@ describe('params validation', () => {
   })
 })
 
+// §1.3 could describe uploads but not validate them; this is the pairing with §1.6.
+describe('file uploads', () => {
+  test('a valid upload passes validation and arrives as a File', async () => {
+    const app = make().post(
+      '/avatar',
+      { body: z.object({ avatar: z.file(), caption: z.string() }) },
+      async (ctx) => ({
+        name: ctx.body.avatar.name,
+        type: ctx.body.avatar.type,
+        text: await ctx.body.avatar.text(),
+        caption: ctx.body.caption,
+      }),
+    )
+
+    const form = new FormData()
+    form.append('avatar', new File(['pixels'], 'me.png', { type: 'image/png' }))
+    form.append('caption', 'holiday')
+
+    const response = await send(app, '/avatar', { method: 'POST', body: form })
+    expect(await response.json()).toEqual({
+      name: 'me.png',
+      type: 'image/png',
+      text: 'pixels',
+      caption: 'holiday',
+    })
+  })
+
+  test('a missing file is a 422 naming the field', async () => {
+    const app = make().post('/avatar', { body: z.object({ avatar: z.file() }) }, () => 'ok')
+
+    const form = new FormData()
+    form.append('caption', 'no file here')
+
+    const issues = await issuesOf(await send(app, '/avatar', { method: 'POST', body: form }))
+    expect(issues[0]).toMatchObject({ location: 'body', path: 'avatar' })
+  })
+
+  test('a text field where a file was declared is rejected', async () => {
+    const app = make().post('/avatar', { body: z.object({ avatar: z.file() }) }, () => 'ok')
+
+    const form = new FormData()
+    form.append('avatar', 'just a string')
+
+    expect((await send(app, '/avatar', { method: 'POST', body: form })).status).toBe(422)
+  })
+
+  test('schema constraints on a file are enforced', async () => {
+    const app = make().post('/avatar', { body: z.object({ avatar: z.file().max(10) }) }, () => 'ok')
+
+    const form = new FormData()
+    form.append('avatar', new File(['x'.repeat(500)], 'big.png', { type: 'image/png' }))
+
+    expect((await send(app, '/avatar', { method: 'POST', body: form })).status).toBe(422)
+  })
+})
+
 describe('query validation', () => {
   test('applies defaults and coercion', async () => {
     const app = make().get(

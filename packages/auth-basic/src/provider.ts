@@ -10,7 +10,7 @@ import {
   toIdentity,
   verifyAccessToken,
 } from '@theoven/auth'
-import { BadRequest, type Context, Unauthorized } from '@theoven/core'
+import { BadRequest, type Context, TooManyRequests, Unauthorized } from '@theoven/core'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { drizzleStore } from './store'
 
@@ -41,6 +41,15 @@ export interface BasicAuthOptions {
    */
   sendResetEmail?: (to: string, token: string) => Promise<void>
   /**
+   * Throttle the endpoints attackers actually hit.
+   *
+   * On by default, and per email address as well as per IP: limiting by IP alone does nothing
+   * against a distributed attempt at one account, and limiting by email alone lets one host
+   * spray the whole user table. Set `false` to handle it yourself.
+   */
+  rateLimit?: AuthRateLimit | false
+
+  /**
    * Cookie holding the refresh token. Default `oven_refresh`.
    *
    * The refresh token is set as an httpOnly cookie rather than returned in the body, so a
@@ -59,6 +68,56 @@ export interface BasicAuthService {
 
 const COOKIE_DEFAULT = 'oven_refresh'
 
+export interface AuthRateLimit {
+  /** Attempts allowed per window on login. Default 10. */
+  login?: number
+  /** Signups allowed per window. Default 5. */
+  signup?: number
+  /** Reset requests allowed per window. Default 3. */
+  forgotPassword?: number
+  /** Window length in milliseconds. Default 15 minutes. */
+  window?: number
+}
+
+const RATE_DEFAULTS = { login: 10, signup: 5, forgotPassword: 3, window: 15 * 60 * 1000 } as const
+
+/**
+ * A fixed-window counter, in memory.
+ *
+ * Per process, so behind a load balancer the effective limit is `limit x instances`. That is
+ * enough to blunt credential stuffing and password-reset spam, which is what these endpoints
+ * face; it is not a precise quota, and the brick's page says so.
+ */
+function throttle(limit: number, window: number) {
+  const hits = new Map<string, { count: number; resetAt: number }>()
+
+  return (key: string): void => {
+    const now = Date.now()
+    let bucket = hits.get(key)
+
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + window }
+      hits.set(key, bucket)
+    }
+
+    bucket.count++
+
+    if (bucket.count > limit) {
+      const retryAfter = Math.ceil((bucket.resetAt - now) / 1000)
+      throw new TooManyRequests('Too many attempts. Try again shortly.', {
+        headers: { 'retry-after': String(retryAfter) },
+      })
+    }
+
+    // Swept on write rather than on a timer, so nothing keeps the process alive at shutdown.
+    if (hits.size > 10_000) {
+      for (const [candidate, entry] of hits) {
+        if (entry.resetAt <= now) hits.delete(candidate)
+      }
+    }
+  }
+}
+
 /**
  * Email-and-password auth, stored with Drizzle.
  *
@@ -76,7 +135,15 @@ export function basicAuth(options: BasicAuthOptions): AuthProvider<StoredUser> &
     resetTtl = 60 * 60,
     minPasswordLength = 8,
     sendResetEmail,
+    rateLimit: rateLimitOptions,
   } = options
+
+  const limits =
+    rateLimitOptions === false ? null : { ...RATE_DEFAULTS, ...(rateLimitOptions ?? {}) }
+
+  const throttleLogin = limits ? throttle(limits.login, limits.window) : null
+  const throttleSignup = limits ? throttle(limits.signup, limits.window) : null
+  const throttleForgot = limits ? throttle(limits.forgotPassword, limits.window) : null
 
   if (!secret) {
     throw new Error(
@@ -147,6 +214,7 @@ export function basicAuth(options: BasicAuthOptions): AuthProvider<StoredUser> &
 
     mount: (register: MountRegistrar, prefix: string) => {
       register('POST', `${prefix}/signup`, async (ctx) => {
+        throttleSignup?.(ctx.ip ?? 'unknown')
         const body = (await ctx.body) as { email?: string; password?: string; name?: string }
         if (!body?.email || !body.password || !body.name) {
           throw new BadRequest('email, password and name are required.')
@@ -172,6 +240,11 @@ export function basicAuth(options: BasicAuthOptions): AuthProvider<StoredUser> &
         if (!body?.email || !body.password) {
           throw new BadRequest('email and password are required.')
         }
+
+        // Both keys: by IP alone a distributed attempt on one account walks through, and by
+        // email alone one host can spray the whole user table.
+        throttleLogin?.(`ip:${ctx.ip ?? 'unknown'}`)
+        throttleLogin?.(`email:${body.email.trim().toLowerCase()}`)
 
         const { user, tokens } = await login(flows, {
           email: body.email,
@@ -203,6 +276,9 @@ export function basicAuth(options: BasicAuthOptions): AuthProvider<StoredUser> &
       register('POST', `${prefix}/forgot-password`, async (ctx) => {
         const body = (await ctx.body) as { email?: string }
         if (!body?.email) throw new BadRequest('email is required.')
+
+        throttleForgot?.(`ip:${ctx.ip ?? 'unknown'}`)
+        throttleForgot?.(`email:${body.email.trim().toLowerCase()}`)
 
         await requestPasswordReset(flows, body.email)
         // Always the same answer, whether or not the address exists — see the flow for why.

@@ -102,10 +102,44 @@ access token goes in the body, where a client attaches it to `Authorization`.
 | `resetTtl` | `3600` | reset-link seconds |
 | `minPasswordLength` | `8` | minimum password length |
 | `sendResetEmail` | — | how reset links are delivered |
+| `rateLimit` | on | throttles login, signup and reset; `false` to disable |
 | `refreshCookie` | `oven_refresh` | cookie name |
 
 There is no default `secret`, and the brick refuses to construct without one. A framework that
 invents a signing secret has invented a secret every deployment shares.
+
+## Rate limiting
+
+Login, signup and password-reset are the endpoints that actually get attacked, so they are
+throttled by default. Nothing to add:
+
+| Endpoint | Default | Keyed by |
+| --- | --- | --- |
+| `POST /auth/login` | 10 per 15 min | IP **and** email |
+| `POST /auth/signup` | 5 per 15 min | IP |
+| `POST /auth/forgot-password` | 3 per 15 min | IP **and** email |
+
+Over the limit, the request gets `429` with a `Retry-After` header — as
+[problem+json](/docs/guides/errors/), like every other Oven error.
+
+Login and reset count against **both** the caller's IP and the email in the body. Either key
+alone leaves a hole: limiting by IP does nothing against a distributed attempt on one account,
+and limiting by email lets a single host spray the whole user table.
+
+```ts
+basicAuth({
+  db: client,
+  secret: env.string('AUTH_SECRET'),
+  rateLimit: { login: 20, signup: 10, forgotPassword: 5, window: 5 * 60 * 1000 },
+})
+```
+
+<Aside type="caution" title="The counters live in memory">
+  They are per process. Behind a load balancer with four instances the effective limit is four
+  times what you configured, and a deploy resets them. That is enough to blunt credential
+  stuffing and reset-email spam, which is what these endpoints face — it is not a precise quota.
+  If you need one, set `rateLimit: false` and put a shared-store limiter in front of `/auth/*`.
+</Aside>
 
 ## Sending reset emails
 
@@ -148,6 +182,6 @@ Each of these has a test, including the enumeration and token-reuse cases.
 - **SQLite schema only.** The tables are declared with `drizzle-orm/sqlite-core`. Postgres works
   as a database, but you would restate the schema with `pg-core` today.
 - **No email verification.** `auth_users.email_verified_at` exists and is never set.
-- **No rate limiting built in.** Login, signup and reset are the endpoints that get attacked;
-  add [`rateLimit`](/docs/reference/middleware/) in front of `/auth/*` yourself.
+- **Rate limiting is per process**, not shared across instances — see the caveat
+  [above](#rate-limiting).
 - **No OAuth.** Use `auth-clerk` or `auth-better` when they land.

@@ -2,6 +2,7 @@
 import { parseArgs } from './args'
 import { build } from './commands/build'
 import { create } from './commands/create'
+import { dbCommand } from './commands/db'
 import { doctor } from './commands/doctor'
 import { openapiCommand, routes } from './commands/inspect'
 import { dev, start } from './commands/run'
@@ -19,6 +20,7 @@ ${style.bold('Commands')}
   ${style.cyan('dev')}              run with a watcher
   ${style.cyan('build')}            bundle and write a route manifest
   ${style.cyan('start')}            run the build
+  ${style.cyan('db')} <command>    generate | migrate | push | studio
   ${style.cyan('routes')}           print the route table
   ${style.cyan('openapi')}          emit the OpenAPI document
   ${style.cyan('doctor')}           check the project for common problems
@@ -41,9 +43,7 @@ ${style.dim('Docs: https://theoven.app/docs')}
 
 /** Commands that need a module the modules themselves have not shipped yet. */
 const PLANNED: Record<string, string> = {
-  db: '@theoven/db',
   worker: '@theoven/queue',
-  migrate: '@theoven/db',
 }
 
 export async function run(argv: readonly string[]): Promise<number> {
@@ -80,6 +80,8 @@ export async function run(argv: readonly string[]): Promise<number> {
       return build(args)
     case 'start':
       return start(args)
+    case 'db':
+      return dbCommand(args)
     case 'routes':
       return routes(args)
     case 'openapi':
