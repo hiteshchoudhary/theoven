@@ -430,10 +430,11 @@ The reason `oven create` gives you a working signup before you have provisioned 
       user enumeration via login and reset responses, refresh-token rotation
 
 ### 2.6 `@theoven/auth-better` and `@theoven/auth-clerk`
-- [ ] `auth-better`: mounts its own routes, owns sessions — exercises the `routes` capability
+- [x] `auth-better` shipped: mounts its own routes, owns sessions — exercises the `routes` capability
 - [x] `auth-clerk` shipped: no routes, hosted sign-in, JWT verification — exercises the opposite end
-- [ ] Both must satisfy the same contract with no changes to it — `auth-clerk` does; `auth-better`
-      is the remaining half of this check
+- [x] Both satisfy the same contract with no changes to it. `auth-clerk` mounts nothing and
+      declares `routes: false`; `auth-better` forwards every method under the prefix on a
+      wildcard and declares `routes: true`. `AuthProvider` did not move.
 
       `auth-clerk` is built on WebCrypto rather than Clerk's SDK: a framework brick that depends
       on a vendor SDK owns that SDK's release cadence and its whole transitive tree. JWKS fetch,

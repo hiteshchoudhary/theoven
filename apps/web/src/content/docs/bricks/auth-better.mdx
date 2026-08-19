@@ -1,0 +1,108 @@
+---
+title: auth-better
+description: better-auth mounted in Oven — it brings its own routes, sessions and plugins.
+sidebar:
+  order: 9
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/auth-better` |
+| **Adds to context** | nothing itself — it is a provider for [`auth`](/docs/bricks/auth/) |
+| **Endpoints** | **all of better-auth's**, mounted at `/auth/*` |
+| **Creates files** | none |
+| **Creates tables** | better-auth's own — `user`, `session`, `account`, `verification`, plus whatever your plugins add |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/auth @theoven/auth-better better-auth
+```
+
+```ts title="src/auth.ts"
+import { betterAuth } from 'better-auth'
+import { Database } from 'bun:sqlite'
+
+export const instance = betterAuth({
+  database: new Database('./auth.db'),
+  basePath: '/auth',
+  secret: env.string('BETTER_AUTH_SECRET'),
+  emailAndPassword: { enabled: true },
+  socialProviders: {
+    github: { clientId: env.string('GITHUB_ID'), clientSecret: env.string('GITHUB_SECRET') },
+  },
+})
+```
+
+```ts title="src/app.ts"
+import { auth } from '@theoven/auth'
+import { betterAuthProvider } from '@theoven/auth-better'
+import { instance } from './auth'
+
+export const app = createApp().use(auth(betterAuthProvider({ instance })))
+```
+
+Run better-auth's own migration once: `bunx @better-auth/cli migrate`.
+
+## You configure better-auth; this brick mounts it
+
+The `instance` is yours. This brick does not wrap `betterAuth()`, take a `database` option, or
+re-expose its plugins.
+
+better-auth's configuration is large, moving, and better documented by better-auth. A wrapper
+around it would be permanently one release behind and would hide whichever option you needed. So
+the boundary is drawn where it is honest: you build the instance, Oven routes to it and reads
+sessions from it.
+
+## Everything, on a wildcard
+
+The `routes` capability at its fullest — the opposite end of the contract from
+[`auth-clerk`](/docs/bricks/auth-clerk/), which mounts nothing at all. The same `AuthProvider`
+interface fits both.
+
+Every method under the prefix is forwarded:
+
+```
+GET|POST|PUT|PATCH|DELETE|OPTIONS  /auth
+GET|POST|PUT|PATCH|DELETE|OPTIONS  /auth/*
+```
+
+A wildcard rather than a list, because better-auth's endpoint set depends on which plugins are
+enabled — enumerating them would be wrong the moment you added one. The cost is that
+`oven routes` shows the wildcard instead of thirty paths, and your OpenAPI document does not
+describe them. better-auth documents its own endpoints.
+
+<Aside type="caution" title="basePath must match the mount prefix">
+  better-auth defaults to `/api/auth`; Oven mounts at `/auth`. A mismatch is a 404 from *inside*
+  better-auth on every request, which looks exactly like a routing bug in Oven and is not one.
+
+  The brick checks this at boot and refuses, naming both paths and both ways to fix it. Set
+  `basePath: '/auth'` on the instance, or mount with `auth(provider, { prefix: '/api/auth' })`.
+</Aside>
+
+## Sessions
+
+`ctx.user` comes from `instance.api.getSession()`, called with the request's headers rather than
+an extracted token — so whichever scheme you configured, cookie or bearer, keeps working without
+this brick knowing about it.
+
+`ctx.user.raw` is better-auth's user object, including any fields you added with
+`additionalFields`.
+
+`refresh` is **not** declared: better-auth rotates sessions on its own endpoints, and there is no
+server-side call for an application to make. Declaring it would offer a method with nothing to
+do.
+
+## Limitations
+
+- **No OpenAPI for the mounted routes.** They arrive as a wildcard, so Oven cannot describe them.
+- **Migrations are better-auth's.** Run `bunx @better-auth/cli migrate`; `oven db` does not know
+  about its schema.
+- **Two session systems if you also use `auth-basic`.** Pick one. Nothing stops you registering
+  both, and nothing good comes of it.
+- **The brick tracks better-auth structurally**, through the `handler` and `getSession` shape
+  rather than its exported types, so it does not pin a version. A breaking change to either would
+  still break it.

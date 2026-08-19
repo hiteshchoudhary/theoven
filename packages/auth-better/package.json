@@ -1,0 +1,37 @@
+{
+  "name": "@theoven/auth-better",
+  "version": "0.0.0",
+  "description": "better-auth for Oven — it mounts its own routes and owns its sessions",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "auth",
+    "better-auth"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*",
+    "better-auth": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*",
+    "better-auth": "^1.7.1"
+  }
+}
