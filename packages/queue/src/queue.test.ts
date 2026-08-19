@@ -199,7 +199,11 @@ describe('the worker', () => {
     const job = defineJob({
       name: 'slow',
       retries: 1,
-      backoff: 1,
+      // Long enough that `drain` cannot pick the retry up in the same pass. With a 1ms backoff
+      // this was a coin flip: on a loaded machine the second attempt ran, exhausted the retry
+      // and dead-lettered the job — which removes it from `jobs`, so the assertion below read
+      // `undefined`. The retried state is what this test is about, so it has to be observable.
+      backoff: 60_000,
       timeout: 30,
       handler: ({ signal }) =>
         new Promise((_resolve, reject) => {
