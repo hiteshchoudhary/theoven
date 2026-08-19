@@ -30,6 +30,31 @@ import * as schema from './schema'
 export const app = createApp().use(db(drizzleSqlite({ url: './data.db', schema })))
 ```
 
+## What it does
+
+Connects Drizzle to SQLite or Postgres, verifies the connection at boot, and closes it on
+shutdown. `ctx.db` is the Drizzle instance itself — not a wrapper, not a proxy. Your queries are
+Drizzle queries, which is also why a coding model already knows how to write them (D16).
+
+The brick's job is only the part every application repeats and gets subtly wrong: connecting once,
+failing loudly at boot rather than on the first request, transactions that actually roll back, and
+a clean shutdown.
+
+## Endpoints
+
+None by default. The [`db`](/docs/bricks/db/) brick can mount one health endpoint if you ask:
+
+```ts
+db(drizzleSqlite({ schema }), { healthPath: '/healthz' })
+```
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `GET` | whatever you pass as `healthPath` | runs `select 1`; `200` healthy, `503` not | none — guard it yourself |
+
+Off unless asked for, because a brick that silently adds a route is one that appears unexplained
+in `oven routes`, and health endpoints are something people want to place and protect themselves.
+
 ## Why this is the default
 
 `bun:sqlite` and Drizzle are not alternatives — Drizzle **runs on** `bun:sqlite`, so this is
@@ -72,6 +97,65 @@ application meets this as sporadic `SQLITE_BUSY` under exactly the concurrency i
 The connection URL is deliberately kept out of the provider's name, because provider names reach
 logs and a connection string carries a password.
 
+## Usage
+
+`ctx.db` is Drizzle. Everything you know about Drizzle applies, and nothing here is Oven-specific:
+
+```ts title="src/routes/users/index.get.ts"
+import { desc } from 'drizzle-orm'
+import { users } from '../../schema'
+
+export default async ({ db }) => db.select().from(users).orderBy(desc(users.createdAt)).limit(20)
+```
+
+```ts title="src/routes/users/[id].get.ts"
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { users } from '../../schema'
+
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ db, params }) => {
+  const [user] = await db.select().from(users).where(eq(users.id, params.id))
+  if (!user) throw new NotFound(`No user ${params.id}.`)
+  return user
+}
+```
+
+Relational queries, prepared statements, `db.query.*`, partial selects — all of it is Drizzle's,
+untouched.
+
+### Transactions that roll back
+
+Use `transaction()` from `@theoven/db`, **not** Drizzle's own on SQLite — see the warning below:
+
+```ts
+import { transaction } from '@theoven/db'
+
+await transaction(ctx.db, async (tx) => {
+  await tx.insert(orders).values(order)
+  await tx.update(stock).set({ count: remaining }).where(eq(stock.sku, order.sku))
+  // Anything thrown here rolls both statements back, awaits included.
+})
+```
+
+To wrap a whole request instead, register the middleware — a request that throws writes nothing:
+
+```ts
+import { transactional } from '@theoven/db'
+
+app.use(transactional())
+```
+
+## What it creates
+
+**Files:** the SQLite database file at `url` (default `./data.db`) when it does not exist —
+`.gitignore` it. Postgres creates nothing locally.
+
+**Tables:** only what your own schema declares. This brick never migrates anything on its own.
+
+Generate and apply migrations with `drizzle-kit` — see [Limitations](#limitations) on `oven db`.
+
 ## Transactions
 
 <Aside type="caution" title="Drizzle's own SQLite transaction does not roll back async failures">
@@ -107,6 +191,38 @@ separate databases** — which shows up as `no such table` on a schema you can w
 and is a genuinely confusing hour.
 
 An adopted connection is not closed on shutdown: it was not the brick's to open.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `connect`, `health`, `close` | ✓ both drivers |
+| `transaction` | ✓ both — SQLite via explicit `begin`/`commit`/`rollback`, and serialised |
+| Adopting an existing client | ✓ SQLite (`client`) |
+| Connection pooling | Postgres only (`max`); SQLite is one connection by design |
+| Migrations | ✗ — `drizzle-kit`'s job, not this brick's |
+| MySQL | ✗ — no entry point yet |
+
+**What fails at boot:** an unreachable database, or a SQLite path that cannot be opened. With
+`checkOnBoot` (on by default) that is one failed restart instead of a deploy that looks green and
+500s on its first request.
+
+## How it is verified
+
+SQLite runs on every `bun test`: booting in memory and from a file, data surviving a restart, a bad
+path refused at boot, insert/select through `ctx.db`, and that the client really is Drizzle's API
+rather than a wrapper. Health is checked live, and the mounted endpoint too.
+
+Transactions get the most attention, because this is where the provider does something of its own:
+commit, rollback on failure, and — kept as an explicit test — a demonstration that **Drizzle's own
+`bun-sqlite` transaction does not roll back an async failure**, so the difference stays a documented
+fact rather than folklore. The `transactional()` middleware is tested for rollback on a failed
+request, commit on a successful one, path scoping, and doing nothing when no database is registered.
+Tuning is asserted by reading the pragmas back, on and off.
+
+Postgres runs the same shape — connect, typed `ctx.db`, async rollback, commit, request-scoped
+transaction, pool release — but only when `POSTGRES_URL` is set. Without it the suite **skips with a
+printed notice**, and it has not run on the author's machine; CI provides the server.
 
 ## Limitations
 

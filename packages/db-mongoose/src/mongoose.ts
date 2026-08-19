@@ -26,7 +26,7 @@ export interface MongooseOptions {
  * *this* app's connection.
  *
  * ```ts
- * const app = createApp().use(db({ provider: mongooseDb({ url: env.string('MONGO_URL') }) }))
+ * const app = createApp().use(db(mongooseDb({ url: env.string('MONGO_URL') })))
  *
  * app.get('/users', async (ctx) => ctx.db.model('User', userSchema).find())
  * ```

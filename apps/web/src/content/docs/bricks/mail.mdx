@@ -34,6 +34,25 @@ export const app = createApp().use(
 )
 ```
 
+## What it does
+
+Gives you `ctx.mail.send()` and `ctx.mail.sendTemplate()`, with four drivers behind one interface:
+console, Resend, SES and SMTP. In development it mounts a preview inbox so you can read what your
+app sent without configuring a provider or sending anything real.
+
+If the [`queue`](/docs/bricks/queue/) brick is registered, sends go through it automatically — with
+retries and backoff, and without your handler waiting on a third party.
+
+## Endpoints
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `GET` | `/_oven/mail` | the preview inbox | none |
+| `GET` | `/_oven/mail/:id` | one captured message | none |
+
+Mounted **only when `preview` is on**, which by default means development only. Set
+`preview: '/some/path'` to move it, or `preview: false` to turn it off.
+
 ## Sending
 
 ```ts
@@ -182,6 +201,60 @@ Rails both ship the equivalent.
   driver throws. Pass `allowConsoleInProduction` if you genuinely mean it.
 </Aside>
 
+## What it creates
+
+**Files:** none. **Tables:** none.
+
+With the queue brick registered, sends become jobs named `oven:mail:send` in whatever store your
+queue uses — so a pending message survives a restart when the queue driver is durable.
+
+## Usage
+
+```ts title="src/routes/signup.post.ts"
+import { z } from 'zod'
+
+export const body = z.object({ email: z.email(), name: z.string() })
+
+export default async ({ body, mail, db }) => {
+  const user = await db.insert(users).values(body).returning()
+
+  await mail.send({
+    to: body.email,
+    subject: 'Welcome to Acme',
+    text: `Thanks for signing up, ${body.name}.`,
+    html: `<p>Thanks for signing up, ${body.name}.</p>`,
+  })
+
+  return user[0]
+}
+```
+
+Wiring it into password reset, which is the most common reason to want mail at all:
+
+```ts title="src/app.ts"
+auth(
+  basicAuth({
+    db: client,
+    secret: env.string('AUTH_SECRET'),
+    sendResetEmail: (to, token) =>
+      mailer.send({
+        to,
+        subject: 'Reset your password',
+        text: `Reset here: ${env.string('APP_URL')}/reset?token=${token}`,
+      }),
+  }),
+)
+```
+
+Reading what the inbox captured, from your own code:
+
+```ts
+ctx.mail.inbox?.all()      // every captured message; `inbox` is undefined when preview is off
+ctx.mail.inbox?.find(id)   // one of them
+ctx.mail.inbox?.clear()
+ctx.mail.driver            // 'resend', 'ses', 'smtp' or 'console'
+```
+
 ## Testing
 
 ```ts
@@ -200,6 +273,22 @@ expect(driver.sent[0]?.to).toBe('ada@example.com')
 | `allowConsoleInProduction` | `false` | permit the console driver outside development |
 | `preview` | on in development | mount the inbox; a string moves it, `false` turns it off |
 | `previewLimit` | `50` | how many messages the inbox keeps |
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `send`, `sendTemplate` | ✓ all drivers |
+| Attachments, inline `cid` images | ✓ all drivers |
+| Automatic plain-text part from HTML | ✓ |
+| Preview inbox | ✓ development by default |
+| Retries and backoff | only with [`queue`](/docs/bricks/queue/) registered |
+| Bounce / complaint webhooks | ✗ — yours to receive |
+| SMTP connection pooling | ✗ — one connection per message |
+| Bulk / marketing sends | ✗ — this is transactional mail |
+
+**What fails at boot:** the console driver in production without `allowConsoleInProduction`; a
+Resend driver with no `apiKey`; an SES driver with no credentials it can resolve.
 
 ## What gets logged
 

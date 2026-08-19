@@ -30,13 +30,32 @@ import { mongooseDb } from '@theoven/db-mongoose'
 export const app = createApp().use(db(mongooseDb({ url: env.string('MONGO_URL') })))
 ```
 
-```ts title="src/routes/users.ts"
-import { Schema } from 'mongoose'
+```ts title="src/routes/users/index.get.ts"
+import { userSchema } from '../../models'
 
-const userSchema = new Schema({ name: String, email: String })
-
-export const GET = async (ctx) => ctx.db.model('User', userSchema).find()
+export default async ({ db }) => db.model('User', userSchema).find()
 ```
+
+## What it does
+
+Connects Mongoose to MongoDB, verifies it at boot with a real `ping`, and closes it on shutdown.
+`ctx.db` is a Mongoose `Connection` — models come off it, and every Mongoose feature is reachable
+because nothing is wrapped (D16).
+
+It is also the adapter that proves the database contract is a contract; see
+[What this adapter is for](#what-this-adapter-is-for).
+
+## Endpoints
+
+None by default. The [`db`](/docs/bricks/db/) brick mounts one health endpoint if you ask for it:
+
+```ts
+db(mongooseDb({ url: env.string('MONGO_URL') }), { healthPath: '/healthz' })
+```
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `GET` | whatever you pass as `healthPath` | pings the server; `200` healthy, `503` not | none — guard it yourself |
 
 ## A Connection, not the global singleton
 
@@ -64,6 +83,55 @@ mongooseDb({
   connection: { maxPoolSize: 20, serverSelectionTimeoutMS: 5000 },
 })
 ```
+
+## Usage
+
+Define schemas once and compile models off `ctx.db`:
+
+```ts title="src/models.ts"
+import { Schema } from 'mongoose'
+
+export const userSchema = new Schema({
+  email: { type: String, required: true, unique: true },
+  name: String,
+  createdAt: { type: Date, default: Date.now },
+})
+```
+
+```ts title="src/routes/users/index.post.ts"
+import { z } from 'zod'
+import { userSchema } from '../../models'
+
+export const body = z.object({ email: z.email(), name: z.string() })
+
+export default async ({ db, body }) => db.model('User', userSchema).create(body)
+```
+
+```ts title="src/routes/users/[id].get.ts"
+import { z } from 'zod'
+import { userSchema } from '../../models'
+
+export const params = z.object({ id: z.string() })
+
+export default async ({ db, params }) => {
+  const user = await db.model('User', userSchema).findById(params.id).lean()
+  if (!user) throw new NotFound(`No user ${params.id}.`)
+  return user
+}
+```
+
+`db.model()` is idempotent for a given name and connection, so calling it per request is cheap —
+Mongoose returns the already-compiled model.
+
+Aggregations, `populate`, change streams, `bulkWrite`, indexes: all Mongoose's, all available,
+none of them wrapped.
+
+## What it creates
+
+**Files:** none.
+
+**Collections:** only what your models declare, created by Mongo on first write. This brick
+migrates nothing.
 
 ## Health checks
 
@@ -113,6 +181,34 @@ single ORM will fit that ORM perfectly and nothing else.
 Three of the four contract methods fit Mongoose unchanged. The fourth did not, and the contract
 did not bend to accommodate it: `transaction` is optional, and a provider that lacks it says so.
 That is the outcome the split was designed for.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `connect`, `health`, `close` | ✓ |
+| `transaction` | ✗ — **declared absent**; `transaction()` and `transactional()` refuse loudly |
+| Pooling, TLS, timeouts | ✓ via `connection`, passed to Mongoose unchanged |
+| Migrations | ✗ — no `oven db` support; schema lives in your models |
+
+**What fails at boot:** a missing `url` is refused at construction, and an unreachable server fails
+during boot rather than on the first query.
+
+## How it is verified
+
+The suite drives a **real MongoDB**: connect, a typed `ctx.db` that is genuinely a Mongoose
+`Connection`, models compiled off it, the health endpoint answering from a live `ping`, and a clean
+close on shutdown.
+
+The most useful assertions are the negative ones — that `transaction()` **throws** for this
+provider and names it, and that `transactional()` fails loudly on a Mongo app instead of wrapping
+nothing. A contract violation that stays silent is the failure mode this whole split exists to
+avoid.
+
+<Aside type="caution" title="These tests are gated">
+  They need `MONGO_URL` and **skip with a printed notice** without it; CI supplies `mongo:8`. They
+  have not run on the author's machine.
+</Aside>
 
 ## Limitations
 

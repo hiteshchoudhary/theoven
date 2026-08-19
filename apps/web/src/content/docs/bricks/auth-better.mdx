@@ -10,7 +10,7 @@ import { Aside } from '@astrojs/starlight/components'
 | | |
 | --- | --- |
 | **Package** | `@theoven/auth-better` |
-| **Adds to context** | nothing itself — it is a provider for [`auth`](/docs/bricks/auth/) |
+| **Adds to context** | `ctx.user`, `ctx.auth` — it is a provider for [`auth`](/docs/bricks/auth/) |
 | **Endpoints** | **all of better-auth's**, mounted at `/auth/*` |
 | **Creates files** | none |
 | **Creates tables** | better-auth's own — `user`, `session`, `account`, `verification`, plus whatever your plugins add |
@@ -46,6 +46,30 @@ export const app = createApp().use(auth(betterAuthProvider({ instance })))
 ```
 
 Run better-auth's own migration once: `bunx @better-auth/cli migrate`.
+
+## What it does
+
+Mounts a better-auth instance you built inside your Oven app, and turns its session into
+`ctx.user`. better-auth owns sign-in, sign-up, OAuth callbacks, verification, and its own tables;
+this brick routes to it and reads sessions back out.
+
+It is the provider that exercises the `routes` capability at its fullest — the opposite end of the
+contract from [`auth-clerk`](/docs/bricks/auth-clerk/), which mounts nothing at all.
+
+## Endpoints
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| any | `/auth` | forwarded to better-auth | better-auth's own |
+| any | `/auth/*` | forwarded to better-auth | better-auth's own |
+
+`GET`, `POST`, `PUT`, `PATCH`, `DELETE` and `OPTIONS` are all forwarded. A wildcard rather than a
+list, because better-auth's endpoint set depends on which plugins are enabled — see
+[Everything, on a wildcard](#everything-on-a-wildcard).
+
+Which concrete paths exist is better-auth's documentation to give, not this page's: with
+`emailAndPassword` you get `/auth/sign-up/email` and `/auth/sign-in/email`, with a social provider
+you also get `/auth/sign-in/social` and `/auth/callback/:provider`, and a plugin adds its own.
 
 ## You configure better-auth; this brick mounts it
 
@@ -95,6 +119,99 @@ this brick knowing about it.
 `refresh` is **not** declared: better-auth rotates sessions on its own endpoints, and there is no
 server-side call for an application to make. Declaring it would offer a method with nothing to
 do.
+
+## Configuration
+
+The brick itself takes two options. Everything else is configured on the better-auth instance.
+
+```ts
+auth(betterAuthProvider({ instance, skipBasePathCheck: false }), { prefix: '/auth' })
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `instance` | — | **required**; the object returned by `betterAuth({ ... })` |
+| `skipBasePathCheck` | `false` | skips the boot check that `basePath` matches the mount prefix |
+
+The second is deliberately narrow: set it only if you route to better-auth some other way, because
+what it disables is the check that catches the most common misconfiguration on this page.
+
+`prefix` belongs to the [`auth`](/docs/bricks/auth/) brick and defaults to `/auth`. Whatever you
+choose must equal better-auth's `basePath`.
+
+## What it creates
+
+**Files:** none.
+
+**Tables:** better-auth's, not Oven's — `user`, `session`, `account`, `verification`, plus
+anything your plugins add. Create them with better-auth's own CLI:
+
+```bash
+bunx @better-auth/cli migrate
+```
+
+`oven db` does not know about this schema and will not generate or apply it.
+
+## Usage
+
+Guarding a route and reading the user is the same as with any other provider:
+
+```ts title="src/routes/me.get.ts"
+export const auth = true
+
+export default async ({ user }) => ({
+  id: user.id,
+  email: user.email,
+  // Anything you added with better-auth's `additionalFields` lives here.
+  plan: user.raw.plan,
+})
+```
+
+Signing out server-side, when better-auth exposes it:
+
+```ts title="src/routes/logout.post.ts"
+export default async (ctx) => {
+  // `ctx.auth` is the provider itself, so its declared capabilities are readable at runtime.
+  if (!ctx.auth.capabilities?.signOut) throw new BadRequest('This provider cannot sign out.')
+  await ctx.auth.signOut?.(ctx)
+  return { ok: true }
+}
+```
+
+Clients usually call better-auth's own endpoints directly instead — `POST /auth/sign-in/email`,
+`POST /auth/sign-out` — which is the path better-auth's client library takes.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `identify` | ✓ — from `instance.api.getSession()` |
+| `routes` | ✓ — the whole of better-auth, on a wildcard |
+| `signOut` | ✓ when the instance exposes `api.signOut`, checked at boot |
+| `refresh` | ✗ — declared `false`; better-auth rotates sessions on its own endpoints |
+
+**What fails at boot:** an `instance` that is missing `handler` or `api.getSession` is rejected
+immediately with the line you should have written; and a `basePath` that disagrees with the mount
+prefix is refused, naming both values.
+
+## How it is verified
+
+Against a **real better-auth instance on a real SQLite database** — not a double. A double would
+only prove the double works, and the whole question here is whether better-auth's own endpoints,
+whatever they happen to be, survive the trip through Oven's router.
+
+The suite signs a user up and in through the mounted routes, checks a wrong password is refused,
+and hits an endpoint the brick never enumerated — the point of the wildcard. Then that the session
+cookie becomes `ctx.user`, that a guarded route refuses an anonymous request, that a corrupt cookie
+leaves public routes working anonymously rather than 500ing, that the prefix itself is routed and
+not only paths beneath it, and that routes outside the prefix are untouched.
+
+Boot behaviour too: a `basePath` mismatch fails and names both paths, matching paths boot (trailing
+slashes included), the check can be waived, a non-instance is refused, and `signOut` is declared
+only when the instance offers it.
+
+The schema those tests run against is generated from better-auth's own table metadata rather than
+hand-copied, so it cannot drift into a false pass when better-auth adds a column.
 
 ## Limitations
 

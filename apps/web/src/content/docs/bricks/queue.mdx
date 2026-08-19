@@ -53,6 +53,24 @@ Miss a field in that payload and it is a **compile error**. The type is declared
 definition and enforced at both ends — `dispatch` will not take the wrong shape, and the handler
 receives the right one without a cast.
 
+## What it does
+
+Background jobs with typed payloads, retries with exponential backoff, a dead letter, delays,
+deduplication and cron — over three drivers (in-process, Redis, Postgres) behind one interface.
+
+`ctx.queue.dispatch()` enqueues; a worker runs the handler. In development that worker runs inside
+your app so `bun run dev` is enough to watch a job execute; in production it is `oven worker`,
+scaling separately from your web processes.
+
+## Endpoints
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `GET` | `/_oven/queue` | the dashboard — counts, dead letter, upcoming cron | none |
+
+Mounted **only when `dashboard` is on**, which by default means development only.
+`dashboard: '/somewhere'` moves it, `dashboard: false` turns it off.
+
 ## Running jobs
 
 In development the worker runs **in your app process**, so `bun run dev` and a dispatch is all it
@@ -167,6 +185,65 @@ job you did not register, **fails at boot** rather than silently never running.
 
 Each firing is deduplicated on the minute, so several instances all ticking enqueue the job once.
 
+## What it creates
+
+**Files:** none.
+
+**Tables:** with `sqlQueue`, one table — `oven_jobs` by default, configurable with `table` — created on boot if absent, holding queued,
+running, failed and dead jobs. With `redisQueue`, keys and sorted sets under its prefix. With
+`memoryQueue`, nothing: jobs live in the process and die with it.
+
+## Usage
+
+The full loop — define, register, dispatch, and inspect:
+
+```ts title="src/jobs.ts"
+import { defineJob } from '@theoven/queue'
+
+export const sendWelcome = defineJob<{ userId: string; email: string }>({
+  name: 'send-welcome',
+  retries: 5,
+  backoff: 2000,
+  timeout: 10_000,
+  handler: async ({ payload, log }) => {
+    await mailer.send({ to: payload.email, subject: 'Welcome', text: '…' })
+    log.info('welcome sent', { userId: payload.userId })
+  },
+})
+```
+
+```ts title="src/routes/signup.post.ts"
+import { sendWelcome } from '../jobs'
+
+export default async ({ body, db, queue }) => {
+  const [user] = await db.insert(users).values(body).returning()
+
+  // The request returns immediately; the email is somebody else's problem now.
+  await queue.dispatch(sendWelcome, { userId: user.id, email: user.email })
+
+  return user
+}
+```
+
+The payload type is declared once on the definition and enforced at both ends: a missing or
+misspelled field is a **compile error**, not a job that dead-letters in production.
+
+### Inspecting the queue from your own routes
+
+```ts title="src/routes/admin/queue.get.ts"
+export const auth = 'admin'
+
+export default async ({ queue }) => ({
+  driver: queue.driver,
+  stats: await queue.stats(),        // counts by state
+  dead: await queue.dead(20),        // jobs that exhausted their retries
+  registered: [...queue.jobs.keys()],
+})
+```
+
+`await queue.revive(id)` puts a dead job back on the queue — the thing you actually want after
+fixing the bug that killed it.
+
 ## The dashboard
 
 ```
@@ -203,6 +280,24 @@ Register both bricks and [`ctx.mail.send()`](/docs/bricks/mail/) enqueues instea
 inline — so a slow provider delays an email rather than failing the request that triggered it,
 and a transient failure is retried rather than lost. Set `queue: false` on the mail brick to keep
 sends inline.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| Typed payloads, retries, backoff, timeouts | ✓ all drivers |
+| Dead letter, `revive()` | ✓ all drivers |
+| `delay` / `runAt` scheduling | ✓ all drivers |
+| Deduplication by `key` | ✓ all drivers |
+| Cron | ✓ all drivers, deduplicated per minute across instances |
+| Survives a restart | `redisQueue` and `sqlQueue` only |
+| Several workers without double-running | ✓ — `FOR UPDATE SKIP LOCKED` on SQL, atomic move on Redis |
+| Job priorities | ✗ |
+| Job chaining / workflows | ✗ — dispatch the next job from the handler |
+
+**What fails at boot:** the memory driver in production without `allowMemoryInProduction`; a cron
+expression that does not parse; a cron entry naming an unregistered job; and `dispatch` of a job
+missing from `jobs: [...]` throws with the line that fixes it.
 
 ## Limitations
 

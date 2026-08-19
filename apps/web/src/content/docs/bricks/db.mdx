@@ -119,6 +119,86 @@ back everything it wrote.
 Added to an app with no database brick, it does nothing rather than failing — so the line is
 safe to leave in a template.
 
+## What it creates
+
+**Files:** none. **Tables:** none. This brick migrates nothing and writes nothing — it manages a
+connection. What the adapter under it creates is on that adapter's page:
+[`db-drizzle`](/docs/bricks/db-drizzle/#what-it-creates),
+[`db-mongoose`](/docs/bricks/db-mongoose/#what-it-creates).
+
+## Usage
+
+Pick an adapter, register it, and query natively:
+
+```ts title="src/app.ts"
+import { db } from '@theoven/db'
+import { drizzleSqlite } from '@theoven/db-drizzle'
+import * as schema from './schema'
+
+export const app = createApp().use(
+  db(drizzleSqlite({ url: './data.db', schema }), { healthPath: '/_health/db', checkOnBoot: true }),
+)
+```
+
+```ts title="src/routes/users/index.get.ts"
+import { eq } from 'drizzle-orm'
+import { users } from '../../schema'
+
+export default async ({ db }) => db.select().from(users).where(eq(users.active, true))
+```
+
+A transaction that rolls back correctly, including across `await`:
+
+```ts
+import { transaction } from '@theoven/db'
+
+await transaction(ctx.db, async (tx) => {
+  await tx.insert(orders).values(order)
+  await tx.update(stock).set({ count: left }).where(eq(stock.sku, order.sku))
+})
+```
+
+Or per request, so a handler that throws writes nothing:
+
+```ts
+import { transactional } from '@theoven/db'
+
+app.use(transactional())
+```
+
+`transaction()` throws — naming the provider — on an adapter that declares no transaction support,
+rather than running your work unwrapped. [`db-mongoose`](/docs/bricks/db-mongoose/#transactions) is
+the case that exists.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `connect`, `health`, `close` | required of every provider |
+| `transaction` | **optional** — declared per provider, and refused loudly when absent |
+| Health endpoint | opt-in via `healthPath` |
+| Boot-time connection check | on by default |
+| Query API | ✗ deliberately — `ctx.db` is the native client (D16) |
+| Migrations | ✗ — your ORM's tooling |
+| Several databases in one app | ✗ — one connection per app today |
+
+**What fails at boot:** an unreachable database when `checkOnBoot` is on, and a provider whose
+`health` returns false — reported with the provider's name rather than a stack trace from inside a
+driver.
+
+## How it is verified
+
+The contract itself is tested against a **fake provider** — the right tool here, because what is
+under test is the brick's own behaviour: that `connect` runs once, that a failed boot check throws
+with the provider named, that `healthPath` answers `503` when unhealthy, that `close` runs on
+shutdown, and that `transaction()` refuses a provider that declares none.
+
+That the contract is genuinely portable is proven elsewhere, by two structurally different
+adapters passing it: [`db-drizzle`](/docs/bricks/db-drizzle/) (SQL, client-scoped transactions) and
+[`db-mongoose`](/docs/bricks/db-mongoose/) (documents, session-scoped, no portable transaction). One
+adapter would have proved nothing — a contract shaped around a single ORM fits that ORM and
+nothing else.
+
 ## Writing a provider
 
 Four methods:

@@ -34,6 +34,48 @@ export const app = createApp()
   .use(auth(basicAuth({ db: client, secret: env.string('AUTH_SECRET') }), { policies }))
 ```
 
+## What it does
+
+The auth **contract**, not an implementation. It defines what a provider is, enforces route
+guards, runs your named policies, and puts `ctx.user` on the context typed to whichever provider
+you registered.
+
+It also owns the security-critical half of password auth — argon2id hashing, JWT signing,
+single-use reset tokens, refresh rotation — so that storage bricks implement seven storage methods
+and nothing security-sensitive (D26). See [Flows](#flows-for-storage-bricks).
+
+Alone it authenticates nobody. Pair it with a provider:
+
+| Provider | For |
+| --- | --- |
+| [`auth-basic`](/docs/bricks/auth-basic/) | email and password, stored with Drizzle |
+| [`auth-mongo`](/docs/bricks/auth-mongo/) | the same, stored with Mongoose |
+| [`auth-clerk`](/docs/bricks/auth-clerk/) | Clerk-hosted sign-in, verified locally |
+| [`auth-better`](/docs/bricks/auth-better/) | better-auth mounted inside your app |
+
+## Endpoints
+
+**This brick mounts none.** A provider declaring the `routes` capability mounts its own under
+`prefix` — `auth-basic` and `auth-mongo` add eight endpoints at `/auth/*`, `auth-better` forwards
+everything under it, and `auth-clerk` adds nothing at all.
+
+## Configuration
+
+```ts
+auth(provider, { prefix: '/auth', policies })
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `prefix` | `/auth` | where a route-mounting provider is mounted |
+| `policies` | `{}` | named authorization rules, see [Policies](#policies) |
+
+Everything else — secrets, token lifetimes, rate limits — belongs to the provider, on its own page.
+
+## What it creates
+
+Nothing. No files, no tables. Storage bricks own their tables and list them on their own pages.
+
 ## Guarding a route
 
 ```ts
@@ -101,6 +143,46 @@ mismatch fails **at boot** rather than at 3am:
 Providers genuinely differ: Clerk cannot sign a user in from a server, and better-auth cannot
 not-mount routes. Requiring both to pretend produces adapters that throw in production.
 
+## Usage
+
+In a route file, the guard is an export and `ctx.user` is narrowed by it:
+
+```ts title="src/routes/me.get.ts"
+export const auth = true
+
+// `user` is `Identity`, not `Identity | null` — the guard above is what proves that.
+export default async ({ user }) => ({ id: user.id, email: user.email })
+```
+
+```ts title="src/routes/users/[userId]/billing.get.ts"
+import { z } from 'zod'
+
+export const auth = 'owner'
+export const params = z.object({ userId: z.uuid() })
+
+export default async ({ user, params }) => loadBilling(params.userId)
+```
+
+Outside a route — in middleware, where there is no schema to read — narrow explicitly:
+
+```ts
+import { requireUser } from '@theoven/auth'
+
+app.use(async (ctx, next) => {
+  const user = requireUser(ctx.user)   // throws 401 if anonymous
+  ctx.log.info('acting', { userId: user.id })
+  return next()
+})
+```
+
+Reading what the provider can do, at runtime:
+
+```ts
+ctx.auth.name                      // 'basic', 'clerk', 'better-auth', …
+ctx.auth.capabilities?.signOut     // false on auth-clerk
+await ctx.auth.signOut?.(ctx)
+```
+
 ## Writing a provider
 
 ```ts
@@ -128,6 +210,33 @@ implements those seven methods and gets every flow.
 
 That is why `auth-basic` (Drizzle) and `auth-mongo` (Mongoose) can exist without duplicating
 password handling: a security fix landing in one and not the other is the bug nobody finds.
+
+## How it is verified
+
+The contract is tested with **stub providers** — deliberately, because what is under test is the
+brick's own logic, not any vendor's: that `auth: true` refuses an anonymous request with a `401`
+carrying `WWW-Authenticate: Bearer`, that a failing policy gives `403` and not `401`, that an
+array of policies requires **all** of them, that an unknown policy name fails **closed** with a
+`500` naming the registered ones, that a public route still works while anonymous, and that a
+provider declaring `routes` without a `mount()` fails at boot.
+
+The flows run here against an **in-memory `AuthStore`** — which doubles as a worked example of how
+small the contract is — covering signup, login, refresh rotation, logout, password change and
+reset. The interesting ones are the security properties rather than the happy paths: an unknown
+email fails with the *identical* message to a wrong password **and in comparable time**, a rotated
+refresh token stops working, a reset token is single-use, a forgotten-password request for an
+unknown address succeeds silently rather than confirming absence, and changing a password ends
+every other session.
+
+Crypto is tested separately: argon2id round-trips, the same password hashes differently each time,
+a malformed hash returns false rather than throwing, tokens are stored only as SHA-256, and access
+tokens are refused when expired, tampered with, or signed by another secret. Signing without a
+secret throws rather than signing with nothing.
+
+That `AuthStore` is a real contract and not a description of its first implementation is proven
+elsewhere: the shared `describeAuthStore` suite from `@theoven/auth/testing` is run by
+[`auth-basic`](/docs/bricks/auth-basic/) against SQLite and [`auth-mongo`](/docs/bricks/auth-mongo/)
+against MongoDB.
 
 ## Limitations
 

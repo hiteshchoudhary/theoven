@@ -86,6 +86,64 @@ Two things are added for you:
 
 `HEAD` routes are skipped: they are served from `GET` and carry no separate contract.
 
+## What it creates
+
+**Files:** none at runtime. `oven openapi --out openapi.json` writes that file when you ask it to;
+nothing is written otherwise.
+
+**Tables:** none.
+
+## Usage
+
+The document comes from schemas you already wrote for validation — declaring them twice is exactly
+the drift this avoids:
+
+```ts title="src/routes/users/[id].get.ts"
+import { z } from 'zod'
+
+export const summary = 'Fetch a user'
+export const tags = ['users']
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const response = z.object({
+  id: z.uuid(),
+  email: z.email(),
+  createdAt: z.iso.datetime(),
+})
+
+export default async ({ db, params }) => findUser(db, params.id)
+```
+
+That route arrives in the document with its path parameter, its response schema, its tag, its
+summary, and a security requirement — none of it written twice.
+
+Registering the brick, with the metadata a generated client needs:
+
+```ts title="src/app.ts"
+import { openapi } from '@theoven/core'
+
+export const app = createApp().use(
+  openapi({
+    info: { title: 'Acme API', version: '1.2.0', description: 'Everything Acme.' },
+    servers: [{ url: 'https://api.acme.com', description: 'production' }],
+    tags: [{ name: 'users', description: 'Accounts and profiles.' }],
+    exclude: ['/internal/*'],
+  }),
+)
+```
+
+## Capabilities
+
+| | |
+| --- | --- |
+| Paths, params, query, body, responses from Zod | ✓ |
+| `summary`, `tags`, `auth` picked up from route exports | ✓ |
+| Security schemes contributed by auth bricks | ✓ — whichever provider is registered |
+| RFC 9457 problem responses documented | ✓ |
+| Non-Zod Standard Schema validators | described permissively, with a startup warning |
+| Wildcard-mounted routes (e.g. [`auth-better`](/docs/bricks/auth-better/)) | ✗ — cannot be described |
+| Webhooks, callbacks, links | ✗ |
+
 ## Using it from code
 
 ```ts

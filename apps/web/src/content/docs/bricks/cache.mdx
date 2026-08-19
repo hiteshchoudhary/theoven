@@ -33,6 +33,20 @@ export const app = createApp().use(
 )
 ```
 
+## What it does
+
+Gives you `ctx.cache` — get, set, delete, tag-invalidate, and `cached()`, which is the one you
+will actually use. Two drivers ship: an in-process LRU and Redis, behind the same interface, so
+moving from one to the other is a config change.
+
+The two things it does that a `Map` does not: collapsing concurrent misses so a cold popular key
+does not stampede your database, and invalidating by tag so you do not have to remember every key
+derived from a thing that changed.
+
+## Endpoints
+
+This brick adds no endpoints.
+
 ## `cached()` is the whole API
 
 ```ts
@@ -84,6 +98,61 @@ await ctx.cache.delete('user:1')
 await ctx.cache.clear()
 ```
 
+## Usage
+
+The common shape — an expensive read, cached and tagged so a write can invalidate it:
+
+```ts title="src/routes/users/[id].get.ts"
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { users } from '../../schema'
+
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ cache, db, params }) =>
+  cache.cached(
+    `user:${params.id}`,
+    async () => {
+      const [user] = await db.select().from(users).where(eq(users.id, params.id))
+      if (!user) throw new NotFound(`No user ${params.id}.`)
+      return user
+    },
+    { ttl: 60_000, tags: [`user:${params.id}`] },
+  )
+```
+
+```ts title="src/routes/users/[id].patch.ts"
+export default async ({ cache, db, params, body }) => {
+  const updated = await db.update(users).set(body).where(eq(users.id, params.id)).returning()
+  // Every key tagged with this user goes, whichever route cached it.
+  await cache.invalidate(`user:${params.id}`)
+  return updated[0]
+}
+```
+
+Note the `throw` inside the producer: it propagates to the caller and **nothing is cached**, so a
+missing row does not become a cached 404.
+
+### Caching something that is not a database row
+
+```ts
+const rates = await ctx.cache.cached(
+  'fx:usd',
+  async () => (await fetch('https://api.example.com/fx/usd')).json(),
+  { ttl: 5 * 60_000 },
+)
+```
+
+This is where stampede protection earns its place: a third-party API that rate-limits you will
+otherwise get one request per concurrent miss the moment the entry expires.
+
+## What it creates
+
+**Files:** none. **Tables:** none.
+
+With `redisCache`, keys are written under the configured `prefix` (default `oven:cache`), plus one
+Redis set per tag. Nothing else in your Redis is touched, and `clear()` removes only prefixed keys.
+
 ## Drivers
 
 | Driver | Stores in | Use for |
@@ -104,10 +173,55 @@ like a leak somewhere else entirely.
 
 ## Configuration
 
+```ts
+cache(redisCache({ url: env.string('REDIS_URL'), prefix: 'myapp:' }), {
+  ttl: 60_000,
+  allowMemoryInProduction: false,
+})
+```
+
+**The brick:**
+
 | Option | Default | |
 | --- | --- | --- |
-| `ttl` | none | default lifetime when a call does not give one |
+| `ttl` | none | default lifetime in ms when a call does not give one |
 | `allowMemoryInProduction` | `false` | permit the in-process driver outside development |
+
+**`memoryCache(options)`:**
+
+| Option | Default | |
+| --- | --- | --- |
+| `max` | `10000` | entries kept before least-recently-used eviction |
+
+**`redisCache(options)`:**
+
+| Option | Default | |
+| --- | --- | --- |
+| `url` | `REDIS_URL` | connection string |
+| `prefix` | `oven:cache` | namespace for every key this cache writes |
+| `client` | — | an existing `Bun.RedisClient` to adopt instead of connecting |
+
+**Per call**, `set()` and `cached()` take:
+
+| Option | Default | |
+| --- | --- | --- |
+| `ttl` | the brick's `ttl` | lifetime in ms for this entry |
+| `tags` | none | tags this entry belongs to, for `invalidate()` |
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `get`, `set`, `delete`, `clear` | ✓ both drivers |
+| `cached()` with stampede collapsing | ✓ both, within one process |
+| `invalidate(tag)` | ✓ both |
+| Shared across instances | Redis only |
+| LRU eviction | memory only — Redis has its own `maxmemory` policy |
+| `stale-while-revalidate` | ✗ |
+| Cross-instance stampede lock | ✗ by choice — see above |
+
+**What fails at boot:** `memoryCache` in production without `allowMemoryInProduction`; and a Redis
+URL that cannot be reached.
 
 ## Limitations
 

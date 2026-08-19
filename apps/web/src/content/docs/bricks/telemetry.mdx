@@ -44,6 +44,21 @@ new NodeSDK({ traceExporter: new OTLPTraceExporter() }).start()
 
 Import that before your app and every request is traced.
 
+## What it does
+
+Wraps every request in an OpenTelemetry span, named by route pattern, with the standard HTTP
+attributes on it. It extracts an incoming `traceparent` so a request from another service
+continues that trace, and exposes `span()` and `traceIds()` for the parts of your own work worth
+seeing separately.
+
+It is **middleware**, not a service — there is no `ctx.telemetry`. Tracing is something that
+happens to a request, not something a handler reaches for.
+
+## Endpoints
+
+This brick adds no endpoints. It never mounts a metrics or trace endpoint; your SDK's exporter
+sends data out, and nothing needs to be scraped from your app.
+
 ## Spans are named by route
 
 ```
@@ -93,6 +108,67 @@ const rates = await span('fetch-rates', () => fetch(url).then((r) => r.json()))
 
 For the parts of a request worth seeing separately — a third-party call, an expensive query. It
 ends the span whether the work returns or throws.
+
+## Usage
+
+Registered once, it applies to everything:
+
+```ts title="src/app.ts"
+export const app = createApp().use(
+  telemetry({
+    name: 'checkout-api',
+    version: '2.1.0',
+    ignore: ['/health', '/metrics'],
+    attributes: (ctx) => ({ 'app.tenant': ctx.headers.get('x-tenant-id') ?? 'none' }),
+  }),
+)
+```
+
+`attributes` runs per request, so anything on the context is available — a tenant, a plan, an
+API-key id. Keep them low-cardinality: an attribute with a distinct value per request is a
+dimension your backend cannot group by, and is charged for.
+
+Inside a handler, add spans for what is worth separating and stamp trace ids on logs:
+
+```ts title="src/routes/checkout.post.ts"
+import { span, traceIds } from '@theoven/telemetry'
+
+export const auth = true
+
+export default async ({ body, db, log }) => {
+  const quote = await span('pricing.quote', () => priceBasket(body.items), {
+    'basket.size': body.items.length,
+  })
+
+  const charge = await span('stripe.charge', () => gateway.charge(quote.total))
+
+  log.info('charged card', { amount: quote.total, ...traceIds() })
+  return db.insert(orders).values({ charge: charge.id }).returning()
+}
+```
+
+`span()` takes an optional third argument of attributes, and ends the span whether the work
+returns or throws.
+
+## What it creates
+
+Nothing — no files, no tables, no endpoints. Spans go wherever your SDK's exporter sends them.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| Request spans, named by route pattern | ✓ |
+| `traceparent` extraction — continues an upstream trace | ✓ |
+| Manual spans via `span()` | ✓ |
+| Trace/span ids for logs via `traceIds()` | ✓ |
+| Automatic DB / queue / outbound-`fetch` instrumentation | ✗ — wrap with `span()` |
+| Metrics and logs signals | ✗ — traces only |
+| Sampling, exporters, resource attributes | your SDK's, not this brick's |
+
+**What fails at boot:** nothing. With no SDK registered, OpenTelemetry's no-op tracer is used and
+the middleware costs almost nothing — so this brick is safe to leave registered in tests and in
+development.
 
 ## Configuration
 

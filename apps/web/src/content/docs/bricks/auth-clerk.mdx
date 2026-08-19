@@ -10,7 +10,7 @@ import { Aside } from '@astrojs/starlight/components'
 | | |
 | --- | --- |
 | **Package** | `@theoven/auth-clerk` |
-| **Adds to context** | nothing itself — it is a provider for [`auth`](/docs/bricks/auth/) |
+| **Adds to context** | `ctx.user`, `ctx.auth` — it is a provider for [`auth`](/docs/bricks/auth/) |
 | **Endpoints** | **none** — Clerk hosts sign-in |
 | **Creates files** | none |
 | **Creates tables** | none |
@@ -38,6 +38,20 @@ CLERK_ISSUER=https://tidy-mole-42.clerk.accounts.dev
 
 That is the whole integration. Your frontend signs in with Clerk and sends the session token;
 this brick verifies it and puts the user on `ctx.user`.
+
+## What it does
+
+Verifies Clerk session tokens on every request and puts the result on `ctx.user`. Nothing else —
+Clerk hosts sign-in, your frontend talks to Clerk directly, and this brick is the backend half
+that decides whether to trust what arrives.
+
+Verification is local: the signing keys are fetched once and cached, so a request costs no round
+trip to Clerk.
+
+## Endpoints
+
+**This brick adds no endpoints.** Clerk hosts sign-in, sign-up, and sign-out; there is nothing
+for Oven to mount. That is the design, not a gap — see below.
 
 ## The opposite end of the contract
 
@@ -87,6 +101,52 @@ A valid signature proves *Clerk* minted the token. It does not prove the token w
 is accepted here. It is optional because Clerk omits `azp` for some token types, and backends
 that never see a browser would break — but set it if a browser is involved.
 
+## Usage
+
+Guard a route and read the user, the same as with any provider:
+
+```ts title="src/routes/me.get.ts"
+export const auth = true
+
+export default async ({ user }) => ({
+  clerkId: user.id,        // the `sub` claim
+  email: user.email,       // only if your JWT template includes it — see Limitations
+})
+```
+
+Anything else in the token is on `raw`, typed as Clerk's claims:
+
+```ts title="src/routes/org/dashboard.get.ts"
+export const auth = true
+
+export default async ({ user }) => {
+  const orgId = user.raw.org_id
+  if (!orgId) throw new Forbidden('This endpoint needs an organization token.')
+  return { orgId }
+}
+```
+
+Roles and organizations are claims, not normalised fields (D17), so anything conditional on them
+belongs in a named [policy](/docs/bricks/auth/#policies):
+
+```ts title="src/app.ts"
+auth(clerkAuth({ issuer: env.url('CLERK_ISSUER') }), {
+  policies: {
+    orgAdmin: (user) => user.raw.org_role === 'admin',
+  },
+})
+```
+
+```ts title="src/routes/org/settings.patch.ts"
+export const auth = 'orgAdmin'
+```
+
+Mirroring Clerk users into your own tables is a webhook you write; this brick does not do it.
+
+## What it creates
+
+Nothing. No files, no tables, no migrations. Users live in Clerk.
+
 ## Where the token comes from
 
 `Authorization: Bearer <token>` first, because that is what an API client sends. Then the
@@ -112,6 +172,38 @@ accepts anything. Both that and an RS256-key-as-HMAC-secret attempt have tests.
 An unknown `kid` usually means Clerk rotated its keys, so the key set is refetched immediately
 rather than after the TTL — but at most once a minute. Without that limit, a stream of forged
 `kid`s would be a way to make your server hammer Clerk's key endpoint on an attacker's behalf.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `identify` | ✓ — local JWT verification, no call to Clerk per request |
+| `routes` | ✗ — declared `false`; Clerk hosts sign-in |
+| `signOut` | ✗ — declared `false`; sessions belong to Clerk |
+| `refresh` | ✗ — declared `false`; Clerk's SDK refreshes in the browser |
+
+**What fails at boot:** a route asking for something the provider declares it cannot do fails at
+startup, naming the provider and the capability — rather than at 3am, in a handler.
+
+## How it is verified
+
+The signature path is tested against **generated RSA key pairs**, so the tokens are really signed
+and really verified rather than compared to a fixture.
+
+The rejections are the point, and each has its own test: a token signed by a different key,
+`alg: "none"`, an RS256 key offered as an HMAC secret, an unknown `kid`, a missing `kid`, and a
+malformed token — rejected rather than thrown. Then the claim checks: wrong issuer, expired, not
+yet valid, no expiry at all, `authorizedParties` enforced when set, and skew tolerated exactly at
+the edges.
+
+Key handling: keys cached across requests, an unknown `kid` triggering at most one refetch a
+minute, a key server that is down surfacing as an error rather than a silent pass, and a key set
+with no usable keys treated as an error.
+
+End to end through a real app: a bearer token identifies a request, so does the `__session`
+cookie, a guarded route refuses an anonymous request, and a forged token is refused.
+
+No Clerk account is needed for any of this, and none is used.
 
 ## Limitations
 

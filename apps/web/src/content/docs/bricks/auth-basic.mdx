@@ -35,6 +35,16 @@ That is the Laravel/Rails property: a working signup, login and password reset b
 provisioned anything. SQLite is a file, and reset emails print to your terminal until you
 configure a provider.
 
+## What it does
+
+Email-and-password authentication, stored with Drizzle over SQLite. It mounts eight endpoints at
+`/auth/*`, hashes with argon2id, and issues a short-lived access JWT plus a revocable refresh
+token — so `logout`, "sign out everywhere" and "changing a password ends other sessions" are all
+real rather than client-side gestures (D20).
+
+This is the default for `oven create`: signup, login and password reset work before you have
+provisioned anything.
+
 ## Endpoints
 
 | Method | Path | Purpose | Auth |
@@ -176,6 +186,99 @@ These are the ones worth knowing about, because they shape what the endpoints re
   believes an account is compromised.
 
 Each of these has a test, including the enumeration and token-reuse cases.
+
+## Usage
+
+The endpoints are mounted for you. Your own routes just read `ctx.user`:
+
+```ts title="src/routes/me.get.ts"
+export const auth = true
+
+export default async ({ user }) => ({ id: user.id, email: user.email, name: user.name })
+```
+
+`user.raw` is the stored row, so any column you added to `auth_users` is reachable — and is what a
+[policy](/docs/bricks/auth/#policies) reads:
+
+```ts title="src/app.ts"
+auth(basicAuth({ db: client, secret: env.string('AUTH_SECRET') }), {
+  policies: { admin: (user) => user.raw.role === 'admin' },
+})
+```
+
+### A client, end to end
+
+```ts
+const { tokens } = await fetch('/auth/login', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ email, password }),
+}).then((r) => r.json())
+
+// The access token goes in the header; the refresh token was set as an httpOnly cookie
+// and is never visible to your JavaScript, which is the point.
+await fetch('/me', { headers: { authorization: `Bearer ${tokens.accessToken}` } })
+
+// When it expires — the cookie is sent automatically.
+await fetch('/auth/refresh', { method: 'POST' })
+```
+
+### Calling the flows from your own endpoint
+
+When signup needs to do more than create a user:
+
+```ts title="src/routes/register.post.ts"
+import { signup } from '@theoven/auth'
+import { z } from 'zod'
+
+export const body = z.object({
+  email: z.email(),
+  password: z.string().min(8),
+  name: z.string(),
+  company: z.string(),
+})
+
+export default async ({ body, auth, db }) => {
+  const { user, tokens } = await signup(auth.flows, body)
+  await db.insert(companies).values({ name: body.company, ownerId: user.id })
+  return { user, ...tokens }
+}
+```
+
+`ctx.auth.flows` is the same `FlowConfig` the mounted endpoints use, so password rules, hashing and
+token lifetimes cannot drift from them.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `identify` | ✓ — from the access JWT, no database read on the hot path |
+| `routes` | ✓ — the eight endpoints above |
+| `signOut` | ✓ — deletes the refresh row, so logout is real |
+| `refresh` | ✓ — rotates the refresh token |
+| Email verification | ✗ — the column exists and is never set |
+| OAuth / social login | ✗ — use [`auth-clerk`](/docs/bricks/auth-clerk/) or [`auth-better`](/docs/bricks/auth-better/) |
+| Rate limiting shared across instances | ✗ — per process |
+
+**What fails at boot:** a missing `secret`, and a missing `db`. A missing `sendResetEmail` only
+warns, so reset works in development before mail is configured.
+
+## How it is verified
+
+Against a **real SQLite database**, through a real app, over HTTP — not against the store directly.
+
+It runs the shared `describeAuthStore` conformance suite from `@theoven/auth/testing`, the same one
+[`auth-mongo`](/docs/bricks/auth-mongo/) runs, plus the full flow: signup, login, refresh, logout,
+change password, forgot, reset.
+
+The assertions that matter are the negative ones. A wrong password and an unknown email fail with
+the *same* message and in comparable time, so the endpoint cannot be used to discover who has an
+account. A rotated refresh token stops working. A reset token cannot be redeemed twice. Changing a
+password ends every other session. The password is never stored — asserted by reading the row back
+and checking the plaintext appears nowhere in it.
+
+A test also asserts this brick's endpoint list matches `auth-mongo`'s exactly, which is what keeps
+"same brick, different storage" true as both change.
 
 ## Where the code lives
 

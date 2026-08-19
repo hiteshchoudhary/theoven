@@ -48,6 +48,29 @@ export default defineRoute(
 No SDK. `Bun.S3Client` is in the runtime and signs its own requests, which is why this brick is a
 few hundred lines rather than a dependency tree.
 
+## What it does
+
+Gives you `ctx.storage` — upload, download, list, delete, stat, and presigned URLs — over four
+drivers: S3 (and anything S3-compatible), local disk, [Bunny](/docs/bricks/storage-bunny/) and
+[ImageKit](/docs/bricks/storage-imagekit/). One interface, so the driver is a config change.
+
+Uploads arrive in your handler as web `File` objects because core parses multipart bodies
+already — there is no `multer` equivalent to install or order correctly.
+
+## Endpoints
+
+This brick adds no endpoints. Files are served from your storage provider or through your own
+routes; nothing is mounted automatically, because a storage brick that silently exposed a public
+file route would be a security decision made on your behalf.
+
+## What it creates
+
+**Files:** with `diskStorage`, the directory at `dir` and everything uploaded into it — add it to
+`.gitignore`. With the other drivers, nothing locally.
+
+**Tables:** none. This brick stores no index of what you uploaded; the bucket is the source of
+truth.
+
 ## Usage
 
 ```ts

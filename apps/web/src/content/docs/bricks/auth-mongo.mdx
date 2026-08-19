@@ -10,7 +10,7 @@ import { Aside } from '@astrojs/starlight/components'
 | | |
 | --- | --- |
 | **Package** | `@theoven/auth-mongo` |
-| **Adds to context** | nothing itself — it is a provider for [`auth`](/docs/bricks/auth/) |
+| **Adds to context** | `ctx.user`, `ctx.auth` — it is a provider for [`auth`](/docs/bricks/auth/) |
 | **Endpoints** | eight, at `/auth/*` |
 | **Creates files** | none |
 | **Creates collections** | `auth_users`, `auth_refresh_tokens`, `auth_reset_tokens` |
@@ -36,6 +36,32 @@ export const app = createApp()
   .use(db(mongooseDb({ url: env.string('MONGO_URL') })))
   .use(auth(mongoAuth({ connection, secret: env.string('AUTH_SECRET') })))
 ```
+
+## What it does
+
+Email-and-password authentication with users, sessions and password resets stored in MongoDB.
+It mounts the whole flow at `/auth/*`, hashes passwords with argon2id, issues a short-lived access
+JWT plus a revocable refresh token, and identifies every request from that JWT.
+
+It is [`auth-basic`](/docs/bricks/auth-basic/) with Mongoose underneath — literally, not
+approximately. See below.
+
+## Endpoints
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| `POST` | `/auth/signup` | create an account | none |
+| `POST` | `/auth/login` | sign in | none |
+| `POST` | `/auth/refresh` | new access token from the refresh cookie | cookie |
+| `POST` | `/auth/logout` | revoke the session | cookie |
+| `POST` | `/auth/forgot-password` | email a reset link | none |
+| `POST` | `/auth/reset-password` | redeem a reset token | token |
+| `POST` | `/auth/change-password` | change while signed in | bearer |
+| `GET` | `/auth/me` | the current user | bearer |
+
+The prefix is configurable: `auth(mongoAuth(...), { prefix: '/identity' })`. A test asserts this
+list matches `auth-basic`'s exactly — that is what "different storage, same brick" has to mean to
+be worth saying.
 
 ## It is `auth-basic` with different storage
 
@@ -82,6 +108,85 @@ brick you chose. Letting Mongo assign an ObjectId instead would make the id form
 that choice — and those ids are visible in JWT subjects, in URLs, and in anything that stored
 one.
 
+## Configuration
+
+```ts
+mongoAuth({
+  connection,
+  secret: env.string('AUTH_SECRET'),
+  accessTtl: 15 * 60,
+  refreshTtl: 30 * 24 * 60 * 60,
+  minPasswordLength: 12,
+  sendResetEmail: (to, token) => mail.send({ to, subject: 'Reset', text: resetUrl(token) }),
+})
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `connection` | — | **required**; a Mongoose `Connection`, not the global singleton |
+| `secret` | — | **required**; signs access tokens. No default exists, deliberately |
+| `accessTtl` | `900` | access-token lifetime, seconds |
+| `refreshTtl` | `2592000` | refresh-token lifetime, seconds (30 days) |
+| `resetTtl` | `3600` | reset-link lifetime, seconds |
+| `minPasswordLength` | `8` | |
+| `sendResetEmail` | — | without it the reset link is logged, and boot warns |
+| `rateLimit` | on | `{ login: 10, signup: 5, forgotPassword: 3, window: 900000 }`, or `false` |
+| `refreshCookie` | `oven_refresh` | name of the httpOnly refresh cookie |
+
+Every one of these is the shared option from `@theoven/auth`, so the
+[`auth-basic` configuration notes](/docs/bricks/auth-basic/#configuration) apply unchanged.
+
+## Usage
+
+The endpoints are mounted for you; your own routes just read `ctx.user`:
+
+```ts title="src/routes/me.get.ts"
+export const auth = true
+
+export default async ({ user }) => ({ id: user.id, email: user.email, name: user.name })
+```
+
+`user.raw` is the stored user document, so anything you added to the collection is reachable.
+
+### Calling the flows yourself
+
+When you want your own endpoint — a signup that also creates a workspace, say — use the flows
+rather than reimplementing them:
+
+```ts title="src/routes/register.post.ts"
+import { signup } from '@theoven/auth'
+import { z } from 'zod'
+
+export const body = z.object({
+  email: z.email(),
+  password: z.string().min(8),
+  name: z.string(),
+  workspace: z.string(),
+})
+
+export default async ({ body, auth, db }) => {
+  // `signup` returns the identity and the token pair, not one merged object.
+  const { user, tokens } = await signup(auth.flows, body)
+  await db.model('Workspace', workspaceSchema).create({ name: body.workspace, owner: user.id })
+  return { user, ...tokens }
+}
+```
+
+`ctx.auth.flows` is the shared `FlowConfig` — the same one the mounted endpoints use, so password
+rules, hashing and token lifetimes stay identical rather than being re-specified here.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| `identify` | ✓ — from the access JWT |
+| `routes` | ✓ — the eight endpoints above |
+| `signOut` | ✓ — `/auth/logout` revokes the refresh row |
+| `refresh` | ✓ — `/auth/refresh` rotates it |
+
+**What fails at boot:** a missing `secret`, and a missing `connection`. A missing `sendResetEmail`
+warns rather than fails, so reset works in development before mail is configured.
+
 ## Housekeeping
 
 ```ts
@@ -111,6 +216,27 @@ If you write a storage brick, run it. It checks the behaviours the flows actuall
 case-insensitive email lookup, tokens found by hash, `usedAt` persisting, and the one that
 matters most: that `deleteRefreshTokens({})` deletes **nothing** rather than signing out every
 user in the database.
+
+## How it is verified
+
+Against a **real MongoDB**, not a fake — a fake store would only prove the fake works, and the
+things that go wrong here are Mongo's own: unique index violations, case-insensitive lookup,
+`usedAt` persisting.
+
+It runs the shared `describeAuthStore` conformance suite from `@theoven/auth/testing` — the same
+suite `auth-basic` runs — plus the full flow end to end through a real app: signup, login, refresh,
+logout, password change, reset.
+
+The test that matters most is the one asserting `deleteRefreshTokens({})` deletes **nothing**. In
+Mongo an empty filter matches every document, so the naive implementation of "sign out this user"
+signs out the entire database. That is a Mongo-specific footgun `auth-basic` cannot have, and it is
+exactly why the conformance suite exists.
+
+<Aside type="caution" title="These tests are gated">
+  They require `MONGO_URL` and **skip with a printed notice** when it is unset. They run in CI
+  against `mongo:8`. They have not been run on the author's machine, and this page would rather say
+  so than imply a coverage it cannot demonstrate.
+</Aside>
 
 ## Limitations
 
