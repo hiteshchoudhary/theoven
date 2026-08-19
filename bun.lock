@@ -122,6 +122,16 @@
         "mongoose": "^8.0.0",
       },
     },
+    "packages/cache": {
+      "name": "@theoven/cache",
+      "version": "0.1.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
+      },
+    },
     "packages/cli": {
       "name": "@theoven/cli",
       "version": "0.1.2",
@@ -616,6 +626,8 @@
     "@theoven/auth-clerk": ["@theoven/auth-clerk@workspace:packages/auth-clerk"],
 
     "@theoven/auth-mongo": ["@theoven/auth-mongo@workspace:packages/auth-mongo"],
+
+    "@theoven/cache": ["@theoven/cache@workspace:packages/cache"],
 
     "@theoven/cli": ["@theoven/cli@workspace:packages/cli"],
 

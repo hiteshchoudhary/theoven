@@ -1,0 +1,131 @@
+---
+title: cache
+description: Caching with tag invalidation and stampede protection — in memory, or in Redis.
+sidebar:
+  order: 13
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/cache` |
+| **Adds to context** | `ctx.cache` |
+| **Endpoints** | none |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/cache
+```
+
+```ts title="src/app.ts"
+import { cache, memoryCache, redisCache } from '@theoven/cache'
+
+export const app = createApp().use(
+  cache(
+    env.has('REDIS_URL') ? redisCache({ url: env.string('REDIS_URL') }) : memoryCache(),
+    { ttl: 60_000 },
+  ),
+)
+```
+
+## `cached()` is the whole API
+
+```ts
+const user = await ctx.cache.cached(
+  `user:${id}`,
+  () => ctx.db.select().from(users).where(eq(users.id, id)),
+  { ttl: 60_000, tags: [`user:${id}`] },
+)
+```
+
+Hit, and you get the value. Miss, and the producer runs once and the result is stored.
+
+### Concurrent misses share one call
+
+This is the part worth having a library for. A popular key expires, fifty requests miss it in the
+same instant, and all fifty recompute — a **cache stampede**, which is how a cache turns a slow
+query into an outage.
+
+`cached()` collapses them: the first miss starts the work, the other forty-nine await the same
+promise.
+
+<Aside type="note" title="Within one process, deliberately">
+  Two instances can still each compute once. Collapsing that needs a distributed lock, which
+  costs a round trip on every miss to save one duplicate call — rarely the right trade. The
+  multiplier is *inside* an instance, and that is what this removes.
+</Aside>
+
+A producer that throws does not poison the key: the next caller gets a fresh attempt rather than
+the same rejection forever.
+
+## Invalidating by tag
+
+```ts
+await ctx.cache.set('user:1:profile', profile, { tags: ['user:1'] })
+await ctx.cache.set('user:1:posts', posts, { tags: ['user:1'] })
+
+await ctx.cache.invalidate('user:1')   // both gone
+```
+
+Tag the *thing* that can change, and invalidate that — rather than remembering every key derived
+from it, which is the version everyone gets wrong on the third feature.
+
+## The rest
+
+```ts
+await ctx.cache.get<User>('user:1')
+await ctx.cache.set('user:1', user, { ttl: 30_000 })
+await ctx.cache.delete('user:1')
+await ctx.cache.clear()
+```
+
+## Drivers
+
+| Driver | Stores in | Use for |
+| --- | --- | --- |
+| `memoryCache({ max })` | this process | development and tests, the default |
+| `redisCache({ url })` | Redis | production, and anything shared across instances |
+
+`memoryCache` evicts least-recently-used at `max` (default 10 000). An unbounded in-process cache
+is a memory leak with a friendly name — it grows until the process dies, and the failure looks
+like a leak somewhere else entirely.
+
+<Aside type="caution" title="The memory driver is refused in production">
+  Each instance would keep its own copy, so a user sees one value, refreshes, and sees another.
+  That bug reproduces only under load and never on a laptop, which is exactly why it is a boot
+  error. Pass `allowMemoryInProduction` if a per-instance cache is genuinely what you want —
+  for a hot in-process lookup table, it often is.
+</Aside>
+
+## Configuration
+
+| Option | Default | |
+| --- | --- | --- |
+| `ttl` | none | default lifetime when a call does not give one |
+| `allowMemoryInProduction` | `false` | permit the in-process driver outside development |
+
+## Limitations
+
+- **No `stale-while-revalidate`.** An expired entry is a miss; serving stale while refreshing in
+  the background is not implemented.
+- **No cross-instance stampede lock**, by choice — see above.
+- **Redis tags are sets of key names.** Invalidating a tag with a very large membership is one
+  `DEL` of many keys, which is fine at thousands and not at millions.
+- **Values must survive `JSON` round-tripping** on the Redis driver. A `Date` comes back as a
+  string; the memory driver keeps the original reference.
+
+## How it is verified
+
+Both drivers run the **same conformance suite** from `@theoven/cache/testing` — expiry, tag
+invalidation, detaching a re-set key from its old tags, and that clearing empties everything.
+
+The stampede test fires twenty concurrent requests at a cold key and asserts the producer ran
+**once**. The poisoning test was written first and failed: an async function body runs
+synchronously up to its first `await`, so a producer throwing immediately cleared the in-flight
+entry before it was ever recorded — and the rejected promise was then served forever. Both are
+regression tests now.

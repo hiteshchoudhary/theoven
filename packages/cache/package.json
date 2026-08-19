@@ -1,0 +1,48 @@
+{
+  "name": "@theoven/cache",
+  "version": "0.1.2",
+  "description": "Caching for Oven — memory and Redis, with tag invalidation and stampede protection",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "cache",
+    "redis"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/cache/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/cache"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/conformance.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:^"
+  }
+}
