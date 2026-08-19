@@ -89,5 +89,9 @@ jobs:
             echo "::error::An integration suite was skipped in CI. Check POSTGRES_URL / MONGO_URL."
             exit 1
           fi
+      # Catches the failure that is silent and total: a `workspace:` range reaching a published
+      # manifest makes every install fail with EUNSUPPORTEDPROTOCOL.
+      - name: Check what would be published
+        run: bun scripts/check-publish.mjs
       - name: Build site
         run: bash scripts/build-site.sh

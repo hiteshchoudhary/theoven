@@ -1,7 +1,12 @@
 # Oven — Task Tracker
 
-**Current state:** **Phases 0–4 complete**, except two items that are yours: buy the domain and
-rotate the npm token.
+**Current state:** **Phases 0–4 complete and all thirteen packages published to npm at 0.1.0.**
+Two items are yours: buy the domain, and rotate the npm token that was pasted into chat.
+
+```bash
+bun add @theoven/core
+bun add -d @theoven/cli
+```
 
 Shipped: router, server, context, errors, logger, response coercion, graceful shutdown, the
 always-on batteries, middleware, bricks, validation, file-based routing, OpenAPI, the CLI, and
@@ -55,7 +60,8 @@ Read `CLAUDE.md` §2b before working. The short version:
 - [x] GitHub repo created and pushed: `hiteshchoudhary/theoven`
 - [x] `@theoven` npm org claimed (owner: hiteshchoudhary); local `npm login` working
 - [ ] **You:** buy `theoven.app` and point it at the Cloudflare Pages project
-- [ ] **You:** rotate the npm token that was pasted into chat, then add the new one as the
+- [ ] **You:** rotate the npm token that was pasted into chat — now more urgent, since it can
+      publish to `@theoven/*` and those names are live — then add the new one as the
       `NPM_TOKEN` GitHub Actions secret so releases can publish
 
 ---
@@ -634,6 +640,21 @@ nothing imported, so the bundle still tried to scan `dist/routes` and died with 
 build now generates an entry that installs the manifest before the app module runs, and
 `loadRoutes` uses it instead of the filesystem — which keeps the app's own code identical in
 development and production. Covered by tests now.
+
+### 5.0 npm — done
+
+- [x] All thirteen packages published at **0.1.0**, in dependency order, with `bun publish`
+- [x] `scripts/check-publish.mjs` packs every package and checks what npm would actually receive:
+      no `workspace:` ranges, no test files, README and LICENSE present, every `exports` and `bin`
+      target actually in the tarball, and one version across the repo. Runs in CI and before a
+      release, and was verified to fail when a package is made to ship its tests.
+- [x] `scripts/publish.mjs` replaces `changeset publish` in the release workflow. Changesets
+      shells out to **npm**, which does not understand `workspace:` — one leaked `workspace:^` in
+      a published `peerDependencies` makes every install fail with `EUNSUPPORTEDPROTOCOL`. The
+      script uses `bun publish`, resolves publish order from the dependency graph, and skips
+      versions already on the registry so a partial release can simply be re-run.
+- [x] Verified by installing from npm into a clean project and running a real app: eight bricks
+      compose, signup and an authenticated request work, and `oven --version` reports 0.1.0
 
 ## Phase 5 — Docs & launch (`apps/web`)
 
