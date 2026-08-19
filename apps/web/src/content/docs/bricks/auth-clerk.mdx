@@ -1,0 +1,125 @@
+---
+title: auth-clerk
+description: Clerk-hosted sign-in, verified on every request. No routes, no sessions to manage.
+sidebar:
+  order: 8
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/auth-clerk` |
+| **Adds to context** | nothing itself — it is a provider for [`auth`](/docs/bricks/auth/) |
+| **Endpoints** | **none** — Clerk hosts sign-in |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/auth @theoven/auth-clerk
+```
+
+```ts title="src/app.ts"
+import { createApp, env } from '@theoven/core'
+import { auth } from '@theoven/auth'
+import { clerkAuth } from '@theoven/auth-clerk'
+
+export const app = createApp().use(
+  auth(clerkAuth({ issuer: env.url('CLERK_ISSUER') })),
+)
+```
+
+```bash title=".env"
+CLERK_ISSUER=https://tidy-mole-42.clerk.accounts.dev
+```
+
+That is the whole integration. Your frontend signs in with Clerk and sends the session token;
+this brick verifies it and puts the user on `ctx.user`.
+
+## The opposite end of the contract
+
+[`auth-basic`](/docs/bricks/auth-basic/) owns everything: users, passwords, sessions, eight
+endpoints. This brick owns nothing. It **cannot** sign anyone in or out, because sessions belong
+to Clerk and the browser talks to Clerk directly.
+
+So it declares those capabilities as absent:
+
+```ts
+capabilities: { routes: false, signOut: false, refresh: false }
+```
+
+<Aside type="note" title="Why declaring is better than faking">
+  A `signOut()` that quietly did nothing would be discovered by a user who clicked "sign out" and
+  stayed signed in. Declaring the gap means a route asking for something the provider cannot do
+  fails at **boot**, with a message naming the provider. That is the reason capabilities exist
+  rather than every provider implementing every method.
+</Aside>
+
+This is also why the brick exists in the first place: a contract that only ever met `auth-basic`
+would have been shaped around it. `auth-clerk` and `auth-basic` sit at opposite extremes and the
+same `AuthProvider` interface fits both, unchanged.
+
+## Configuration
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `issuer` | — | **required**; your Clerk instance URL |
+| `jwksUrl` | `${issuer}/.well-known/jwks.json` | where signing keys are fetched |
+| `authorizedParties` | — | origins allowed to mint tokens for this backend |
+| `clockSkew` | `5` | seconds of tolerance on `exp` / `nbf` |
+| `jwksTtl` | `600000` | how long a fetched key set is trusted, in ms |
+| `cookie` | `__session` | cookie checked when there is no bearer token |
+
+### Set `authorizedParties`
+
+```ts
+clerkAuth({
+  issuer: env.url('CLERK_ISSUER'),
+  authorizedParties: ['https://app.example.com'],
+})
+```
+
+A valid signature proves *Clerk* minted the token. It does not prove the token was minted for
+**you**. Without `authorizedParties`, a token issued to a different frontend of the same instance
+is accepted here. It is optional because Clerk omits `azp` for some token types, and backends
+that never see a browser would break — but set it if a browser is involved.
+
+## Where the token comes from
+
+`Authorization: Bearer <token>` first, because that is what an API client sends. Then the
+`__session` cookie, which Clerk's browser SDK sets on same-origin requests. Neither present means
+an anonymous request, not an error — a public route on the same app still has to work.
+
+## How verification works
+
+No Clerk SDK. This brick is about two hundred lines on WebCrypto, because a framework brick that
+depends on a vendor SDK owns that SDK's release cadence and its whole transitive tree.
+
+1. Fetch the instance's JWKS and import the RSA keys, cached for ten minutes.
+2. Check the token's header names **RS256** and a `kid` we hold.
+3. Verify the signature.
+4. Check `iss` matches your issuer exactly, `exp`/`nbf` are within skew, and `azp` is authorized.
+
+Step 2 matters more than it looks: the algorithm is a field *in the token*, so trusting it is the
+classic JWT break — `alg: "none"` means "no signature", and an implementation that honours it
+accepts anything. Both that and an RS256-key-as-HMAC-secret attempt have tests.
+
+### Key rotation
+
+An unknown `kid` usually means Clerk rotated its keys, so the key set is refetched immediately
+rather than after the TTL — but at most once a minute. Without that limit, a stream of forged
+`kid`s would be a way to make your server hammer Clerk's key endpoint on an attacker's behalf.
+
+## Limitations
+
+- **No user data beyond the token.** `ctx.user.email` and `.name` are present only if your Clerk
+  JWT template includes them; the default template carries just `sub`. Everything the token does
+  carry is on `ctx.user.raw`. Fetching a full profile would mean a Clerk API call per request.
+- **No server-side sign-out.** Sign out through Clerk on the frontend.
+- **No organizations or roles built in.** They arrive as claims on `ctx.user.raw`; turn them into
+  a [policy](/docs/bricks/auth/#policies) yourself.
+- **No webhook handling.** If you mirror Clerk users into your own database, that endpoint is
+  yours to write.

@@ -64,6 +64,18 @@
         "drizzle-orm": ">=0.36.0",
       },
     },
+    "packages/auth-clerk": {
+      "name": "@theoven/auth-clerk",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@theoven/auth": "workspace:*",
+        "@theoven/core": "workspace:*",
+      },
+      "peerDependencies": {
+        "@theoven/auth": "workspace:*",
+        "@theoven/core": "workspace:*",
+      },
+    },
     "packages/auth-mongo": {
       "name": "@theoven/auth-mongo",
       "version": "0.0.0",
@@ -521,6 +533,8 @@
     "@theoven/auth": ["@theoven/auth@workspace:packages/auth"],
 
     "@theoven/auth-basic": ["@theoven/auth-basic@workspace:packages/auth-basic"],
+
+    "@theoven/auth-clerk": ["@theoven/auth-clerk@workspace:packages/auth-clerk"],
 
     "@theoven/auth-mongo": ["@theoven/auth-mongo@workspace:packages/auth-mongo"],
 

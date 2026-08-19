@@ -26,13 +26,13 @@ its page says so rather than omitting the section.
 | [`auth`](/docs/bricks/auth/) | `ctx.user`, `ctx.auth` | none itself |
 | [`auth-basic`](/docs/bricks/auth-basic/) | email and password auth, on Drizzle | eight, at `/auth/*` |
 | [`auth-mongo`](/docs/bricks/auth-mongo/) | the same flows, on Mongoose | eight, at `/auth/*` |
+| [`auth-clerk`](/docs/bricks/auth-clerk/) | `ctx.user` from Clerk, hosted sign-in | **none** |
 | [`mail`](/docs/bricks/mail/) | `ctx.mail` | none |
 
 ## Planned
 
 | Brick | Adds |
 | --- | --- |
-| `@theoven/auth-clerk` | `ctx.user` from Clerk, hosted sign-in |
 | `@theoven/auth-better` | `ctx.user` from better-auth, mounted routes |
 | `@theoven/db-prisma` | `ctx.db` — a `PrismaClient` |
 | `@theoven/storage` | `ctx.storage` — S3, R2, MinIO |

@@ -1,0 +1,35 @@
+{
+  "name": "@theoven/auth-clerk",
+  "version": "0.0.0",
+  "description": "Clerk authentication for Oven — hosted sign-in, verified session tokens, no routes",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "auth",
+    "clerk"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@theoven/auth": "workspace:*",
+    "@theoven/core": "workspace:*"
+  }
+}

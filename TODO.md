@@ -431,8 +431,16 @@ The reason `oven create` gives you a working signup before you have provisioned 
 
 ### 2.6 `@theoven/auth-better` and `@theoven/auth-clerk`
 - [ ] `auth-better`: mounts its own routes, owns sessions — exercises the `routes` capability
-- [ ] `auth-clerk`: no routes, hosted sign-in, JWT verification — exercises the opposite end
-- [ ] Both must satisfy the same contract with no changes to it
+- [x] `auth-clerk` shipped: no routes, hosted sign-in, JWT verification — exercises the opposite end
+- [ ] Both must satisfy the same contract with no changes to it — `auth-clerk` does; `auth-better`
+      is the remaining half of this check
+
+      `auth-clerk` is built on WebCrypto rather than Clerk's SDK: a framework brick that depends
+      on a vendor SDK owns that SDK's release cadence and its whole transitive tree. JWKS fetch,
+      cache, rotation-on-unknown-kid (rate limited, or forged kids become a way to make the
+      server hammer Clerk's key endpoint), RS256 verify, then issuer/expiry/azp checks. The
+      `alg: none` and RSA-key-as-HMAC-secret breaks both have tests, and the signature tests were
+      verified to fail when verification is disabled.
 
 ### 2.7 Mail, pulled forward from Phase 3
 Only as far as `auth-basic` needs it: password reset cannot work without sending mail.
