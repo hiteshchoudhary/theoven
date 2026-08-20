@@ -1,7 +1,11 @@
 # Oven — Task Tracker
 
-**Current state:** **Phases 0–5 complete**, and all fourteen packages published to npm at
-**0.1.2**. Two items are yours: point `theoven.app` at the Pages project, and launch.
+**Current state:** **Phases 0–5 complete**, plus the post-1.0 stretch (real-time, cache, CDN
+storage, telemetry) and proposal 0001 (response filtering, routers, dependencies). All
+**eighteen** packages are published at **0.2.0**, and `theoven.app` is live.
+
+One item is yours: **launch** — and, separately, revoke the npm tokens and the Gemini key that
+were pasted in chat during the 0.1.x releases.
 
 ```bash
 bun create theoven my-app --db sqlite --auth basic
@@ -764,12 +768,15 @@ development and production. Covered by tests now.
 
 ## Backlog / post-1.0
 
-- [ ] 💡 WebSockets + rooms (`Bun.serve` has native WS)
-- [ ] 💡 Cache brick (Redis/memory) with `cached()` helpers
-- [ ] 💡 SSE / realtime brick
+- [x] ~~💡 WebSockets + rooms~~ **Shipped 0.1.3.** `app.ws()` on an ordinary guarded route, with
+      Bun's own pub/sub for rooms.
+- [x] ~~💡 Cache brick (Redis/memory) with `cached()` helpers~~ **Shipped 0.1.3** as
+      `@theoven/cache`, with tag invalidation and stampede protection.
+- [x] ~~💡 SSE / realtime brick~~ **Shipped 0.1.3** in core rather than as a brick — `sse()` is
+      a return value, not a capability on the context.
+- [x] ~~💡 OpenTelemetry brick~~ **Shipped 0.1.3** as `@theoven/telemetry`.
 - [ ] 💡 Typed RPC client generated from the route table
 - [ ] 💡 Admin panel (auto-CRUD from drizzle schema)
-- [ ] 💡 OpenTelemetry brick
 - [ ] 💡 i18n brick
 - [ ] 💡 Payments brick (Stripe)
 - [ ] 💡 `oven deploy` to Fly/Railway/Cloudflare Containers
