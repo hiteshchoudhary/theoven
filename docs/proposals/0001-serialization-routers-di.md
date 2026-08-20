@@ -1,6 +1,6 @@
 # Proposal 0001 — Response serialisation, routers, and per-request dependencies
 
-Status: **draft, awaiting decisions**
+Status: **D29 decided and shipped; D30/D31 awaiting decisions**
 Context: the three places Oven is behind FastAPI that matter for large codebases.
 
 Everything here is verified against the code at `313025d`, not recalled. Where a claim was
@@ -12,7 +12,7 @@ tested, the test is named.
 
 | | What it closes | Size | Risk | Order |
 | --- | --- | --- | --- | --- |
-| **1. Response serialisation** | output filtering — a real data-leak vector | S | medium (behaviour change) | first |
+| **1. Response serialisation** | output filtering — a real data-leak vector | S | medium (behaviour change) | **done (D29, option a)** |
 | **2. Routers** | reusable, composable route groups | M | low | second |
 | **3. Dependencies** | per-request, per-route, composable injection | L | medium (new concept) | third |
 
@@ -95,7 +95,7 @@ Three options:
   say plainly that a response schema does not prevent leaking fields, because right now a reader
   reasonably assumes it does.
 
-**Recommendation: (a)**, with the mismatch behaviour split so the change cannot cause an outage:
+**Decided: (a)** (D29), with the mismatch behaviour split so the change cannot cause an outage:
 
 | | development | production |
 | --- | --- | --- |

@@ -93,7 +93,8 @@ createApp({
 | `cookies` | — | cookie settings, notably the signing secret |
 | `token` | cookie `token`, query `access_token` | where `ctx.token` is looked for |
 | `trustProxy` | `false` | whether `X-Forwarded-For` may set `ctx.ip` |
-| `validateResponses` | `development` | check results against declared response schemas |
+| `validateResponses` | `development` | a response that does not match its schema is a `500` |
+| `serializeResponses` | `true` | a response schema's parsed output becomes the body |
 
 Two of those are security settings rather than conveniences, and both default to the safe side:
 
@@ -106,9 +107,17 @@ Two of those are security settings rather than conveniences, and both default to
   on `ctx.ip`. Pass a number to say how many hops to skip.
 </Aside>
 
-`validateResponses` defaults to on in development and off in production deliberately: it checks
-*your* code rather than untrusted input, so the bug it catches is one local development should
-have caught — and unlike request validation, the cost lands on every successful response.
+These two are separate on purpose.
+
+`serializeResponses` is on **everywhere**, because a response schema filtering the body is a
+safety property, not a check: Zod strips keys it does not declare, so a row carrying a
+`passwordHash` cannot send one. Only routes that declare a schema pay for it — about 480 ns each,
+and nothing on routes that do not.
+
+`validateResponses` governs only what happens when the value **fails** to parse: a `500` in
+development, and in production a logged `filtered: false` with the request still succeeding.
+Failing closed in production would turn a drifted schema into an outage on the deploy that
+introduced it. See [response schemas](/docs/reference/validation/#response-validation).
 
 ## Errors
 

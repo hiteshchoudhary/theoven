@@ -134,16 +134,62 @@ export default route(
 )
 ```
 
-Response schemas always shape the OpenAPI document. Whether they are *enforced* at runtime
-depends on `validateResponses`, which defaults to **on in development, off in production**.
+Response schemas do three things: shape the OpenAPI document, **filter the response body**, and —
+in development — fail loudly when a route has drifted from its contract.
 
-<Aside type="caution" title="That default is deliberate">
-  Response validation checks *your* code, not untrusted input — so the bug it catches is one local
-  development and CI should already have caught. Unlike request validation, the cost lands on
-  every successful response rather than only on bad input. Turn it on in production with
-  `createApp({ validateResponses: true })` if you would rather fail loudly than serve a wrong
-  shape.
+### The schema filters the response
+
+The parsed output becomes the body, so a field the schema does not declare is not sent:
+
+```ts
+export default route(
+  { response: { 200: z.object({ id: z.string(), email: z.email() }) } },
+  async (ctx) => ctx.db.select().from(users).where(eq(users.id, ctx.params.id)),
+  //                ^ the row also has passwordHash and resetToken on it
+)
+```
+
+```json title="what the client receives"
+{ "id": "1", "email": "ada@example.com" }
+```
+
+This is the reason to declare one. `SELECT *` into a handler's return value is how credentials
+leak, and the schema you wrote for documentation stops it — in production as well as development
+(D29).
+
+<Aside type="caution" title="Two schemas that filter nothing">
+  `z.object({...}).passthrough()` keeps unknown keys by design, and `z.any()` or `z.unknown()`
+  match anything. Both are legitimate, and neither filters. If the schema is there for safety,
+  make it a plain `z.object`.
 </Aside>
+
+### What happens when it does not match
+
+| | development | production |
+| --- | --- | --- |
+| parses | filtered body | filtered body |
+| does not parse | `500`, issues in the body | `error` logged, **unfiltered** body, request succeeds |
+
+The asymmetry is deliberate. Failing closed in production would turn a schema that has drifted
+into an outage on the deploy that introduced it — a working endpoint replaced by a `500` over a
+field nobody reads. So the request survives.
+
+But a value that did not parse was not filtered either, so that log line carries
+`filtered: false`. If a route is logging it, the schema is not protecting anything on that route.
+
+`validateResponses` controls the failing half, and defaults to **on in development, off in
+production**. Set `createApp({ validateResponses: true })` to fail closed in production too.
+
+### Turning it off
+
+```ts
+createApp({ serializeResponses: false })
+```
+
+The handler's value is sent untouched. Worth knowing before you reach for it: filtering costs
+about **480 ns** on a route that declares a response schema, and nothing at all on a route that
+does not. That is roughly 5% of a real request over a socket, and 0.02% of a 2 ms database
+query.
 
 ### A handler that takes control is not validated
 
@@ -163,16 +209,6 @@ that was working correctly.
 
 A returned **string is still validated**, because `response: { 200: z.string() }` is a reasonable
 contract for a text endpoint.
-
-<Aside type="caution" title="A response schema does not filter output">
-  Today a schema only *checks* the value, and only when `validateResponses` is on — so returning a
-  row with a `passwordHash` on it sends the hash, in production, whatever the schema says. Zod
-  would strip it; Oven does not currently use the stripped value.
-
-  Until that changes, select the columns you mean to return rather than relying on the schema to
-  remove them. Making schemas serialise is
-  [proposal 0001](https://github.com/hiteshchoudhary/theoven/blob/main/docs/proposals/0001-serialization-routers-di.md).
-</Aside>
 
 ## Validating headers
 

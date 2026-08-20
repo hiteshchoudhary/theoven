@@ -104,6 +104,22 @@ export interface AppOptions {
    * validation, the cost is paid on every successful response.
    */
   validateResponses?: boolean
+
+  /**
+   * Use a response schema's **parsed output** as the response body. Defaults to `true`.
+   *
+   * This is what makes a response schema a safety property rather than documentation (D29). A
+   * Zod object strips keys it does not declare, so a route returning a database row sends only
+   * the fields it promised — the `passwordHash` on that row cannot reach the client because it
+   * is not in the schema.
+   *
+   * Only routes that declare a response schema pay for it, which is what keeps this consistent
+   * with "lazy, not eager": declaring the schema *is* the opt-in.
+   *
+   * Set `false` to send the handler's value untouched. `validateResponses` still governs whether
+   * a mismatch fails the request.
+   */
+  serializeResponses?: boolean
 }
 
 const PROBLEM_TYPE = 'application/problem+json; charset=utf-8'
@@ -231,6 +247,7 @@ export class App<Ext = unknown> implements BrickHost {
       trustProxy: options.trustProxy ?? false,
       validateResponses:
         options.validateResponses ?? options.development ?? Bun.env.NODE_ENV !== 'production',
+      serializeResponses: options.serializeResponses ?? true,
     }
     this.baseLogger = options.logger ?? new ConsoleLogger({ level: this.settings.logLevel })
   }
@@ -866,22 +883,47 @@ export class App<Ext = unknown> implements BrickHost {
 
     // `tookControl` first: a handler that returned a Response or a stream is not describable by
     // a response schema, and checking it produced a 500 on a route that was working.
-    if (schema?.response && this.settings.validateResponses && !tookControl(result)) {
-      const issues = await validateResponse(schema, ctx.status ?? 200, result)
-      if (issues.length > 0) {
+    if (
+      schema?.response &&
+      (this.settings.serializeResponses || this.settings.validateResponses) &&
+      !tookControl(result)
+    ) {
+      const status = ctx.status ?? 200
+      const outcome = await validateResponse(schema, status, result)
+
+      if (outcome.issues.length > 0) {
+        /**
+         * A mismatch is loud in development and non-fatal in production, deliberately (D29).
+         *
+         * Failing closed in production would turn a schema that has drifted into an outage on
+         * the deploy that introduced it — a working endpoint replaced by a 500 because of a
+         * field nobody reads. Failing open keeps it serving.
+         *
+         * The cost of failing open is stated in the log line rather than left to be inferred:
+         * a schema that did not parse did not filter either, so the unfiltered value is what
+         * goes out.
+         */
         ctx.log.error('Response does not match its declared schema', {
           path: ctx.path,
-          status: ctx.status ?? 200,
-          issues,
+          status,
+          issues: outcome.issues,
+          // Said plainly, because the safety property people rely on is the one that just did
+          // not happen: an unparsed value is an unfiltered one.
+          filtered: false,
         })
-        // The detail is withheld in production for the same reason any internal error is: it
-        // describes our own data shapes, which is not the caller's business.
-        throw new OvenError(
-          500,
-          'Internal Server Error',
-          'Response validation failed.',
-          this.settings.development ? { detail: { errors: issues } } : undefined,
-        )
+
+        if (this.settings.validateResponses) {
+          // The detail is withheld in production for the same reason any internal error is: it
+          // describes our own data shapes, which is not the caller's business.
+          throw new OvenError(
+            500,
+            'Internal Server Error',
+            'Response validation failed.',
+            this.settings.development ? { detail: { errors: outcome.issues } } : undefined,
+          )
+        }
+      } else if (outcome.checked && this.settings.serializeResponses) {
+        result = outcome.value
       }
     }
 

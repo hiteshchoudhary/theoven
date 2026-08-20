@@ -832,13 +832,12 @@ its own nested 0.7.2 and still benchmarks.
 
 - [x] ~~`ctx` as plain object or class with getters?~~ **Class.** Lazy getters need a
       prototype, and a shared hidden class keeps construction to one allocation.
-- [~] ~~Response validation in prod: on or off by default?~~ **Off** — but **reopened** for
-      *serialisation* rather than validation, see
-      [proposal 0001](docs/proposals/0001-serialization-routers-di.md). The original answer
-      covers checking our own output for drift, which is genuinely a development concern. It does
-      not cover *filtering* the output, which is a security control: Zod already strips unknown
-      keys and we discard the result, so a `passwordHash` that reaches a handler's return value
-      reaches the client. Awaiting a decision on D29.
+- [x] ~~Response validation in prod: on or off by default?~~ **Split in two (D29).**
+      *Serialisation* is on everywhere — a response schema's parsed output becomes the body, so
+      it filters undeclared fields, which is a security control. *Validation* — failing the
+      request when the value does not parse — stays on in development and off in production,
+      because failing closed there turns a drifted schema into an outage. Measured cost: +482ns
+      on routes that declare a schema, none on routes that do not.
 - [x] ~~Ship our own logger or wrap pino?~~ **Our own, pluggable.** A small built-in so
       `ctx.log` always works with zero setup; `createApp({ logger })` swaps in pino.
 - [ ] Integration test strategy for Postgres/Redis/MinIO — testcontainers or docker-compose in CI?
@@ -847,7 +846,15 @@ its own nested 0.7.2 and still benchmarks.
 ## Next up — proposal 0001
 
 [Response serialisation, routers, dependencies](docs/proposals/0001-serialization-routers-di.md)
-— the three gaps against FastAPI that matter for larger codebases. Awaiting decisions D29–D31.
+— the three gaps against FastAPI that matter for larger codebases.
+
+- [x] **D29 — response serialisation.** Option (a): schemas serialise in every environment,
+      `serializeResponses` on by default; mismatch is a 500 in development and a logged,
+      unfiltered 200 in production. Shipped.
+- [ ] **D30 — routers.** Reusable, mountable route groups with prefix/tags/auth defaults; the
+      single grouping primitive, including for bricks. Sub-app mounting explicitly out of scope.
+- [ ] **D31 — dependencies.** Per-request, per-route, composable; `ctx.deps.<name>`; generator
+      teardown; `app.override()` for tests. Wants D30 first so routers can carry deps.
 
 - [x] ~~**Bug:** a handler returning a `Response` 500s when its route declares a `response`
       schema.~~ **Fixed.** It affected all six documented take-control return types, not just

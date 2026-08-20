@@ -450,6 +450,142 @@ describe('response validation', () => {
   })
 })
 
+/**
+ * D29: a response schema serialises, in every environment.
+ *
+ * The reason this exists is not tidiness. Zod strips keys it does not declare, so parsing a row
+ * against the schema is what stops a `passwordHash` reaching a client — and before this, the
+ * parsed value was computed and discarded, so declaring a schema did nothing in production.
+ */
+describe('response serialisation', () => {
+  const publicUser = z.object({ id: z.string(), email: z.email() })
+
+  /** What a handler that forgot to select columns returns. */
+  const row = {
+    id: '1',
+    email: 'ada@example.com',
+    passwordHash: '$argon2id$v=19$SECRET',
+    resetToken: 'tok_live_dangerous',
+  }
+
+  test('fields the schema does not declare are stripped', async () => {
+    const app = make().get('/x', { response: { 200: publicUser } }, () => row)
+    const response = await send(app, '/x')
+
+    expect(await response.json()).toEqual({ id: '1', email: 'ada@example.com' })
+  })
+
+  test('the secret is not merely absent from the object — it is not in the bytes', async () => {
+    const app = make().get('/x', { response: { 200: publicUser } }, () => row)
+    const text = await (await send(app, '/x')).text()
+
+    expect(text).not.toContain('SECRET')
+    expect(text).not.toContain('tok_live_dangerous')
+  })
+
+  // The whole point of D29: in production this used to do nothing at all.
+  test('it filters in production, where validation is off', async () => {
+    const app = make({ development: false }).get('/x', { response: { 200: publicUser } }, () => row)
+    const text = await (await send(app, '/x')).text()
+
+    expect((await send(app, '/x')).status).toBe(200)
+    expect(text).not.toContain('SECRET')
+  })
+
+  test('arrays are filtered element by element', async () => {
+    const app = make().get('/x', { response: { 200: z.array(publicUser) } }, () => [row, row])
+    const body = (await (await send(app, '/x')).json()) as unknown[]
+
+    expect(body).toEqual([
+      { id: '1', email: 'ada@example.com' },
+      { id: '1', email: 'ada@example.com' },
+    ])
+  })
+
+  test('nested objects are filtered too', async () => {
+    const schema = z.object({ user: publicUser })
+    const app = make().get('/x', { response: { 200: schema } }, () => ({
+      user: row,
+      internal: 'no',
+    }))
+
+    expect(await (await send(app, '/x')).json()).toEqual({
+      user: { id: '1', email: 'ada@example.com' },
+    })
+  })
+
+  test('a transform in the schema shapes the output', async () => {
+    const schema = z.object({ name: z.string().transform((value) => value.toUpperCase()) })
+    const app = make().get('/x', { response: { 200: schema } }, () => ({ name: 'ada' }))
+
+    expect(await (await send(app, '/x')).json()).toEqual({ name: 'ADA' })
+  })
+
+  /**
+   * The deliberate asymmetry. Failing closed in production would turn a drifted schema into an
+   * outage on the deploy that introduced it, so the request survives — but it survives
+   * unfiltered, which is why the log line says so.
+   */
+  test('a schema that does not parse fails open in production, unfiltered', async () => {
+    const app = make({ development: false }).get(
+      '/x',
+      { response: { 200: z.object({ id: z.number() }) } },
+      () => row,
+    )
+    const response = await send(app, '/x')
+
+    expect(response.status).toBe(200)
+    // Unfiltered: the parse failed, so there was no trustworthy value to send instead.
+    expect(await response.text()).toContain('SECRET')
+  })
+
+  test('the same mismatch is a 500 in development', async () => {
+    const app = make({ development: true }).get(
+      '/x',
+      { response: { 200: z.object({ id: z.number() }) } },
+      () => row,
+    )
+
+    expect((await send(app, '/x')).status).toBe(500)
+  })
+
+  test('serializeResponses: false sends the handler value untouched', async () => {
+    const app = make({ serializeResponses: false, validateResponses: false }).get(
+      '/x',
+      { response: { 200: publicUser } },
+      () => row,
+    )
+
+    expect(await (await send(app, '/x')).text()).toContain('SECRET')
+  })
+
+  test('a route with no response schema is untouched', async () => {
+    const app = make().get('/x', () => row)
+
+    expect(await (await send(app, '/x')).json()).toEqual(row)
+  })
+
+  test('only the schema matching the status filters', async () => {
+    const app = make().get('/x', { response: { 200: publicUser } }, (ctx) => {
+      ctx.status = 201
+      return row
+    })
+
+    // No schema for 201, so nothing is stripped — and nothing pretends to have been.
+    expect(await (await send(app, '/x')).json()).toEqual(row)
+  })
+
+  test('a passthrough schema declares that it filters nothing', async () => {
+    const app = make().get(
+      '/x',
+      { response: { 200: z.object({ id: z.string() }).passthrough() } },
+      () => row,
+    )
+
+    expect(await (await send(app, '/x')).text()).toContain('SECRET')
+  })
+})
+
 // D4 says Zod is the default, not a requirement. That is only true if something else works.
 describe('no lock-in: valibot', () => {
   test('validates a body', async () => {

@@ -173,21 +173,30 @@ export async function validateRequest(ctx: Context, schema: RouteSchema): Promis
 }
 
 /**
- * Checks a handler's result against the response schema for its status.
+ * Checks a handler's result against the response schema for its status, and returns the parsed
+ * value.
+ *
+ * The parsed value matters as much as the issues (D29). A Zod object strips keys it does not
+ * declare, so parsing a database row against the schema is what removes the `passwordHash`
+ * nobody meant to send. Returning only the issues — as this did — computed that safety and threw
+ * it away.
  *
  * A failure here is a bug in *our* code, not in the caller's request, so it is a 500 rather
  * than a 422 — and the detail only reaches the client in development, where it is a fast way to
  * notice a route that has drifted from its contract.
+ *
+ * `value` is `undefined` when there are issues: there is no trustworthy parse to hand back, and
+ * the caller decides what to do with the original.
  */
 export async function validateResponse(
   schema: RouteSchema,
   status: number,
   value: unknown,
-): Promise<ValidationIssue[]> {
+): Promise<{ issues: ValidationIssue[]; value: unknown; checked: boolean }> {
   const responseSchema = schema.response?.[status]
-  if (!responseSchema) return []
+  if (!responseSchema) return { issues: [], value, checked: false }
 
   const issues: ValidationIssue[] = []
-  await check(responseSchema, value, 'response', issues)
-  return issues
+  const parsed = await check(responseSchema, value, 'response', issues)
+  return { issues, value: issues.length > 0 ? undefined : parsed, checked: true }
 }
