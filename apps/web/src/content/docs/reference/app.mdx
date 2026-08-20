@@ -61,11 +61,31 @@ registration rather than silently letting the last one win.
 app.use(requestLogger())              // middleware, everywhere
 app.use('/admin', requireAdmin())     // middleware, scoped to a prefix
 app.use(db(drizzleSqlite({ url })))   // a brick
+app.use(adminRouter)                  // a router
 ```
 
-`.use()` takes both. A brick contributes to the context and its type flows through the chain — so
-`ctx.db` exists after the line above, and is a compile error before it. See
+`.use()` takes all three, and tells them apart with no ambiguity: a function is middleware, a
+router is recognised by its brand, anything else is a brick.
+
+A brick contributes to the context and its type flows through the chain — so `ctx.db` exists after
+that line and is a compile error before it. A [router](/docs/reference/routers/) contributes
+routes, with its prefix, tags and auth applied. See
 [Middleware & hooks](/docs/reference/middleware/) and [Bricks](/docs/reference/bricks/).
+
+### `app.override(dependency, resolver)`
+
+Replaces a [dependency](/docs/reference/dependencies/) for this app — the testing seam:
+
+```ts
+app.override(currentTenant, () => ({ id: 'test-tenant', plan: 'pro' }))
+
+const response = await app.fetch(new Request('http://x/dashboard'))
+
+app.clearOverrides()
+```
+
+It applies wherever the dependency is used, including as a sub-dependency of another, so replacing
+one root swaps out everything derived from it without touching those definitions.
 
 ## Configuration
 

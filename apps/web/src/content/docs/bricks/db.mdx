@@ -119,6 +119,47 @@ back everything it wrote.
 Added to an app with no database brick, it does nothing rather than failing — so the line is
 safe to leave in a template.
 
+### Or one transaction per route
+
+A [dependency](/docs/reference/dependencies/) scopes it to exactly the routes that name it,
+instead of a path prefix:
+
+```ts title="src/deps.ts"
+import { dependency } from '@theoven/core'
+import { transaction } from '@theoven/db'
+
+export const tx = dependency('tx', async function* (ctx) {
+  const handle = await begin(ctx.db)
+  try {
+    yield handle
+    await handle.commit()
+  } catch (error) {
+    await handle.rollback()
+    throw error
+  }
+})
+```
+
+```ts title="src/routes/orders/index.post.ts"
+export default route({ deps: { tx }, body: orderSchema }, async (ctx) => {
+  await ctx.deps.tx.insert(orders).values(ctx.body)
+  await ctx.deps.tx.update(stock).set({ count: left })
+  return { ok: true }
+})
+```
+
+Which to reach for:
+
+| | `transactional()` | a `tx` dependency |
+| --- | --- | --- |
+| Scope | a path prefix | the routes that declare it |
+| Handler changes | none — `ctx.db` is scoped | use `ctx.deps.tx` |
+| Visible in the route | ✗ | ✓, it is in the signature |
+| Nested with other setup | ✗ | ✓, dependencies compose |
+
+`transactional()` stays the lighter option when a whole prefix writes. The dependency is better
+when only some routes do, because a reader can see which ones from the route itself.
+
 ## What it creates
 
 **Files:** none. **Tables:** none. This brick migrates nothing and writes nothing — it manages a

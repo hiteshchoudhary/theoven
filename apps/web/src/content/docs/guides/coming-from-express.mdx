@@ -89,16 +89,46 @@ users.get('/:id', show)
 app.use('/users', users)
 ```
 
-```ts title="Oven"
+There are two translations, and both are right depending on why you had a router.
+
+**If the router was a directory of endpoints**, use [file-based
+routing](/docs/reference/file-routing/) — the filesystem is the route table:
+
+```ts title="Oven — file routing"
 // src/routes/users/index.get.ts   → GET /users
 // src/routes/users/[id].get.ts    → GET /users/:id
 ```
 
-The filesystem is the route table. A `_middleware.ts` in a directory applies to that directory and
-everything under it, which is what `router.use()` was for. See
-[file-based routing](/docs/reference/file-routing/).
+A `_middleware.ts` in a directory applies to it and everything under it, which is what
+`router.use()` was for.
 
-Programmatic registration still exists — `app.get(...)` — if you would rather keep a router file.
+**If the router was a group with something in common** — a shared guard, a shared prefix, a set of
+routes you mount twice — use a [router](/docs/reference/routers/):
+
+```ts title="Oven — a router"
+const users = routerFor<typeof app>({ prefix: '/users', tags: ['users'], auth: true })
+
+users.get('/', list)
+users.get('/:id', { params: z.object({ id: z.uuid() }) }, show)
+
+app.use(users)
+```
+
+That is closer to what `express.Router()` actually was, with two differences worth knowing:
+
+- **`auth` and `tags` are declared once for the group.** Express had no equivalent; you passed
+  middleware and hoped every route in the file was covered.
+- **A router can be mounted more than once**, so `/v1` and `/v2` over the same routes is two
+  lines rather than a factory function.
+
+| Express | Oven |
+| --- | --- |
+| `express.Router()` | `router()` / `routerFor<typeof app>()` |
+| `router.use(mw)` | `router.use(mw)` — scoped to the router's prefix |
+| `app.use('/users', router)` | `router({ prefix: '/users' })`, then `app.use(router)` |
+| `router.use(otherRouter)` | `router.use(otherRouter)` — prefixes join |
+| middleware for auth on every route | `auth` on the router, once |
+| `app.use('/api', someOtherApp)` | not supported — a router is routes, not a second app |
 
 ## Validation
 
@@ -191,6 +221,53 @@ app.use(rateLimit({ limit: 100, window: 60_000 }))
 
 Nothing to install — these ship in core. They stay explicit rather than always-on because their
 *policy* genuinely varies by app, unlike body parsing.
+
+## `req.user`, `res.locals` and friends
+
+Express middleware attaches things to the request and later handlers read them, untyped:
+
+```js title="Express"
+app.use(async (req, res, next) => {
+  req.tenant = await resolveTenant(req.hostname)
+  next()
+})
+
+app.get('/dashboard', (req, res) => res.json({ tenant: req.tenant }))   // any
+```
+
+Oven has no `ctx.state` bag, deliberately — an untyped bucket is invisible to autocomplete and
+`unknown` where you read it. There are two replacements, and which one you want depends on scope:
+
+```ts title="Oven — needed by some routes"
+const tenant = dependency('tenant', (ctx) => resolveTenant(ctx.header('host')))
+
+export default route({ deps: { tenant } }, (ctx) => ({ tenant: ctx.deps.tenant }))
+//                                                                ^ typed
+```
+
+```ts title="Oven — needed by every route"
+// A brick: built once at boot, on the context of every request.
+app.use({ name: 'billing', setup: () => createBillingClient() })
+```
+
+The rule: [a dependency](/docs/reference/dependencies/) is per request and per route,
+[a brick](/docs/reference/bricks/) is per app. Both arrive typed; neither can be forgotten by a
+route that needs it, because the route names it.
+
+Dependencies also compose and clean up, which `req.locals` never did:
+
+```ts
+const tx = dependency('tx', async function* (ctx) {
+  const handle = await begin(ctx.db)
+  try {
+    yield handle
+    await handle.commit()
+  } catch (error) {
+    await handle.rollback()
+    throw error
+  }
+})
+```
 
 ## Things that genuinely do not translate
 

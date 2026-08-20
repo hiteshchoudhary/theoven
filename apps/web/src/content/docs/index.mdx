@@ -43,11 +43,15 @@ export const app = createApp()
 
 ```ts title="src/routes/users/[id]/avatar.post.ts"
 export default route(
-  { auth: true, body: z.object({ file: z.file().max(5_000_000) }) },
+  {
+    auth: true,
+    body: z.object({ file: z.file().max(5_000_000) }),
+    response: { 200: z.object({ id: z.uuid(), avatar: z.string() }) },
+  },
   async (ctx) => {
     const { key } = await ctx.storage.upload(`avatars/${ctx.params.id}`, ctx.body.file)
     await ctx.queue.dispatch(resizeAvatar, { key })
-    return ctx.db.update(users).set({ avatar: key })
+    return ctx.db.update(users).set({ avatar: key }).returning()
   },
 )
 ```
@@ -55,6 +59,41 @@ export default route(
 That route is validated, authenticated, typed and documented at `/docs` — and nothing in it was
 wired by hand. Leave a brick out of `app.ts` and touching it is a compile error rather than a
 crash at 3am.
+
+The `response` schema is not only documentation: it **filters the body**, so the row's
+`passwordHash` cannot be sent even though the handler returned the whole record.
+
+## Grouping and per-request values
+
+```ts title="src/routes/admin.ts"
+const admin = routerFor<typeof app>({ prefix: '/admin', tags: ['admin'], auth: 'staff' })
+
+admin.get('/users', (ctx) => ctx.db.select().from(users))
+admin.delete('/users/:id', { params: idParam }, (ctx) => remove(ctx.params.id))
+
+app.use(admin)   // prefix, tag and guard declared once
+```
+
+```ts title="a transaction that rolls itself back"
+const tx = dependency('tx', async function* (ctx) {
+  const handle = await begin(ctx.db)
+  try {
+    yield handle
+    await handle.commit()
+  } catch (error) {
+    await handle.rollback()
+    throw error
+  }
+})
+
+export default route({ deps: { tx } }, async (ctx) => {
+  await ctx.deps.tx.insert(orders).values(order)
+  return { ok: true }
+})
+```
+
+[Routers](/docs/reference/routers/) group routes; [dependencies](/docs/reference/dependencies/)
+are per-request values that compose, cache within a request, and clean up after it.
 
 ## Reference
 
@@ -76,7 +115,7 @@ crash at 3am.
 
 ## Status
 
-**0.1.3, on npm.** Everything documented here is published and installable:
+**0.2.0, on npm.** Everything documented here is published and installable:
 
 ```bash
 bun create theoven my-app --db sqlite --auth basic
@@ -87,10 +126,17 @@ Mongo, Clerk, better-auth), storage (S3, disk, Bunny, ImageKit), mail, queues, c
 OpenTelemetry. See the [brick catalogue](/docs/bricks/) for what each one does, and the
 [roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for what is next.
 
-<Aside type="caution" title="Upgrade from 0.1.2">
-  In 0.1.2, a route file declaring `export const auth = true` was **not guarded** — the
-  declaration was dropped on the way to the auth brick and the route answered anonymously with a
-  `200`. `defineRoute({ auth: true }, …)` was unaffected. Fixed in 0.1.3.
+<Aside type="caution" title="Upgrading">
+  **From 0.1.2 or earlier — do it.** A route file declaring `export const auth = true` was **not
+  guarded**: the declaration was dropped on the way to the auth brick and the route answered
+  anonymously with a `200`. `defineRoute({ auth: true }, …)` was unaffected. Fixed in 0.1.3.
+
+  **To 0.2.0**, two breaking changes:
+
+  - A `response` schema now **filters the body** rather than only checking it. Fields the schema
+    does not declare are no longer sent. Add them, or set `serializeResponses: false`.
+  - The radix tree exported as `Router` is now `RadixRouter`; `Router` names the
+    [route group](/docs/reference/routers/) you build. Almost nobody imports the former.
 </Aside>
 
 Pre-1.0, so APIs can still change between minor versions — that freedom is deliberate while the

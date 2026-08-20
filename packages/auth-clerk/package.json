@@ -1,6 +1,6 @@
 {
   "name": "@theoven/auth-clerk",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Clerk authentication for Oven — hosted sign-in, verified session tokens, no routes",
   "keywords": [
     "bun",
