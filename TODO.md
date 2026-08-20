@@ -850,7 +850,23 @@ its own nested 0.7.2 and still benchmarks.
 - [ ] Integration test strategy for Postgres/Redis/MinIO — testcontainers or docker-compose in CI?
 - [ ] Temp-file spill threshold for uploads — what default? (16MB?)
 
-## Next up — proposal 0001
+## Next up — proposal 0002
+
+[Google and GitHub sign-in](docs/proposals/0002-social-login.md) — two optional flows beside the
+password flow, no second brick and no breaking migration.
+
+- [ ] **D33 — account linking.** Auto-link only on a provider-verified email (recommended), never
+      unconditionally.
+- [ ] **D34 — is a provider-verified email required?** Recommended yes: an account without one can
+      never be linked or recovered, and allowing it is a one-way door.
+- [ ] **D35 — provider token storage.** Recommended off by default; tokens nobody reads are pure
+      liability.
+
+Sequenced after the decisions: optional `AuthStore` account methods + conformance, the
+unusable-password sentinel, splitting endpoints into session/password/oauth groups, then the two
+providers.
+
+## Proposal 0001 — done
 
 [Response serialisation, routers, dependencies](docs/proposals/0001-serialization-routers-di.md)
 — the three gaps against FastAPI that matter for larger codebases.
