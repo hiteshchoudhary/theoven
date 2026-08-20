@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import type { AuthStore } from './store'
+import { type AuthStore, supportsAccounts } from './store'
 
 /**
  * The conformance suite every `AuthStore` must pass.
@@ -158,6 +158,110 @@ export function describeAuthStore(
       test('an unknown hash is null', async () => {
         expect(await store.findResetToken('never-issued')).toBeNull()
       })
+    })
+  })
+
+  /**
+   * Linked accounts, for social sign-in.
+   *
+   * Skipped rather than failed for a store that does not implement them — they are optional on
+   * the contract (D19), and a third-party store written before social sign-in existed is not
+   * broken, it simply cannot do it.
+   */
+  describe(`AuthStore accounts: ${name}`, () => {
+    let store: AuthStore
+    let supported = false
+
+    beforeEach(async () => {
+      store = await makeStore()
+      supported = supportsAccounts(store)
+      if (supported) {
+        await store.createUser({
+          id: 'user-1',
+          email: 'ada@example.com',
+          name: 'Ada',
+          passwordHash: 'not-a-real-hash',
+        })
+      }
+    })
+
+    const account = {
+      id: 'account-1',
+      userId: 'user-1',
+      provider: 'google',
+      providerAccountId: 'g-1',
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+    }
+
+    test('a linked account comes back by provider and account id', async () => {
+      if (!supported) return
+      await store.linkAccount?.({ ...account })
+
+      const found = await store.findAccount?.('google', 'g-1')
+      expect(found).toMatchObject({ userId: 'user-1', provider: 'google' })
+    })
+
+    test('an unknown account is null, not an error', async () => {
+      if (!supported) return
+      expect(await store.findAccount?.('google', 'nobody')).toBeNull()
+    })
+
+    test('a different provider with the same account id is a different account', async () => {
+      if (!supported) return
+      await store.linkAccount?.({ ...account })
+
+      expect(await store.findAccount?.('github', 'g-1')).toBeNull()
+    })
+
+    /**
+     * The database is what prevents a double link, not the application. Two callbacks racing for
+     * the same provider account must not both succeed and produce two rows pointing at different
+     * users.
+     */
+    test('linking the same provider account twice is refused', async () => {
+      if (!supported) return
+      await store.linkAccount?.({ ...account })
+
+      expect(
+        store.linkAccount?.({ ...account, id: 'account-2', userId: 'user-2' }),
+      ).rejects.toThrow()
+    })
+
+    test('a user’s accounts come back together', async () => {
+      if (!supported) return
+      await store.linkAccount?.({ ...account })
+      await store.linkAccount?.({
+        ...account,
+        id: 'account-2',
+        provider: 'github',
+        providerAccountId: 'h-1',
+      })
+
+      const found = (await store.findAccountsByUser?.('user-1')) ?? []
+      expect(found.map((entry) => entry.provider).sort()).toEqual(['github', 'google'])
+    })
+
+    test('unlinking removes exactly that provider', async () => {
+      if (!supported) return
+      await store.linkAccount?.({ ...account })
+      await store.linkAccount?.({
+        ...account,
+        id: 'account-2',
+        provider: 'github',
+        providerAccountId: 'h-1',
+      })
+
+      await store.unlinkAccount?.('user-1', 'google')
+
+      const found = (await store.findAccountsByUser?.('user-1')) ?? []
+      expect(found.map((entry) => entry.provider)).toEqual(['github'])
+    })
+
+    test('unlinking something absent is not an error', async () => {
+      if (!supported) return
+      expect(store.unlinkAccount?.('user-1', 'google')).resolves.toBeUndefined()
     })
   })
 }

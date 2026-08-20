@@ -855,16 +855,22 @@ its own nested 0.7.2 and still benchmarks.
 [Google and GitHub sign-in](docs/proposals/0002-social-login.md) — two optional flows beside the
 password flow, no second brick and no breaking migration.
 
-- [ ] **D33 — account linking.** Auto-link only on a provider-verified email (recommended), never
-      unconditionally.
-- [ ] **D34 — is a provider-verified email required?** Recommended yes: an account without one can
-      never be linked or recovered, and allowing it is a one-way door.
-- [ ] **D35 — provider token storage.** Recommended off by default; tokens nobody reads are pure
-      liability.
+- [x] ~~D33 account linking~~ · ~~D34 verified email required~~ · ~~D35 provider tokens~~ —
+      all three decided as recommended, plus **D36** (unusable-password sentinel) which fell out
+      of the build.
+- [x] **Shipped.** Optional `AuthStore` account methods with boot-time capability checking,
+      accounts conformance tests, the sentinel, session/password/oauth endpoint groups, Google and
+      GitHub, and storage in both `auth-basic` (Drizzle) and `auth-mongo` (Mongoose).
 
-Sequenced after the decisions: optional `AuthStore` account methods + conformance, the
-unusable-password sentinel, splitting endpoints into session/password/oauth groups, then the two
-providers.
+Still open on this:
+
+- [ ] Apple — deliberately deferred. Its self-signed ES256 client secret, `form_post` callback and
+      first-authorisation-only profile are what should stress the provider interface, once there is
+      a reason to.
+- [ ] An endpoint to link a provider to the **already signed-in** user. Today linking only happens
+      as a side effect of signing in, so a password user cannot attach Google from a settings page
+      without signing out first. `unlinkAccount` exists and is not yet mounted.
+- [ ] Scaffold support: `oven create --auth basic` still writes a password-only app.
 
 ## Proposal 0001 — done
 

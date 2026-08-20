@@ -78,6 +78,43 @@ Refresh and reset tokens are stored **hashed**, so a leaked database does not ha
 credentials. Both cascade on user delete, so removing a user cannot leave sessions that outlive
 them.
 
+## Social sign-in
+
+Google and GitHub are optional flows on this brick. Two extra steps beyond the configuration on the
+[`auth` page](/docs/bricks/auth/#social-sign-in):
+
+**1. Add the accounts table to your schema.** It lives on a separate export path, so an application
+that never uses social sign-in never gets it:
+
+```ts title="src/schema.ts" ins={2}
+export * from '@theoven/auth-basic/schema'
+export * from '@theoven/auth-basic/schema/accounts'
+```
+
+```bash
+oven db generate && oven db migrate
+```
+
+**2. Configure a provider.** That is the opt-in — it turns on the store's account methods, and the
+brick then checks at boot that you did step 1 too.
+
+<Aside type="note" title="Two steps, on purpose">
+  Configuring a provider without the schema fails at **startup**, naming both fixes. The
+  alternative — shipping the table to everyone — means a migration for applications that will never
+  have a linked account, and the line being in *your* schema file is what keeps it from appearing
+  in `git status` unexplained.
+</Aside>
+
+### What it creates
+
+| Table | Holds |
+| --- | --- |
+| `auth_accounts` | id, user, provider, the provider's account id, and optionally its tokens |
+
+Unique on `(provider, provider_account_id)`, so the database — not the application — is what
+prevents two racing callbacks linking the same provider account to two users. Cascades on user
+delete, so removing a user does not leave credentials pointing at an id that no longer exists.
+
 ## How sessions work
 
 A **15-minute access JWT** plus a **revocable refresh token**:

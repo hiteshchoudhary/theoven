@@ -1,4 +1,10 @@
-import type { AuthStore, StoredRefreshToken, StoredResetToken, StoredUser } from '@theoven/auth'
+import type {
+  AuthStore,
+  StoredAccount,
+  StoredRefreshToken,
+  StoredResetToken,
+  StoredUser,
+} from '@theoven/auth'
 import type { Connection } from 'mongoose'
 import { type AuthModels, authModels } from './schema'
 
@@ -13,7 +19,21 @@ import { type AuthModels, authModels } from './schema'
  * It is also the test of whether `AuthStore` is a real contract or a description of Drizzle. It
  * fit without changes.
  */
-export function mongooseStore(connection: Connection): AuthStore {
+export interface MongooseStoreOptions {
+  /**
+   * Expose the linked-account methods, for social sign-in.
+   *
+   * Off by default, matching `auth-basic`. Mongo would create the collection on first write
+   * rather than failing, which is precisely why this is explicit: a typo in a provider name
+   * should not silently create `auth_accounts` in a database that was never meant to have one.
+   */
+  accounts?: boolean
+}
+
+export function mongooseStore(
+  connection: Connection,
+  options: MongooseStoreOptions = {},
+): AuthStore {
   /**
    * Compiled on first use, not at construction.
    *
@@ -27,7 +47,44 @@ export function mongooseStore(connection: Connection): AuthStore {
     return compiled
   }
 
+  const accountMethods: Pick<
+    AuthStore,
+    'findAccount' | 'linkAccount' | 'findAccountsByUser' | 'unlinkAccount'
+  > = {
+    findAccount: async (provider, providerAccountId) => {
+      const doc = await models().accounts.findOne({ provider, providerAccountId }).lean()
+      return doc ? toAccount(doc) : null
+    },
+
+    linkAccount: async (account) => {
+      const doc = {
+        _id: account.id,
+        userId: account.userId,
+        provider: account.provider,
+        providerAccountId: account.providerAccountId,
+        accessToken: account.accessToken ?? null,
+        refreshToken: account.refreshToken ?? null,
+        expiresAt: account.expiresAt ?? null,
+        createdAt: new Date(),
+      }
+      // The unique index rejects a second link for the same provider account, which is what
+      // makes the refusal a database guarantee rather than a check we might forget.
+      await models().accounts.create(doc)
+      return toAccount(doc)
+    },
+
+    findAccountsByUser: async (userId) => {
+      const docs = await models().accounts.find({ userId }).lean()
+      return docs.map(toAccount)
+    },
+
+    unlinkAccount: async (userId, provider) => {
+      await models().accounts.deleteOne({ userId, provider })
+    },
+  }
+
   return {
+    ...(options.accounts ? accountMethods : {}),
     findUserByEmail: async (email) => {
       const doc = await models().users.findOne({ email: email.toLowerCase() }).lean()
       return doc ? toUser(doc) : null
@@ -156,6 +213,28 @@ function toResetToken(doc: {
  * housekeeping rather than a security control — run it from a cron job when the collections
  * start to bother you.
  */
+function toAccount(doc: {
+  _id: string
+  userId: string
+  provider: string
+  providerAccountId: string
+  accessToken?: string | null
+  refreshToken?: string | null
+  expiresAt?: Date | null
+  createdAt: Date
+}): StoredAccount {
+  return {
+    id: doc._id,
+    userId: doc.userId,
+    provider: doc.provider,
+    providerAccountId: doc.providerAccountId,
+    accessToken: doc.accessToken ?? null,
+    refreshToken: doc.refreshToken ?? null,
+    expiresAt: doc.expiresAt ?? null,
+    createdAt: doc.createdAt,
+  }
+}
+
 export async function pruneExpiredTokens(connection: Connection, now = new Date()): Promise<void> {
   const models = authModels(connection)
   await models.refreshTokens.deleteMany({ expiresAt: { $lt: now } })

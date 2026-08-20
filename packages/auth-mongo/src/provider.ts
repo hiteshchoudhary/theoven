@@ -34,5 +34,11 @@ export type MongoAuthService = PasswordAuthService
  */
 export function mongoAuth(options: MongoAuthOptions): AuthProvider<StoredUser> & MongoAuthService {
   const { connection, ...rest } = options
-  return passwordAuthProvider({ ...rest, name: 'mongo', store: mongooseStore(connection) })
+  // Configuring `oauth` is the opt-in, exactly as in auth-basic.
+  const accounts = Boolean(rest.oauth && Object.keys(rest.oauth).length > 0)
+  return passwordAuthProvider({
+    ...rest,
+    name: 'mongo',
+    store: mongooseStore(connection, { accounts }),
+  })
 }

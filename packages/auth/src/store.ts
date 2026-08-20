@@ -36,6 +36,31 @@ export interface StoredResetToken {
   usedAt?: Date | null
 }
 
+/**
+ * A credential from an identity provider, linked to a user.
+ *
+ * `providerAccountId` is the provider's own stable id — Google's `sub`, GitHub's numeric id — and
+ * **not** the email. An email can change hands; the subject identifier cannot, and keying on it is
+ * what stops a renamed account being mistaken for a different person.
+ */
+export interface StoredAccount {
+  id: string
+  userId: string
+  /** `google`, `github`, … */
+  provider: string
+  providerAccountId: string
+  /**
+   * The provider's access and refresh tokens, when the application asked for them to be kept.
+   *
+   * Absent by default (D35). Storing credentials for someone else's service is a liability an
+   * app should take on deliberately, not by inheriting a library's default.
+   */
+  accessToken?: string | null
+  refreshToken?: string | null
+  expiresAt?: Date | null
+  createdAt: Date
+}
+
 export interface AuthStore {
   // --- users ---------------------------------------------------------------------------
   /** Case-insensitive lookup. Emails are compared lowercased, because people type both. */
@@ -60,4 +85,36 @@ export interface AuthStore {
   createResetToken(token: Omit<StoredResetToken, 'usedAt'>): Promise<void>
   findResetToken(tokenHash: string): Promise<StoredResetToken | null>
   markResetTokenUsed(id: string): Promise<void>
+
+  // --- linked accounts (optional) ------------------------------------------------------
+  /**
+   * These three are **optional**, and social sign-in declares a capability that is checked at
+   * boot (D19).
+   *
+   * `AuthStore` is a public contract — the docs invite third-party storage bricks and give them a
+   * conformance suite to run — so adding required methods would break every one of them for a
+   * feature they never asked for. A store without these is a store that cannot do social sign-in,
+   * and configuring `oauth` against it fails at startup naming the store, rather than at the first
+   * callback.
+   */
+  findAccount?(provider: string, providerAccountId: string): Promise<StoredAccount | null>
+  /** @throws when the pair is already linked — the caller turns that into a refusal, not a steal. */
+  linkAccount?(account: Omit<StoredAccount, 'createdAt'>): Promise<StoredAccount>
+  /** Every account a user has, so the last-credential check can be made before unlinking one. */
+  findAccountsByUser?(userId: string): Promise<StoredAccount[]>
+  unlinkAccount?(userId: string, provider: string): Promise<void>
+}
+
+/** An `AuthStore` that can hold linked accounts. Narrowed at boot, so the flows need no guards. */
+export type AccountCapableStore = AuthStore &
+  Required<Pick<AuthStore, 'findAccount' | 'linkAccount' | 'findAccountsByUser' | 'unlinkAccount'>>
+
+/** Whether a store can hold linked accounts. */
+export function supportsAccounts(store: AuthStore): store is AccountCapableStore {
+  return (
+    typeof store.findAccount === 'function' &&
+    typeof store.linkAccount === 'function' &&
+    typeof store.findAccountsByUser === 'function' &&
+    typeof store.unlinkAccount === 'function'
+  )
 }

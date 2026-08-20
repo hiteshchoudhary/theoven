@@ -27,6 +27,25 @@ export function hashPassword(password: string): Promise<string> {
 }
 
 /**
+ * The hash stored for a user who has never set a password.
+ *
+ * A user created by signing in with Google has no password, and the alternative — making
+ * `password_hash` nullable — is a breaking migration for every existing installation. Django has
+ * done this for fifteen years (`set_unusable_password`), and it is boring in the right way.
+ *
+ * The `!` prefix cannot occur in an argon2id hash, which begins `$argon2id$`. `verifyPassword`
+ * refuses it explicitly rather than relying on `Bun.password.verify` rejecting a malformed hash —
+ * a guard that depends on a third party's error behaviour is one release away from not being a
+ * guard (D34).
+ */
+export const UNUSABLE_PASSWORD = '!oauth-only'
+
+/** Whether a stored hash means "this user has no password", rather than a password to check. */
+export function isUnusablePassword(hash: string): boolean {
+  return hash.startsWith('!')
+}
+
+/**
  * Verifies a password against a stored hash.
  *
  * Returns `false` rather than throwing on a malformed hash. A corrupt row should fail the login,
@@ -34,6 +53,10 @@ export function hashPassword(password: string): Promise<string> {
  * password" to anyone watching response times.
  */
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  // Checked before anything else: an unusable password must never be verifiable, whatever the
+  // verifier happens to do with a string that is not a hash.
+  if (isUnusablePassword(hash)) return false
+
   try {
     return await Bun.password.verify(password, hash)
   } catch {

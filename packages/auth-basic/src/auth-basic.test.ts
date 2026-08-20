@@ -38,6 +38,19 @@ create table auth_refresh_tokens (
 create unique index auth_refresh_token_hash_idx on auth_refresh_tokens (token_hash);
 create index auth_refresh_user_idx on auth_refresh_tokens (user_id);
 
+create table auth_accounts (
+  id text primary key,
+  user_id text not null references auth_users(id) on delete cascade,
+  provider text not null,
+  provider_account_id text not null,
+  access_token text,
+  refresh_token text,
+  expires_at integer,
+  created_at integer not null default (unixepoch() * 1000)
+);
+create unique index auth_accounts_provider_idx on auth_accounts (provider, provider_account_id);
+create index auth_accounts_user_idx on auth_accounts (user_id);
+
 create table auth_reset_tokens (
   id text primary key,
   user_id text not null references auth_users(id) on delete cascade,
@@ -668,5 +681,7 @@ describe('with the db brick', () => {
 describeAuthStore('drizzle over bun:sqlite', () => {
   const sqlite = new Database(':memory:')
   sqlite.exec(MIGRATION)
-  return drizzleStore(drizzle(sqlite, { schema: authSchema }))
+  // `accounts: true` because the migration above created the table — the same pairing an
+  // application makes when it adds the schema export and configures a provider.
+  return drizzleStore(drizzle(sqlite, { schema: authSchema }), { accounts: true })
 })

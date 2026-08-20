@@ -24,7 +24,10 @@ import {
   toIdentity,
 } from './flows'
 import type { Identity } from './identity'
+import { completeOAuth, type OAuthConfig, startOAuth } from './oauth/flow'
+import type { OAuthProvider, OAuthProviderOptions } from './oauth/provider'
 import type { AuthStore, StoredUser } from './store'
+import { supportsAccounts } from './store'
 
 export interface PasswordAuthOptions {
   /** Where users, refresh tokens and reset tokens live. */
@@ -67,6 +70,42 @@ export interface PasswordAuthOptions {
    * spray the whole user table. Set `false` to handle it yourself.
    */
   rateLimit?: AuthRateLimit | false
+
+  /**
+   * Email-and-password sign-in. On by default.
+   *
+   * Set `false` for an application that authenticates only through providers. The session
+   * endpoints — refresh, logout, me — stay mounted either way, because a session is a session
+   * however it was established.
+   */
+  password?: boolean
+
+  /**
+   * Social sign-in providers, keyed by name.
+   *
+   * Each configured provider mounts two endpoints and nothing else. Omit this and no OAuth code
+   * runs, no accounts table is touched, and the brick behaves exactly as it did before.
+   */
+  oauth?: Record<string, { provider: OAuthProvider } & OAuthProviderOptions>
+
+  /**
+   * Where a provider sends the browser back, given a provider name.
+   *
+   * Required when `oauth` is configured, because only the application knows its own public URL —
+   * guessing it from the request's Host header would let a caller choose where the code is sent.
+   */
+  callbackUrl?: (provider: string) => string
+
+  /** Where to send the browser after a successful sign-in. Defaults to returning JSON. */
+  afterOAuth?: string
+
+  /**
+   * Replaces `fetch` for provider calls. Tests inject one; nothing else should.
+   *
+   * Without it these flows can only be exercised against a real Google or GitHub application,
+   * which is a test nobody runs.
+   */
+  fetcher?: typeof fetch
 
   /**
    * Cookie holding the refresh token. Default `oven_refresh`.
@@ -154,6 +193,11 @@ export function passwordAuthProvider(
     name,
     secret,
     refreshCookie = COOKIE_DEFAULT,
+    password = true,
+    oauth,
+    callbackUrl,
+    afterOAuth,
+    fetcher,
     accessTtl = 15 * 60,
     refreshTtl = 30 * 24 * 60 * 60,
     resetTtl = 60 * 60,
@@ -161,6 +205,31 @@ export function passwordAuthProvider(
     sendResetEmail,
     rateLimit: rateLimitOptions,
   } = options
+
+  /**
+   * Everything about a misconfigured social sign-in is checked here, at construction, rather than
+   * at the first callback (D19).
+   *
+   * A store without account methods, or a missing callback URL, produces a redirect that works
+   * right up until someone comes back from Google — which is the worst possible moment to find
+   * out, because it happens in production, to a real person, and looks like the provider's fault.
+   */
+  if (oauth && Object.keys(oauth).length > 0) {
+    if (!supportsAccounts(store)) {
+      throw new Error(
+        `The "${name}" auth store cannot hold linked accounts, so social sign-in cannot work. ` +
+          'For auth-basic, pass `drizzleStore(db, { accounts: true })` and add ' +
+          "`export * from '@theoven/auth-basic/schema/accounts'` to your schema.",
+      )
+    }
+    if (typeof callbackUrl !== 'function') {
+      throw new Error(
+        'Social sign-in needs `callbackUrl`, because only your application knows its own public ' +
+          'URL. Deriving it from the request Host header would let a caller choose where the ' +
+          'authorization code is sent.',
+      )
+    }
+  }
 
   const limits =
     rateLimitOptions === false ? null : { ...RATE_DEFAULTS, ...(rateLimitOptions ?? {}) }
@@ -237,51 +306,60 @@ export function passwordAuthProvider(
     },
 
     mount: (register: MountRegistrar, prefix: string) => {
-      register('POST', `${prefix}/signup`, async (ctx) => {
-        throttleSignup?.(ctx.ip ?? 'unknown')
-        const body = (await ctx.body) as { email?: string; password?: string; name?: string }
-        if (!body?.email || !body.password || !body.name) {
-          throw new BadRequest('email, password and name are required.')
-        }
+      /**
+       * The password endpoints, mounted only when the password flow is on.
+       *
+       * An application that signs people in with Google alone does not want a live `/auth/signup`
+       * quietly accepting passwords behind it. That is not clutter, it is a way in nobody
+       * intended (D33).
+       */
+      if (password) {
+        register('POST', `${prefix}/signup`, async (ctx) => {
+          throttleSignup?.(ctx.ip ?? 'unknown')
+          const body = (await ctx.body) as { email?: string; password?: string; name?: string }
+          if (!body?.email || !body.password || !body.name) {
+            throw new BadRequest('email, password and name are required.')
+          }
 
-        const { user, tokens } = await signup(flows, {
-          email: body.email,
-          password: body.password,
-          name: body.name,
+          const { user, tokens } = await signup(flows, {
+            email: body.email,
+            password: body.password,
+            name: body.name,
+          })
+
+          setRefreshCookie(ctx, tokens.refreshToken)
+          ctx.status = 201
+          return {
+            user: publicUser(user),
+            accessToken: tokens.accessToken,
+            expiresIn: tokens.expiresIn,
+          }
         })
 
-        setRefreshCookie(ctx, tokens.refreshToken)
-        ctx.status = 201
-        return {
-          user: publicUser(user),
-          accessToken: tokens.accessToken,
-          expiresIn: tokens.expiresIn,
-        }
-      })
+        register('POST', `${prefix}/login`, async (ctx) => {
+          const body = (await ctx.body) as { email?: string; password?: string }
+          if (!body?.email || !body.password) {
+            throw new BadRequest('email and password are required.')
+          }
 
-      register('POST', `${prefix}/login`, async (ctx) => {
-        const body = (await ctx.body) as { email?: string; password?: string }
-        if (!body?.email || !body.password) {
-          throw new BadRequest('email and password are required.')
-        }
+          // Both keys: by IP alone a distributed attempt on one account walks through, and by
+          // email alone one host can spray the whole user table.
+          throttleLogin?.(`ip:${ctx.ip ?? 'unknown'}`)
+          throttleLogin?.(`email:${body.email.trim().toLowerCase()}`)
 
-        // Both keys: by IP alone a distributed attempt on one account walks through, and by
-        // email alone one host can spray the whole user table.
-        throttleLogin?.(`ip:${ctx.ip ?? 'unknown'}`)
-        throttleLogin?.(`email:${body.email.trim().toLowerCase()}`)
+          const { user, tokens } = await login(flows, {
+            email: body.email,
+            password: body.password,
+          })
 
-        const { user, tokens } = await login(flows, {
-          email: body.email,
-          password: body.password,
+          setRefreshCookie(ctx, tokens.refreshToken)
+          return {
+            user: publicUser(user),
+            accessToken: tokens.accessToken,
+            expiresIn: tokens.expiresIn,
+          }
         })
-
-        setRefreshCookie(ctx, tokens.refreshToken)
-        return {
-          user: publicUser(user),
-          accessToken: tokens.accessToken,
-          expiresIn: tokens.expiresIn,
-        }
-      })
+      }
 
       register('POST', `${prefix}/refresh`, async (ctx) => {
         const tokens = await refresh(flows, readRefreshToken(ctx))
@@ -297,42 +375,82 @@ export function passwordAuthProvider(
         return null
       })
 
-      register('POST', `${prefix}/forgot-password`, async (ctx) => {
-        const body = (await ctx.body) as { email?: string }
-        if (!body?.email) throw new BadRequest('email is required.')
+      if (password) {
+        register('POST', `${prefix}/forgot-password`, async (ctx) => {
+          const body = (await ctx.body) as { email?: string }
+          if (!body?.email) throw new BadRequest('email is required.')
 
-        throttleForgot?.(`ip:${ctx.ip ?? 'unknown'}`)
-        throttleForgot?.(`email:${body.email.trim().toLowerCase()}`)
+          throttleForgot?.(`ip:${ctx.ip ?? 'unknown'}`)
+          throttleForgot?.(`email:${body.email.trim().toLowerCase()}`)
 
-        await requestPasswordReset(flows, body.email)
-        // Always the same answer, whether or not the address exists — see the flow for why.
-        return { message: 'If that email has an account, a reset link is on its way.' }
-      })
+          await requestPasswordReset(flows, body.email)
+          // Always the same answer, whether or not the address exists — see the flow for why.
+          return { message: 'If that email has an account, a reset link is on its way.' }
+        })
 
-      register('POST', `${prefix}/reset-password`, async (ctx) => {
-        const body = (await ctx.body) as { token?: string; password?: string }
-        if (!body?.token || !body.password) {
-          throw new BadRequest('token and password are required.')
+        register('POST', `${prefix}/reset-password`, async (ctx) => {
+          const body = (await ctx.body) as { token?: string; password?: string }
+          if (!body?.token || !body.password) {
+            throw new BadRequest('token and password are required.')
+          }
+
+          await resetPassword(flows, body.token, body.password)
+          ctx.cookies.delete(refreshCookie)
+          return { message: 'Password updated. Please sign in again.' }
+        })
+
+        register('POST', `${prefix}/change-password`, async (ctx) => {
+          const user = (ctx as Context & { user?: Identity<StoredUser> | null }).user
+          if (!user) throw new Unauthorized('Authentication required.')
+
+          const body = (await ctx.body) as { current?: string; next?: string }
+          if (!body?.current || !body.next) {
+            throw new BadRequest('current and next are required.')
+          }
+
+          await changePassword(flows, user.id, { current: body.current, next: body.next })
+          ctx.cookies.delete(refreshCookie)
+          return { message: 'Password changed. Other sessions have been signed out.' }
+        })
+      }
+
+      for (const [key, configured] of Object.entries(oauth ?? {})) {
+        const { provider, ...providerOptions } = configured
+        const oauthConfig: OAuthConfig = {
+          ...flows,
+          store: flows.store as OAuthConfig['store'],
+          callbackUrl: callbackUrl as (name: string) => string,
+          ...(fetcher ? { fetcher } : {}),
         }
 
-        await resetPassword(flows, body.token, body.password)
-        ctx.cookies.delete(refreshCookie)
-        return { message: 'Password updated. Please sign in again.' }
-      })
+        register('GET', `${prefix}/oauth/${key}`, async (ctx) => {
+          const target = await startOAuth(
+            oauthConfig,
+            provider,
+            providerOptions,
+            ctx,
+            (ctx.query as { redirect?: string }).redirect,
+          )
+          return ctx.redirect(target, 302)
+        })
 
-      register('POST', `${prefix}/change-password`, async (ctx) => {
-        const user = (ctx as Context & { user?: Identity<StoredUser> | null }).user
-        if (!user) throw new Unauthorized('Authentication required.')
+        register('GET', `${prefix}/oauth/${key}/callback`, async (ctx) => {
+          const result = await completeOAuth(oauthConfig, provider, providerOptions, ctx)
 
-        const body = (await ctx.body) as { current?: string; next?: string }
-        if (!body?.current || !body.next) {
-          throw new BadRequest('current and next are required.')
-        }
+          setRefreshCookie(ctx, result.tokens.refreshToken)
 
-        await changePassword(flows, user.id, { current: body.current, next: body.next })
-        ctx.cookies.delete(refreshCookie)
-        return { message: 'Password changed. Other sessions have been signed out.' }
-      })
+          // A browser that started this needs somewhere to land; an API client wants the tokens.
+          const destination = result.redirectTo ?? afterOAuth
+          if (destination) return ctx.redirect(destination, 302)
+
+          return {
+            user: publicUser(result.user),
+            accessToken: result.tokens.accessToken,
+            expiresIn: result.tokens.expiresIn,
+            created: result.created,
+          }
+        })
+      }
 
       register('GET', `${prefix}/me`, async (ctx) => {
         const user = (ctx as Context & { user?: Identity<StoredUser> | null }).user

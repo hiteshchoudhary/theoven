@@ -129,6 +129,103 @@ the generated OpenAPI document.
   rule that does not exist.
 </Aside>
 
+## Social sign-in
+
+Google and GitHub are built into the password providers — [`auth-basic`](/docs/bricks/auth-basic/)
+and [`auth-mongo`](/docs/bricks/auth-mongo/) — and off until configured.
+
+```ts title="src/app.ts"
+import { auth, github, google } from '@theoven/auth'
+import { basicAuth } from '@theoven/auth-basic'
+
+auth(
+  basicAuth({
+    db: client,
+    secret: env.string('AUTH_SECRET'),
+    callbackUrl: (provider) => `${env.string('APP_URL')}/auth/oauth/${provider}/callback`,
+    oauth: {
+      google: { provider: google, clientId: env.string('GOOGLE_ID'), clientSecret: env.string('GOOGLE_SECRET') },
+      github: { provider: github, clientId: env.string('GITHUB_ID'), clientSecret: env.string('GITHUB_SECRET') },
+    },
+  }),
+)
+```
+
+Each configured provider mounts two endpoints and nothing else:
+
+| Method | Path | |
+| --- | --- | --- |
+| `GET` | `/auth/oauth/:provider` | redirects to the provider |
+| `GET` | `/auth/oauth/:provider/callback` | completes the sign-in |
+
+### It produces the same session
+
+An OAuth sign-in issues the **same** short access JWT and revocable refresh row a password login
+does (D20). So `auth: true`, your policies, `logout`, sign-out-everywhere and
+password-change-invalidates-sessions all keep working, and an OAuth session is revocable like any
+other.
+
+Adding social sign-in touches no route you have written.
+
+### Flows are independently optional
+
+```ts
+basicAuth({ db: client, secret, password: false, callbackUrl, oauth: { google: googleConfig } })
+```
+
+`password: false` mounts no `signup`, `login`, `forgot-password`, `reset-password` or
+`change-password`. The session endpoints — `refresh`, `logout`, `me` — stay, because a session is a
+session however it began.
+
+<Aside type="caution" title="Why that matters">
+  An application that signs people in with Google alone does not want a live `/auth/signup`
+  quietly accepting passwords behind it. That is not clutter; it is a way in nobody intended.
+</Aside>
+
+### When a provider email matches an existing user
+
+The rule, and it is the security-critical part (D33):
+
+| | |
+| --- | --- |
+| The provider account is already linked | sign in as that user, whatever the email now says |
+| The email matches a user **and the provider verified it** | link, and sign in |
+| The email matches but the provider did **not** verify it | **refuse**, with a message saying to sign in and link from settings |
+| No match | create the user |
+
+The third row is the one that exists for a reason. A provider that lets someone claim an address
+they do not own would otherwise hand them somebody else's account. Google's `email_verified` and
+GitHub's `verified` flag are both real checks, so both are safe to link on — the rule is what keeps
+that true when a third provider is added.
+
+Identity is keyed on the provider's **subject id**, never the email, so someone who changes their
+address at Google is still the same user here.
+
+### A provider that returns no email is refused
+
+GitHub omits the email unless the `user:email` scope is granted, and a user may have none verified.
+Since email is the anchor for linking and for recovery, an account without one could never be
+linked or recovered — so the sign-in fails with a readable message instead (D34).
+
+### Provider tokens are not stored
+
+```ts
+oauth: { github: { provider: github, clientId, clientSecret, storeTokens: true } }
+```
+
+Off by default (D35). Most applications want sign-in, not the provider's API, and tokens nobody
+reads are a liability rather than a feature. Opt in per provider when you actually need to call
+them.
+
+### Users created this way have no password
+
+They are stored with an **unusable password** — a value nothing can verify — rather than a null
+one, which is what avoids a breaking migration for every existing installation. `change-password`
+on such a user answers `409`; they can set a first password through `forgot-password` →
+`reset-password` like anyone else.
+
+Unlinking a provider is refused when it would leave someone with no way to sign in at all.
+
 ## Capabilities
 
 `identify()` is the only method a provider must implement. Everything else is declared, and a

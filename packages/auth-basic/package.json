@@ -1,7 +1,7 @@
 {
   "name": "@theoven/auth-basic",
   "version": "0.4.1",
-  "description": "Email and password auth for Oven — signup, login, refresh, reset — stored with Drizzle",
+  "description": "Email and password auth for Oven \u2014 signup, login, refresh, reset \u2014 stored with Drizzle",
   "keywords": [
     "bun",
     "oven",
@@ -23,7 +23,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./schema/accounts": "./src/schema-accounts.ts"
   },
   "files": [
     "src",

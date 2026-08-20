@@ -85,10 +85,41 @@ const resetTokenSchema = new Schema<ResetTokenDocument>(
 )
 resetTokenSchema.index({ tokenHash: 1 }, { unique: true })
 
+/** A linked provider account. Collection: `auth_accounts`. */
+export interface AccountDocument {
+  _id: string
+  userId: string
+  provider: string
+  providerAccountId: string
+  accessToken?: string | null
+  refreshToken?: string | null
+  expiresAt?: Date | null
+  createdAt: Date
+}
+
+const accountSchema = new Schema<AccountDocument>(
+  {
+    _id: { type: String, required: true },
+    userId: { type: String, required: true },
+    provider: { type: String, required: true },
+    providerAccountId: { type: String, required: true },
+    // Null unless the application asked for tokens to be kept (D35).
+    accessToken: { type: String, default: null },
+    refreshToken: { type: String, default: null },
+    expiresAt: { type: Date, default: null },
+    createdAt: { type: Date, required: true },
+  },
+  { collection: 'auth_accounts', versionKey: false, _id: false },
+)
+// Mongo enforces one user per provider account, so two racing callbacks cannot both link it.
+accountSchema.index({ provider: 1, providerAccountId: 1 }, { unique: true })
+accountSchema.index({ userId: 1 })
+
 export interface AuthModels {
   users: Model<UserDocument>
   refreshTokens: Model<RefreshTokenDocument>
   resetTokens: Model<ResetTokenDocument>
+  accounts: Model<AccountDocument>
 }
 
 /**
@@ -109,5 +140,8 @@ export function authModels(connection: Connection): AuthModels {
     resetTokens:
       (connection.models.AuthResetToken as Model<ResetTokenDocument> | undefined) ??
       connection.model('AuthResetToken', resetTokenSchema),
+    accounts:
+      (connection.models.AuthAccount as Model<AccountDocument> | undefined) ??
+      connection.model('AuthAccount', accountSchema),
   }
 }

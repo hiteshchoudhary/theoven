@@ -31,5 +31,8 @@ export type BasicAuthService = PasswordAuthService
  */
 export function basicAuth(options: BasicAuthOptions): AuthProvider<StoredUser> & BasicAuthService {
   const { db, ...rest } = options
-  return passwordAuthProvider({ ...rest, name: 'basic', store: drizzleStore(db) })
+  // Configuring `oauth` is the opt-in: it turns on the store's account methods, and the provider
+  // then checks at boot that the schema was added too.
+  const accounts = Boolean(rest.oauth && Object.keys(rest.oauth).length > 0)
+  return passwordAuthProvider({ ...rest, name: 'basic', store: drizzleStore(db, { accounts }) })
 }

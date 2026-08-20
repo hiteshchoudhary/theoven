@@ -59,7 +59,14 @@ function config(input: FlowConfig) {
   return { ...DEFAULTS, ...input }
 }
 
-async function issueTokens(user: StoredUser, input: FlowConfig): Promise<TokenPair> {
+/**
+ * Issues an access/refresh pair for a user.
+ *
+ * Exported so social sign-in produces the *same* session a password login does — one session
+ * model means logout, sign-out-everywhere and password-change-invalidates-sessions keep working
+ * however the person signed in.
+ */
+export async function issueTokens(user: StoredUser, input: FlowConfig): Promise<TokenPair> {
   const { store, secret, accessTtl, refreshTtl } = config(input)
 
   const refreshToken = randomToken()
