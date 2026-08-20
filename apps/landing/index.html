@@ -45,6 +45,7 @@
       <a href="/docs/">Docs</a>
       <a href="/docs/bricks/">Bricks</a>
       <a href="/docs/tutorial/first-route/">Tutorial</a>
+      <a href="/docs/projects/">Projects</a>
       <a href="/docs/guides/benchmarks/">Benchmarks</a>
     </nav>
 
@@ -77,7 +78,7 @@
 
     <div class="hero-cta">
       <a class="btn btn-primary" href="/docs/start/installation/">Get started</a>
-      <a class="btn btn-secondary" href="/docs/tutorial/first-route/">Read the tutorial</a>
+      <a class="btn btn-secondary" href="/docs/projects/">Build something real</a>
     </div>
 
     <button class="install copy" data-copy="bun create theoven my-app" type="button" aria-label="Copy install command">
@@ -89,8 +90,8 @@
     <dl class="stats">
       <div><dt>108k</dt><dd>req/s on Bun</dd></div>
       <div><dt>5.9&times;</dt><dd>faster than Express</dd></div>
-      <div><dt>1331</dt><dd>tests, all green</dd></div>
-      <div><dt>14</dt><dd>packages on npm</dd></div>
+      <div><dt>1540</dt><dd>tests, all green</dd></div>
+      <div><dt>18</dt><dd>packages on npm</dd></div>
     </dl>
   </div>
 
@@ -261,10 +262,11 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
   <div class="wrap">
     <header class="section-head">
       <p class="eyebrow">Add a brick, get a feature</p>
-      <h2>Fourteen packages, one contract</h2>
+      <h2>Sixteen bricks, one contract</h2>
       <p class="sub">
-        Every brick contributes a capability to the request context, fully typed. Each page lists
-        what it <strong>cannot</strong> do as plainly as what it can.
+        Every brick contributes a capability to the request context, fully typed — and disappears
+        from the type when you remove it. Each page lists what it <strong>cannot</strong> do as
+        plainly as what it can.
       </p>
     </header>
 
@@ -276,13 +278,13 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
       </article>
       <article class="card">
         <h3><span class="tick">&check;</span>Auth</h3>
-        <p>Email and password on SQL or Mongo, plus Clerk and better-auth. Eight endpoints, argon2id, revocable sessions, rate limited by default.</p>
-        <a class="link-arrow" href="/docs/bricks/auth/">four providers &rarr;</a>
+        <p>Email and password, <strong>Google and GitHub</strong>, or Clerk and better-auth. Eight endpoints, argon2id, revocable sessions, rate limited by default.</p>
+        <a class="link-arrow" href="/docs/recipes/google-login/">Sign in with Google in 20 min &rarr;</a>
       </article>
       <article class="card">
         <h3><span class="tick">&check;</span>Storage</h3>
-        <p>S3, R2, MinIO and Spaces, with presigned direct uploads — and a local directory so uploads work before you have a bucket.</p>
-        <a class="link-arrow" href="/docs/bricks/storage/">storage &rarr;</a>
+        <p>S3, R2, MinIO, Bunny and ImageKit, with presigned direct uploads — and a local directory so uploads work before you have a bucket.</p>
+        <a class="link-arrow" href="/docs/bricks/storage/">five drivers &rarr;</a>
       </article>
       <article class="card">
         <h3><span class="tick">&check;</span>Queue</h3>
@@ -295,8 +297,18 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
         <a class="link-arrow" href="/docs/bricks/mail/">mail &rarr;</a>
       </article>
       <article class="card">
+        <h3><span class="tick">&check;</span>Real-time</h3>
+        <p>WebSockets upgraded from an ordinary guarded route, so <code>auth: true</code> is checked before a socket exists. Server-sent events for the one-way case.</p>
+        <a class="link-arrow" href="/docs/reference/realtime/">WebSockets &amp; SSE &rarr;</a>
+      </article>
+      <article class="card">
+        <h3><span class="tick">&check;</span>Cache &amp; telemetry</h3>
+        <p>Tag invalidation and stampede protection, in memory or Redis. OpenTelemetry spans named by route pattern, not by path.</p>
+        <a class="link-arrow" href="/docs/bricks/cache/">cache, telemetry &rarr;</a>
+      </article>
+      <article class="card">
         <h3><span class="tick">&check;</span>OpenAPI &amp; docs UI</h3>
-        <p>The same schemas that validate generate an OpenAPI 3.1 document and a browsable reference. Checked against a real parser in CI.</p>
+        <p>The same schemas that validate generate an OpenAPI 3.1 document and a browsable reference — and <strong>filter the response</strong>, so a column you forgot to omit cannot be sent.</p>
         <a class="link-arrow" href="/docs/bricks/openapi/">openapi &rarr;</a>
       </article>
     </div>
@@ -309,8 +321,58 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
   </div>
 </section>
 
+<!-- ─────────────────────────────  LEARN  ───────────────────────────── -->
+<!--
+  The docs are a differentiator and the page did not mention them once. FastAPI won largely on
+  documentation, and Oven now has three ways in — a tutorial, drop-in recipes, and full projects.
+-->
+<section class="section alt" id="learn">
+  <div class="wrap">
+    <header class="section-head">
+      <p class="eyebrow">Three ways in</p>
+      <h2>Docs you can build from</h2>
+      <p class="sub">
+        Not a reference and a hello-world. Every snippet on the site is executed before it is
+        published — <strong>458 of them</strong>, checked on every commit, so a sample that drifts
+        from the framework fails the build rather than your afternoon.
+      </p>
+    </header>
+
+    <div class="grid reveal">
+      <article class="card">
+        <h3>Tutorial</h3>
+        <p class="card-meta">5 chapters &middot; one idea each</p>
+        <p>A route, then validation, errors, a database, auth. Start here if you have not written an Oven app before.</p>
+        <a class="link-arrow" href="/docs/tutorial/first-route/">Your first route &rarr;</a>
+      </article>
+
+      <article class="card">
+        <h3>Recipes</h3>
+        <p class="card-meta">4 builds &middot; one sitting each</p>
+        <p>A finished feature you drop into an app you already have. Sign in with Google, image uploads, expiring share links, real-time notifications.</p>
+        <a class="link-arrow" href="/docs/recipes/">Browse recipes &rarr;</a>
+      </article>
+
+      <article class="card">
+        <h3>Projects</h3>
+        <p class="card-meta">3 backends &middot; 16 chapters</p>
+        <p>A whole backend in order — a chat app, a Trello clone, a video platform — including the parts that are actually hard.</p>
+        <a class="link-arrow" href="/docs/projects/">Build something real &rarr;</a>
+      </article>
+    </div>
+
+    <p class="caption">
+      <strong>The hard parts get their own chapters.</strong> Cursor pagination, because offset
+      shows a reader the same message twice. Card ordering, measured to the exact drag where
+      floating-point positions collapse — <em>42</em>. An upload pipeline with a video that is
+      honestly not watchable yet.
+      <a class="link-arrow" href="/docs/projects/trello/ordering/">Read the ordering chapter &rarr;</a>
+    </p>
+  </div>
+</section>
+
 <!-- ────────────────────────────  BENCHMARKS  ───────────────────────── -->
-<section class="section alt" id="benchmarks">
+<section class="section" id="benchmarks">
   <div class="wrap">
     <header class="section-head">
       <p class="eyebrow">Measured, not claimed</p>
@@ -340,7 +402,7 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
 </section>
 
 <!-- ────────────────────────────  COMPARISON  ───────────────────────── -->
-<section class="section" id="compare">
+<section class="section alt" id="compare">
   <div class="wrap">
     <header class="section-head">
       <p class="eyebrow">Where it sits</p>
@@ -359,6 +421,8 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
           <tr><th scope="row">Types inferred from schemas</th><td class="no">&mdash;</td><td class="part">partial</td><td class="part">partial</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">File-based routing</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="us yes">&check;</td></tr>
           <tr><th scope="row">Body / cookies / uploads always on</th><td class="no">&mdash;</td><td class="part">partial</td><td class="yes">&check;</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">Per-request dependency injection</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="yes">&check;</td><td class="yes">&check;</td><td class="us yes">&check;</td></tr>
+          <tr><th scope="row">Google / GitHub sign-in in the box</th><td class="no">&mdash;</td><td class="no">&mdash;</td><td class="part">module</td><td class="no">&mdash;</td><td class="us yes">&check;</td></tr>
         </tbody>
       </table>
     </div>
@@ -366,12 +430,16 @@ app.<span class="c-fn">get</span>(<span class="c-str">'/time'</span>, (ctx) => (
     <p class="caption">
       We are not competing on router microseconds — Bun makes everything fast. We compete on the
       time between <code>bun create</code> and an app shaped like production.
+      <br><br>
+      Where FastAPI is still ahead: OAuth2 scopes, static file serving, and per-exception handlers.
+      Those are on the list rather than in the box, and the
+      <a class="link-arrow" href="/docs/bricks/">brick pages</a> say so.
     </p>
   </div>
 </section>
 
 <!-- ────────────────────────────  PHILOSOPHY  ───────────────────────── -->
-<section class="section alt" id="philosophy">
+<section class="section" id="philosophy">
   <div class="wrap">
     <div class="manifesto reveal">
       <p class="eyebrow">A deliberate break</p>

@@ -292,6 +292,13 @@ h2 { font-size: clamp(26px, 3.4vw, 38px); line-height: 1.12; letter-spacing: -0.
 .card .replaces b { color: var(--text-2); font-weight: 500; }
 .card .link-arrow { display: inline-block; margin-top: 12px; font-size: 13px; }
 
+/* A count under a card title — "5 chapters · one idea each". Sits between the heading and the
+   description, so it reads as a label rather than as the first sentence. */
+.card-meta {
+  font-size: 12.5px; color: var(--text-3); margin-bottom: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The status ticks carry the only other ember on the page, and only at 14px. */
 .card .tick { color: var(--ember); margin-right: 7px; font-size: 13px; }
 
