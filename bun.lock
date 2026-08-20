@@ -274,6 +274,40 @@
         "@theoven/core": "workspace:^",
       },
     },
+    "packages/vector": {
+      "name": "@theoven/vector",
+      "version": "0.5.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
+      },
+    },
+    "packages/vector-pg": {
+      "name": "@theoven/vector-pg",
+      "version": "0.5.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/vector": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/vector": "workspace:^",
+      },
+    },
+    "packages/vector-qdrant": {
+      "name": "@theoven/vector-qdrant",
+      "version": "0.5.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/vector": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
+        "@theoven/vector": "workspace:^",
+      },
+    },
     "packages/webhooks": {
       "name": "@theoven/webhooks",
       "version": "0.5.2",
@@ -715,6 +749,12 @@
     "@theoven/storage-imagekit": ["@theoven/storage-imagekit@workspace:packages/storage-imagekit"],
 
     "@theoven/telemetry": ["@theoven/telemetry@workspace:packages/telemetry"],
+
+    "@theoven/vector": ["@theoven/vector@workspace:packages/vector"],
+
+    "@theoven/vector-pg": ["@theoven/vector-pg@workspace:packages/vector-pg"],
+
+    "@theoven/vector-qdrant": ["@theoven/vector-qdrant@workspace:packages/vector-qdrant"],
 
     "@theoven/web": ["@theoven/web@workspace:apps/web"],
 

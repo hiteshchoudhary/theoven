@@ -860,7 +860,13 @@ its own nested 0.7.2 and still benchmarks.
       - [ ] **Found, not fixed:** core's in-process `rateLimit` drops the `RateLimit-*` headers on
             its own `429` — same bug, since `ctx.set` does not survive a thrown error. Left alone
             because existing bricks are out of scope for this phase; one line when wanted.
-- [ ] `@theoven/vector` + sqlite / pg / qdrant / pinecone
+- [x] **`@theoven/vector`** + `vector-pg`, `vector-qdrant` — shipped. All three pass one
+      conformance suite; pgvector and Qdrant tested against real servers in containers.
+      - [ ] Pinecone adapter. The contract fits it; nobody has written it. A fourth HTTP store
+            proves little the Qdrant one does not, which is why it was not done first.
+      - [ ] `sqlite-vec` cannot load under Bun (no dynamic extension support in the bundled
+            SQLite). Revisit if Bun ships extension loading — it would replace the scan with an
+            index and lift the ~50k ceiling.
 - [ ] `@theoven/ai` — AI SDK as a peer dependency
 - [ ] `@theoven/payments` + stripe / razorpay / paddle
 - [ ] `@theoven/sandbox` + daytona / e2b / docker

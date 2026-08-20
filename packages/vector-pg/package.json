@@ -1,0 +1,52 @@
+{
+  "name": "@theoven/vector-pg",
+  "version": "0.5.2",
+  "description": "pgvector as a vector store for Oven",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "vector",
+    "pgvector",
+    "postgres",
+    "embeddings"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/vector/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/vector-pg"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^",
+    "@theoven/vector": "workspace:^"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:^",
+    "@theoven/vector": "workspace:^"
+  }
+}

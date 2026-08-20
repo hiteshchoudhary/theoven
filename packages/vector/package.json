@@ -1,0 +1,51 @@
+{
+  "name": "@theoven/vector",
+  "version": "0.5.2",
+  "description": "Vector search for Oven \u2014 an embedded scan, pgvector or Qdrant behind one contract",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "vector",
+    "embeddings",
+    "rag",
+    "similarity-search"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/vector/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/vector"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/store-conformance.ts",
+    "./src/*": "./src/*.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:^"
+  }
+}

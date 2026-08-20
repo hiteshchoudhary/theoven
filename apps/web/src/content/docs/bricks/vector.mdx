@@ -1,0 +1,182 @@
+---
+title: vector
+description: Vector search behind one contract — an embedded scan, pgvector, or Qdrant, with the same score on all three.
+sidebar:
+  order: 19
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/vector` |
+| **Adds to context** | `ctx.vector` |
+| **Endpoints** | none |
+| **Creates files** | `./vectors.db` with the SQLite store |
+| **Creates tables** | `oven_vectors` (SQLite, pgvector) · collections (Qdrant) |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/vector
+```
+
+```ts title="src/app.ts"
+import { sqliteVector, vector } from '@theoven/vector'
+
+export const app = createApp().use(vector(sqliteVector({ url: './vectors.db' })))
+```
+
+```ts title="src/routes/search.post.ts"
+import { z } from 'zod'
+
+export const body = z.object({ question: z.string().min(1) })
+
+export default async ({ body, vector }) => {
+  const embedding = await embed(body.question)
+  return vector.query(embedding, { k: 5, filter: { source: 'handbook' } })
+}
+```
+
+## What it does
+
+Stores embeddings and finds the nearest ones. Defaults to SQLite so retrieval works with **nothing
+to provision** — the same argument as the SQLite database default (D21) — and moving to pgvector or
+Qdrant is one line.
+
+## Endpoints
+
+This brick adds none.
+
+## Stores
+
+| | Search | Provision |
+| --- | --- | --- |
+| `sqliteVector` | scans in process | nothing |
+| [`pgVector`](https://www.npmjs.com/package/@theoven/vector-pg) | pgvector index | Postgres + extension |
+| [`qdrantVector`](https://www.npmjs.com/package/@theoven/vector-qdrant) | HNSW, server-side | a Qdrant |
+
+### `score` means the same thing on all three
+
+Cosine similarity: **1 identical, 0 unrelated, −1 opposite.** Higher is always more similar.
+
+That normalisation is deliberate and it is most of what makes this a contract. Engines disagree —
+pgvector's `<=>` is a *distance* where lower is better, Qdrant returns a similarity where higher
+is. Forwarding each untouched would make `score` mean the opposite thing depending on which store
+was registered, so a threshold tuned in development would silently invert in production.
+
+Run against the same three vectors, all three engines agree to three decimal places:
+
+```
+sqlite    same=1.000  close=0.914  ortho=0.000
+qdrant    same=1.000  close=0.914  ortho=0.000
+pgvector  same=1.000  close=0.914  ortho=0.000
+```
+
+## Configuration
+
+```ts
+vector(sqliteVector({ url: './vectors.db' }), { namespace: 'documents' })
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `namespace` | `'default'` | used when a call does not name one |
+
+A namespace is the unit of separation — a Qdrant collection, a column in SQL. Per tenant, per
+corpus, per environment. Naming one explicitly is how a staging index stays out of a production
+search.
+
+## Usage
+
+```ts
+await ctx.vector.upsert([
+  { id: 'handbook#1', embedding, metadata: { source: 'handbook', page: 1 } },
+])
+
+const matches = await ctx.vector.query(embedding, {
+  k: 5,
+  filter: { source: 'handbook' },
+  minScore: 0.75,
+})
+
+await ctx.vector.remove(['handbook#1'])
+await ctx.vector.count()                       // in the default namespace
+await ctx.vector.query(embedding, { namespace: 'tenant-42' })
+```
+
+Upsert **replaces** by id rather than erroring, which is what makes re-indexing a corpus safe to
+run twice.
+
+### Filters are equality, deliberately
+
+```ts
+{ filter: { source: 'handbook', draft: false } }
+```
+
+Every engine supports this. Past it they diverge hard — Qdrant has nested boolean trees, Pinecone
+has `$gt` and `$in`, pgvector has all of SQL. Inventing a query language over that would be worse
+than all three and permanently behind each, so anything richer goes through
+[`raw`](/docs/reference/bricks/#raw--the-escape-hatch).
+
+## What it creates
+
+**SQLite:** `./vectors.db` by default, holding one `oven_vectors` table. `.gitignore` it.
+
+**pgvector:** the `vector` extension and an `oven_vectors` table, created at boot.
+
+**Qdrant:** one collection per namespace, created on demand with cosine distance.
+
+## Capabilities
+
+| | sqlite | pgvector | qdrant |
+| --- | --- | --- | --- |
+| upsert, query, remove, clear, count | ✓ | ✓ | ✓ |
+| Equality filters | ✓ | ✓ | ✓ |
+| Namespaces | ✓ | ✓ | ✓ |
+| Approximate index | ✗ — exact scan | ✓ | ✓ |
+| Learns dimensions from the first write | ✓ | ✗ — required | ✗ — required |
+| Arbitrary string ids | ✓ | ✓ | ✓ *(mapped to uuids)* |
+
+## Limitations
+
+- **The embedded store scans, and `sqlite-vec` is why.** It cannot be loaded under Bun — the
+  bundled SQLite is built without dynamic extension support, and `load()` fails outright. So the
+  store compares in JavaScript. Measured at 1536 dimensions: **3.4 ms at 1,000 vectors, 17 ms at
+  10,000, 88 ms at 50,000, 359 ms at 200,000.** Linear, fine to roughly 50,000, and past that you
+  should change the store rather than tune this one.
+- **One embedding model per namespace.** Mixing dimensions is refused with a
+  `VectorDimensionError` rather than stored, because two models' vectors are not comparable and a
+  silent mix makes every later query quietly wrong.
+- **pgvector's index is not created for you.** The table works without one by scanning; an
+  `ivfflat` or `hnsw` index is a decision about recall and build time that belongs to you.
+- **No hybrid search, reranking or sparse vectors.** Reach through `raw`.
+- **No Pinecone adapter yet.** The contract fits it; nobody has written it.
+- **Metadata is flat.** Strings, numbers and booleans — nested objects are not filterable on every
+  engine, so they are not in the contract.
+
+## How it is verified
+
+All three stores run the **same conformance suite**, and that is the point: an in-process scan,
+Postgres with an extension, and a hosted HTTP service are about as structurally different as three
+implementations get. One suite over all three is what makes `VectorStore` a contract rather than a
+description of whichever was written first.
+
+pgvector and Qdrant are tested against **real servers** in containers, gated on `PGVECTOR_TEST_URL`
+and `QDRANT_TEST_URL`, skipping with a printed notice otherwise.
+
+<Aside type="note" title="Three bugs the second and third adapters found">
+  Everything below passed on SQLite and failed elsewhere, which is the argument for writing the
+  second adapter at all:
+
+  - **The conformance suite leaked a connection per test**, because it never closed the store. An
+    in-process store never shows this; Postgres refused the run partway through with *"sorry, too
+    many clients already"*.
+  - **pgvector stored metadata as a jsonb *string*** rather than an object, because Bun.SQL
+    encodes a JS object into jsonb itself and re-encodes a string you hand it. `jsonb_typeof`
+    returned `string`, `@>` containment matched nothing, and **every metadata filter silently
+    returned no results** with no error anywhere.
+  - **A JS array passed to `= any($1)`** serialises as `a,b`, which Postgres rejects as a
+    malformed array literal.
+</Aside>
