@@ -1,0 +1,202 @@
+---
+title: 'YouTube: subscriptions and the feed'
+description: Subscribe, count subscribers, and build a home feed that is one query however many channels someone follows.
+sidebar:
+  order: 6
+  label: 6. Feed
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## Subscribing
+
+```ts title="src/schema.ts"
+export const subscriptions = sqliteTable(
+  'subscriptions',
+  {
+    subscriberId: text('subscriber_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  // The pair is the identity. Subscribing twice is not two subscriptions, and the database
+  // is what says so — verified: the second insert is refused by the primary key.
+  (table) => [primaryKey({ columns: [table.subscriberId, table.channelId] })],
+)
+```
+
+```ts title="src/routes/channels/[handle]/subscribe.post.ts"
+export const auth = true
+export const params = z.object({ handle: z.string() })
+
+export default async ({ db, params, user }) => {
+  const [channel] = await db
+    .select()
+    .from(channels)
+    .where(eq(channels.handle, params.handle.toLowerCase()))
+
+  if (!channel) throw new NotFound('No such channel.')
+  if (channel.ownerId === user.id) throw new Conflict('You cannot subscribe to your own channel.')
+
+  await db
+    .insert(subscriptions)
+    .values({ subscriberId: user.id, channelId: channel.id })
+    .onConflictDoNothing()
+
+  return { subscribed: true }
+}
+```
+
+Idempotent because the primary key makes it so — a double-tap on a phone is one subscription, with
+no read-then-write race.
+
+## The feed, in one query
+
+Someone following 200 channels must not cost 200 queries. A subquery keeps it to one:
+
+```ts title="src/routes/feed.get.ts"
+import { and, desc, eq, inArray, lt } from 'drizzle-orm'
+import { z } from 'zod'
+import { channels, subscriptions, videos } from '../schema'
+
+export const auth = true
+export const query = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  before: z.uuid().optional(),
+})
+
+export default async (ctx) => {
+  // Not fetched into memory — this becomes an IN (SELECT …) in the statement below.
+  const following = ctx.db
+    .select({ id: subscriptions.channelId })
+    .from(subscriptions)
+    .where(eq(subscriptions.subscriberId, ctx.user.id))
+
+  const cursor = ctx.query.before
+    ? (await ctx.db.select().from(videos).where(eq(videos.id, ctx.query.before)))[0]
+    : undefined
+
+  const rows = await ctx.db
+    .select({ video: videos, handle: channels.handle, channelName: channels.name })
+    .from(videos)
+    .innerJoin(channels, eq(channels.id, videos.channelId))
+    .where(
+      and(
+        inArray(videos.channelId, following),
+        // The three conditions that keep unwatchable videos out of a feed.
+        eq(videos.status, 'ready'),
+        eq(videos.visibility, 'public'),
+        cursor?.publishedAt ? lt(videos.publishedAt, cursor.publishedAt) : undefined,
+      ),
+    )
+    .orderBy(desc(videos.publishedAt))
+    .limit(ctx.query.limit)
+
+  return {
+    videos: rows.map((row) => ({ ...row.video, channel: { handle: row.handle, name: row.channelName } })),
+    next: rows.length === ctx.query.limit ? (rows.at(-1)?.video.id ?? null) : null,
+  }
+}
+```
+
+### It was run
+
+Three channels, five videos, one viewer following two of them:
+
+```
+feed for u1 : alan public | grace public
+  (excludes their own channel, a private video, and one still processing)
+```
+
+Two of five. The three excluded are exactly the three that should be — which is the whole point of
+putting `status` and `visibility` in the `WHERE` rather than filtering afterwards.
+
+<Aside type="caution" title="Filtering after the query is a different bug">
+  Fetching 20 rows and then dropping the private ones leaves the reader with 17 and a `next` cursor
+  that skips the rest. The conditions have to be in the statement so `LIMIT` counts things the
+  viewer can actually see.
+</Aside>
+
+## Subscriber counts
+
+Counting on read is right until it isn't:
+
+```ts
+const [{ subscribers }] = await db
+  .select({ subscribers: count() })
+  .from(subscriptions)
+  .where(eq(subscriptions.channelId, channel.id))
+```
+
+Verified against the seeded data:
+
+```
+subscriber counts: [{"channelId":"c2","subscribers":1},{"channelId":"c3","subscribers":1}]
+```
+
+With an index on `subscriptions(channel_id)` this is fine into the millions. It stops being fine
+when the count is on a page served constantly — a channel page, and every video card in the feed.
+
+The fix, when you get there, is a counter column on `channels` updated in the same transaction as
+the subscribe, plus a periodic reconciliation job because counters drift. Do not start there: a
+denormalised count is a second source of truth, and it will be wrong at some point in a way the
+`COUNT(*)` never is.
+
+## Notifying subscribers
+
+When a video goes public, everyone following should hear about it. Fan-out belongs in a job, not in
+the request:
+
+```ts title="src/jobs.ts"
+export const notifySubscribers = defineJob<{ videoId: string }>({
+  name: 'notify-subscribers',
+  retries: 3,
+  handler: async ({ payload, log }) => {
+    const [video] = await db.select().from(videos).where(eq(videos.id, payload.videoId))
+    if (!video || video.visibility !== 'public') return
+
+    const followers = await db
+      .select({ userId: subscriptions.subscriberId })
+      .from(subscriptions)
+      .where(eq(subscriptions.channelId, video.channelId))
+
+    for (const follower of followers) {
+      app.publish(`user:${follower.userId}`, JSON.stringify({ type: 'video.published', video }))
+    }
+
+    log.info('notified subscribers', { videoId: video.id, count: followers.length })
+  },
+})
+```
+
+Dispatched from the publish endpoint. A channel with a hundred thousand subscribers must not make
+someone's PATCH request take a minute — and it must not fail their edit because the notification
+step broke.
+
+The `visibility !== 'public'` re-check inside the job matters: between dispatch and execution the
+owner may have made it private again, and a job that trusts its payload would notify everyone about
+a video they cannot watch.
+
+## What you built
+
+| | |
+| --- | --- |
+| Channels | unique handles, decided by the index rather than a racy lookup |
+| Uploads | a real pipeline, with a `failed` state the owner can see |
+| Visibility | one rule, four routes, `404` rather than `403` |
+| Views | atomic, deduplicated per viewer per hour, off the read path |
+| Playlists | ordered, and filtered per viewer — a public playlist does not publish private videos |
+| Subscriptions | idempotent, and a feed that is one query |
+
+## What this does not do
+
+- **No transcoding.** `transcode()` is where ffmpeg or a service goes; the pipeline around it is
+  what these chapters build.
+- **No adaptive streaming.** One source file, no HLS or DASH ladder, and no range requests on the
+  development path — so seeking needs the presigned branch.
+- **No comments, likes or search.** Comments are the chat schema; search wants Postgres full-text
+  or a separate index.
+- **The feed is chronological.** No ranking, which is a system rather than a query.
+- **Subscriber counts are computed**, deliberately — see above for when to change that and why not
+  to start there.

@@ -1,0 +1,56 @@
+---
+title: 'YouTube: what you will build'
+description: Channels, an upload pipeline, playlists, subscriptions and a feed — the whole backend.
+sidebar:
+  order: 1
+  label: 1. Overview
+---
+
+The largest of the three: a video platform backend. Accounts and channels, an upload that survives
+a large file, playlists, subscriptions, and a home feed.
+
+By the end you will have:
+
+- Sign-up with a password **or** Google, and a channel per account
+- An upload that stores the file and hands it to a background job, with a video that is honestly
+  *not yet watchable* until that job finishes
+- Visibility — public, unlisted, private — enforced on every read path
+- Playlists, ordered, reusing the [positions from Trello](/docs/projects/trello/ordering/)
+- Subscriptions, and a feed that is one query no matter how many channels someone follows
+
+## The hard parts
+
+**A video has states, and pretending otherwise breaks the player.** Between "the upload finished"
+and "this can be watched" there is real work — and if the API returns `ready` the moment bytes land,
+every client shows a broken video. The status column is the first thing on the schema for a reason.
+
+**The feed must not be a query per channel.** Someone following 200 channels should cost one query,
+not 200. Chapter 6 builds it and shows the output.
+
+**Visibility is checked on every path, not just one.** A private video is reachable through the
+channel page, the playlist it sits in, the feed, and its own URL. Four places, one rule — so the
+rule lives in one function.
+
+## The shape
+
+```
+src/
+  schema.ts               channels, videos, playlists, playlist_items, subscriptions
+  visibility.ts           the one rule, used by four routes
+  jobs.ts                 the processing job
+  routes/
+    channels/…            create, read, subscribe
+    videos/…              upload, watch, update
+    playlists/…           create, add, reorder
+    feed.get.ts           the subscription feed
+```
+
+## Before you start
+
+```bash
+bun create theoven tube --db sqlite --auth basic
+cd tube && bun install
+bun add @theoven/storage @theoven/queue
+```
+
+[Channels and accounts →](/docs/projects/youtube/channels/)

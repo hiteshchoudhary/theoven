@@ -1,0 +1,192 @@
+---
+title: 'YouTube: playlists'
+description: Ordered collections, reusing the positions from Trello — and the visibility trap they introduce.
+sidebar:
+  order: 5
+  label: 5. Playlists
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## The tables
+
+```ts title="src/schema.ts"
+export const playlists = sqliteTable('playlists', {
+  id: text('id').primaryKey(),
+  channelId: text('channel_id').notNull(),
+  title: text('title').notNull(),
+  visibility: text('visibility', { enum: ['public', 'unlisted', 'private'] })
+    .notNull()
+    .default('private'),
+})
+
+export const playlistItems = sqliteTable(
+  'playlist_items',
+  {
+    id: text('id').primaryKey(),
+    playlistId: text('playlist_id').notNull(),
+    videoId: text('video_id').notNull(),
+    /** Same fractional ordering as the Trello cards, and the same rebalance caveat. */
+    position: real('position').notNull(),
+    addedAt: integer('added_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    index('playlist_items_idx').on(table.playlistId, table.position),
+    // The same video twice in one playlist is a mistake, not a feature.
+    uniqueIndex('playlist_items_unique').on(table.playlistId, table.videoId),
+  ],
+)
+```
+
+The ordering is [exactly the Trello design](/docs/projects/trello/ordering/) — `between()`, `STEP =
+1024`, and the same rebalance when floats collapse. Nothing new to build; reuse `src/order.ts`.
+
+## Adding a video
+
+```ts title="src/routes/playlists/[id]/items.post.ts"
+import { desc, eq } from 'drizzle-orm'
+import { Conflict, NotFound } from '@theoven/core'
+import { z } from 'zod'
+import { STEP } from '../../../order'
+
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({ videoId: z.uuid() })
+
+export default async ({ body, db, params, user }) => {
+  const playlist = await requireOwnedPlaylist(db, params.id, user.id)
+
+  // The video must be one this person may actually see — otherwise "add to playlist" becomes
+  // a way to confirm that a private video exists.
+  const video = await watchableVideo(db, body.videoId, user.id)
+
+  const [last] = await db
+    .select({ position: playlistItems.position })
+    .from(playlistItems)
+    .where(eq(playlistItems.playlistId, params.id))
+    .orderBy(desc(playlistItems.position))
+    .limit(1)
+
+  try {
+    const [item] = await db
+      .insert(playlistItems)
+      .values({
+        id: crypto.randomUUID(),
+        playlistId: params.id,
+        videoId: video.id,
+        position: (last?.position ?? 0) + STEP,
+      })
+      .returning()
+
+    return item
+  } catch {
+    throw new Conflict('That video is already in this playlist.')
+  }
+}
+```
+
+## The trap: visibility is not inherited
+
+A playlist is public. A video in it is private. What does the playlist return?
+
+```ts title="src/routes/playlists/[id].get.ts"
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ db, params, user }) => {
+  const [playlist] = await db.select().from(playlists).where(eq(playlists.id, params.id))
+  assertPlaylistVisible(playlist, user?.id)
+
+  const rows = await db
+    .select({ item: playlistItems, video: videos, ownerId: channels.ownerId })
+    .from(playlistItems)
+    .innerJoin(videos, eq(videos.id, playlistItems.videoId))
+    .innerJoin(channels, eq(channels.id, videos.channelId))
+    .where(eq(playlistItems.playlistId, params.id))
+    .orderBy(asc(playlistItems.position))
+
+  return {
+    ...playlist,
+    // Filtered per video, per viewer. A public playlist does not make its contents public.
+    items: rows
+      .filter((row) => canWatch({ ...row.video, ownerId: row.ownerId }, user?.id))
+      .map((row) => ({ position: row.item.position, video: row.video })),
+  }
+}
+```
+
+<Aside type="caution" title="This is the bug worth stopping for">
+  The obvious implementation joins and returns everything, because the *playlist* was public. That
+  publishes every private video anyone ever added to it — titles, thumbnails, ids — through a route
+  nobody thought of as a video route.
+
+  Visibility belongs to the video, always, and is re-checked wherever a video is returned. That is
+  why `canWatch` is a function rather than four copies of a condition.
+</Aside>
+
+A consequence worth telling users about: two people can open the same public playlist and see
+different numbers of videos. That is correct, and it surprises people, so the API returning a
+filtered list rather than a count-with-holes is the kinder shape.
+
+## Reordering
+
+```ts title="src/routes/playlists/[id]/items/[itemId].patch.ts"
+export const auth = true
+export const params = z.object({ id: z.uuid(), itemId: z.uuid() })
+export const body = z.object({ after: z.uuid().optional() })
+
+export default async ({ body, db, params, user }) => {
+  await requireOwnedPlaylist(db, params.id, user.id)
+
+  const above = body.after
+    ? (await db.select().from(playlistItems).where(eq(playlistItems.id, body.after)))[0]
+    : undefined
+
+  const [below] = await db
+    .select()
+    .from(playlistItems)
+    .where(
+      and(
+        eq(playlistItems.playlistId, params.id),
+        above ? gt(playlistItems.position, above.position) : undefined,
+      ),
+    )
+    .orderBy(asc(playlistItems.position))
+    .limit(1)
+
+  const position = between(above?.position, below?.position)
+
+  if (collapsed(position, above?.position, below?.position)) {
+    await rebalancePlaylist(db, params.id)
+    // Retry once against fresh positions.
+    return reorder(db, params)
+  }
+
+  const [moved] = await db
+    .update(playlistItems)
+    .set({ position })
+    .where(eq(playlistItems.id, params.itemId))
+    .returning()
+
+  return moved
+}
+```
+
+One write, same as a card. The rebalance is the same too — and the same 42-drags-into-one-gap limit
+applies, though a playlist is reordered far less often than a sprint board, so it is unlikely to
+matter here.
+
+## Watch Later, and other implicit playlists
+
+Watch Later and Liked Videos are playlists with a flag rather than special tables:
+
+```ts
+kind: text('kind', { enum: ['user', 'watch-later', 'liked'] }).notNull().default('user'),
+```
+
+One `uniqueIndex` on `(channelId, kind)` for the non-`user` kinds keeps them singular. Everything
+above — ordering, visibility filtering, the add endpoint — works unchanged, which is the argument
+for not giving them their own tables.
+
+[Subscriptions and the feed →](/docs/projects/youtube/subscriptions/)

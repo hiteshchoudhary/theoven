@@ -1,0 +1,224 @@
+---
+title: 'YouTube: the upload pipeline'
+description: A video that is honestly not watchable yet, and a background job that makes it so.
+sidebar:
+  order: 3
+  label: 3. Uploading
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## A video has states
+
+```ts title="src/schema.ts"
+export const videos = sqliteTable(
+  'videos',
+  {
+    id: text('id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+
+    /**
+     * Where this video is in the pipeline.
+     *
+     * `ready` is the only state a viewer may see, and it is set by the processing job — never
+     * by the upload endpoint. Returning `ready` when the bytes land means every client shows a
+     * player pointed at something that cannot be played yet.
+     */
+    status: text('status', { enum: ['uploading', 'processing', 'ready', 'failed'] })
+      .notNull()
+      .default('uploading'),
+
+    visibility: text('visibility', { enum: ['public', 'unlisted', 'private'] })
+      .notNull()
+      .default('private'),
+
+    sourceKey: text('source_key'),
+    thumbnailKey: text('thumbnail_key'),
+    durationSeconds: integer('duration_seconds'),
+    views: integer('views').notNull().default(0),
+
+    /** Null until it is both `ready` and made public. This is what the feed orders by. */
+    publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => [index('videos_channel_idx').on(table.channelId, table.publishedAt)],
+)
+```
+
+<Aside type="caution" title="`private` is the default, and that is deliberate">
+  A video whose visibility defaults to `public` is published the instant the row is written —
+  before the owner has titled it, before processing finished, and before they meant to. Defaulting
+  to private means publishing is something someone does, rather than something that happens to
+  them.
+</Aside>
+
+## The upload
+
+```ts title="src/routes/videos/index.post.ts"
+import { z } from 'zod'
+import { processVideo } from '../../jobs'
+import { channels, videos } from '../../schema'
+
+export const auth = true
+export const body = z.object({
+  file: z.file().max(2_000_000_000).mime(['video/mp4', 'video/quicktime', 'video/webm']),
+  title: z.string().min(1).max(120),
+  description: z.string().max(5000).optional(),
+})
+
+export default async ({ body, db, queue, storage, user }) => {
+  const [channel] = await db.select().from(channels).where(eq(channels.ownerId, user.id))
+  if (!channel) throw new NotFound('Create a channel first.')
+
+  const id = crypto.randomUUID()
+  // Keyed by video id, not by channel: a second upload must not overwrite the first, and the
+  // key has to stay valid for as long as the row does.
+  const sourceKey = `videos/${id}/source`
+
+  await storage.upload(sourceKey, body.file)
+
+  const [video] = await db
+    .insert(videos)
+    .values({
+      id,
+      channelId: channel.id,
+      title: body.title,
+      description: body.description ?? null,
+      sourceKey,
+      status: 'processing',
+    })
+    .returning()
+
+  // Handed off. The request returns now; the work happens elsewhere.
+  await queue.dispatch(processVideo, { videoId: id, sourceKey })
+
+  ctx.status = 202
+  return video
+}
+```
+
+`202 Accepted`, not `201 Created`. The row exists, the file is stored, and the thing the caller
+actually wants — a watchable video — has not happened yet. A `201` would be a lie the client
+believes.
+
+## The job
+
+```ts title="src/jobs.ts"
+import { defineJob } from '@theoven/queue'
+import { eq } from 'drizzle-orm'
+import { videos } from './schema'
+
+export const processVideo = defineJob<{ videoId: string; sourceKey: string }>({
+  name: 'process-video',
+  retries: 3,
+  backoff: 5000,
+  timeout: 30 * 60_000,
+
+  handler: async ({ payload, signal, log }) => {
+    const { videoId, sourceKey } = payload
+
+    // Whatever your pipeline is — ffmpeg, a transcoding service, a thumbnail grab.
+    const { durationSeconds, thumbnailKey } = await transcode(sourceKey, { signal })
+
+    await db
+      .update(videos)
+      .set({ status: 'ready', durationSeconds, thumbnailKey })
+      .where(eq(videos.id, videoId))
+
+    log.info('video ready', { videoId, durationSeconds })
+  },
+})
+```
+
+Three things worth noting.
+
+**`signal` is passed to the work.** A thirty-minute timeout means a stuck transcode is abandoned
+rather than holding a worker forever — but only if the work you call actually respects the signal.
+Passing it and ignoring it is the same as not having a timeout.
+
+**The retries are for transient failures.** A transcoder that is briefly unavailable should be
+retried; a file that is not really a video should not. Which is why the failure path is explicit:
+
+```ts title="src/jobs.ts"
+handler: async ({ payload, remaining, log }) => {
+  try {
+    // …
+  } catch (error) {
+    // On the last attempt, record the failure so the owner sees something other than a
+    // video stuck on "processing" forever.
+    if (remaining === 0) {
+      await db.update(videos).set({ status: 'failed' }).where(eq(videos.id, payload.videoId))
+      log.error('video failed permanently', { videoId: payload.videoId })
+    }
+    throw error
+  }
+}
+```
+
+Without that, a video that fails all three attempts sits at `processing` indefinitely and the owner
+has no idea why. A dead-lettered job is visible to *you*; `status: 'failed'` is visible to *them*.
+
+**The job does not publish the video.** It sets `ready`. Whether anyone can see it is visibility,
+which is the owner's decision and the next chapter's subject.
+
+## Publishing
+
+```ts title="src/routes/videos/[id].patch.ts"
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({
+  title: z.string().min(1).max(120).optional(),
+  description: z.string().max(5000).optional(),
+  visibility: z.enum(['public', 'unlisted', 'private']).optional(),
+})
+
+export default async ({ body, db, params, user }) => {
+  const video = await requireOwnedVideo(db, params.id, user.id)
+
+  if (body.visibility === 'public' && video.status !== 'ready') {
+    throw new Conflict('This video is still processing.')
+  }
+
+  const [updated] = await db
+    .update(videos)
+    .set({
+      ...body,
+      // Set once, the first time it goes public — so a private/public toggle does not keep
+      // moving it back to the top of everyone's feed.
+      publishedAt:
+        body.visibility === 'public' && !video.publishedAt ? new Date() : video.publishedAt,
+    })
+    .where(eq(videos.id, params.id))
+    .returning()
+
+  return updated
+}
+```
+
+The `publishedAt` rule is the sort of thing that only shows up in production: without it, unlisting
+and relisting a year-old video republishes it to every subscriber's feed.
+
+## Large files
+
+The upload above passes bytes through your server. For real video, hand the browser a URL and let
+it upload straight to the bucket:
+
+```ts title="src/routes/videos/upload-url.post.ts"
+export const auth = true
+export const body = z.object({ contentType: z.enum(['video/mp4', 'video/webm']) })
+
+export default async ({ body, storage, user }) => {
+  if (!storage.canPresign) throw new ServiceUnavailable('Direct upload is not configured.')
+
+  const id = crypto.randomUUID()
+  return { videoId: id, url: storage.presignUpload(`videos/${id}/source`, { expiresIn: 3600 }) }
+}
+```
+
+`canPresign` is `false` on the disk driver, so the check is what keeps this honest in development
+rather than 500ing in production. The client then calls a confirm endpoint to create the row and
+dispatch the job — the size and type limits move to the bucket policy, since your server no longer
+sees the bytes.
+
+[Watching, and visibility →](/docs/projects/youtube/watching/)

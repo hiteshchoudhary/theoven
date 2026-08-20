@@ -41,6 +41,9 @@ export default defineConfig({
         // Short, self-contained builds. Distinct from `build/`, which is one application in
         // order — these are things you drop into an application you already have.
         { label: 'Recipes', items: [{ autogenerate: { directory: 'recipes' } }] },
+        // Long builds. Each is a realistic backend with the parts that are actually hard —
+        // message pagination, card ordering, an upload pipeline — rather than a CRUD demo.
+        { label: 'Projects', items: [{ autogenerate: { directory: 'projects' } }] },
         { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
         // The catalogue. One page per shipped brick, all following the same shape so a reader
         // — or a model — can find "what endpoints does this add" without hunting.

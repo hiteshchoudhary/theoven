@@ -1,0 +1,149 @@
+---
+title: 'Chat: rooms and membership'
+description: Create a room, join one, and write the check that every other route depends on.
+sidebar:
+  order: 3
+  label: 3. Rooms
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## The check everything shares
+
+Every room route asks the same question, so it is written once:
+
+```ts title="src/rooms.ts"
+import { Forbidden } from '@theoven/core'
+import { and, eq } from 'drizzle-orm'
+import { members } from './schema'
+
+/**
+ * Refuses anyone who is not in the room, and returns their membership when they are.
+ *
+ * `Forbidden`, not `NotFound`: they are authenticated, so hiding the room's existence buys
+ * nothing — and a 403 tells them to ask for an invite rather than to check their spelling.
+ */
+export async function requireMember(db, roomId: string, userId: string) {
+  const [membership] = await db
+    .select()
+    .from(members)
+    .where(and(eq(members.roomId, roomId), eq(members.userId, userId)))
+
+  if (!membership) throw new Forbidden('You are not in this room.')
+  return membership
+}
+```
+
+Verified against the real table:
+
+```
+member  : ok
+outsider: You are not in this room.
+```
+
+## Creating a room
+
+```ts title="src/routes/rooms/index.post.ts"
+import { z } from 'zod'
+import { transaction } from '@theoven/db'
+import { members, rooms } from '../../schema'
+
+export const auth = true
+export const body = z.object({ name: z.string().min(1).max(80) })
+
+export default async ({ body, db, user }) => {
+  const id = crypto.randomUUID()
+
+  // Both rows or neither: a room whose creator is not a member is a room nobody can enter,
+  // including the person who just made it.
+  await transaction(db, async (tx) => {
+    await tx.insert(rooms).values({ id, name: body.name, createdBy: user.id })
+    await tx.insert(members).values({ roomId: id, userId: user.id, role: 'owner' })
+  })
+
+  return { id, name: body.name }
+}
+```
+
+<Aside type="caution" title="Use `transaction()` from `@theoven/db`, not Drizzle's own">
+  On `bun:sqlite`, Drizzle's transaction commits before an async rejection arrives, so work that
+  throws after an `await` is committed anyway. `transaction()` issues the boundaries itself. There
+  is [a test in the framework](/docs/bricks/db-drizzle/#transactions) that demonstrates the
+  difference.
+</Aside>
+
+## Joining
+
+```ts title="src/routes/rooms/[id]/join.post.ts"
+import { eq } from 'drizzle-orm'
+import { NotFound } from '@theoven/core'
+import { z } from 'zod'
+import { members, rooms } from '../../../schema'
+
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ db, params, user }) => {
+  const [room] = await db.select().from(rooms).where(eq(rooms.id, params.id))
+  if (!room) throw new NotFound('No such room.')
+
+  // Joining twice is the same as joining once — the composite primary key says so, and
+  // `onConflictDoNothing` is how you ask the database rather than checking first and racing.
+  await db
+    .insert(members)
+    .values({ roomId: params.id, userId: user.id })
+    .onConflictDoNothing()
+
+  return { joined: true }
+}
+```
+
+The double-click case is handled by the schema. A `SELECT` then `INSERT` would have a window
+between them, and two fast clicks would produce a constraint error the user did nothing to deserve.
+
+## Listing the rooms someone is in
+
+```ts title="src/routes/rooms/index.get.ts"
+import { eq } from 'drizzle-orm'
+import { members, rooms } from '../../schema'
+
+export const auth = true
+
+export default async ({ db, user }) =>
+  db
+    .select({ id: rooms.id, name: rooms.name, role: members.role })
+    .from(members)
+    .innerJoin(rooms, eq(rooms.id, members.roomId))
+    .where(eq(members.userId, user.id))
+```
+
+Driven from `members`, not `rooms` — the answer is "rooms this person is in", and starting from the
+table that knows that avoids filtering a growing table by a subquery.
+
+## Leaving
+
+```ts title="src/routes/rooms/[id]/leave.post.ts"
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ db, params, user }) => {
+  const membership = await requireMember(db, params.id, user.id)
+
+  if (membership.role === 'owner') {
+    const [{ owners }] = await db
+      .select({ owners: count() })
+      .from(members)
+      .where(and(eq(members.roomId, params.id), eq(members.role, 'owner')))
+
+    if (owners === 1) throw new Conflict('Promote another owner before leaving.')
+  }
+
+  await db.delete(members).where(and(eq(members.roomId, params.id), eq(members.userId, user.id)))
+  return { left: true }
+}
+```
+
+The owner check is the kind of thing that is obvious in hindsight and absent from most first
+drafts: without it, the last owner leaves and the room can never be administered again.
+
+[Messages and pagination →](/docs/projects/chat/messages/)

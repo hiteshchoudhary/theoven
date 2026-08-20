@@ -1,0 +1,108 @@
+---
+title: 'Chat: the schema'
+description: Three tables, and the two indexes that decide whether history stays fast.
+sidebar:
+  order: 2
+  label: 2. Schema
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```ts title="src/schema.ts"
+import { sql } from 'drizzle-orm'
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export * from '@theoven/auth-basic/schema'
+
+export const rooms = sqliteTable('rooms', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  createdBy: text('created_by').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const members = sqliteTable(
+  'members',
+  {
+    roomId: text('room_id').notNull(),
+    userId: text('user_id').notNull(),
+    role: text('role', { enum: ['owner', 'member'] })
+      .notNull()
+      .default('member'),
+    joinedAt: integer('joined_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  // The pair *is* the identity: joining twice is not a second membership.
+  (table) => [primaryKey({ columns: [table.roomId, table.userId] })],
+)
+
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: text('id').primaryKey(),
+    roomId: text('room_id').notNull(),
+    authorId: text('author_id').notNull(),
+    body: text('body').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  // Every history query is "this room, newest first". Without this index it is a table scan
+  // that gets slower every day the app is used.
+  (table) => [index('messages_room_idx').on(table.roomId, table.createdAt)],
+)
+```
+
+```bash
+bun run db:generate && bun run db:migrate
+```
+
+## The three decisions in there
+
+### Membership is a composite primary key, not an id
+
+`primaryKey({ columns: [roomId, userId] })` means the database refuses a second membership row for
+the same person in the same room. Joining twice is idempotent because it cannot be anything else —
+no `SELECT` first, no race between two clicks.
+
+An `id` column with a unique index would do the same thing and carry a value nobody reads.
+
+### The index is on `(roomId, createdAt)`, in that order
+
+Every history query filters by room and sorts by time. A composite index in that order serves both
+in one pass. Reversed — `(createdAt, roomId)` — it serves neither well, because the filter is on
+the second column.
+
+<Aside type="note" title="This is the query that will hurt first">
+  Message tables grow without bound and history is the most-called endpoint in a chat app. It is
+  worth being deliberate here even though the app is empty today.
+</Aside>
+
+### Timestamps are millisecond integers
+
+`{ mode: 'timestamp_ms' }` stores an integer and hands you a `Date`. SQLite has no date type, so
+the alternative is a string — which sorts correctly only by luck of format, and compares slowly.
+
+Milliseconds rather than seconds because two messages in the same second is normal, and the cursor
+in the next chapter orders by this column.
+
+## Postgres
+
+Change three imports and nothing else:
+
+```ts
+import { index, integer, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core'
+
+export const messages = pgTable('messages', {
+  id: text('id').primaryKey(),
+  // …
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+```
+
+The queries in the following chapters are identical on both.
+
+[Rooms and membership →](/docs/projects/chat/rooms/)

@@ -1,0 +1,136 @@
+---
+title: 'Chat: live delivery'
+description: A socket that refuses non-members before it opens, and a broadcast that does not walk a list.
+sidebar:
+  order: 5
+  label: 5. Real-time
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## The socket
+
+```ts title="src/app.ts"
+import { z } from 'zod'
+import { Forbidden } from '@theoven/core'
+import { requireMember } from './rooms'
+
+app.ws('/rooms/:id/ws', { auth: true, params: z.object({ id: z.uuid() }) }, {
+  /**
+   * Runs before the socket exists. Throwing refuses the connection, and the client gets the
+   * usual problem+json rather than an opaque close.
+   */
+  upgrade: async (ctx) => {
+    await requireMember(ctx.db, ctx.params.id, ctx.user.id)
+    return { room: ctx.params.id, userId: ctx.user.id }
+  },
+
+  open: (socket) => socket.subscribe(`room:${socket.data.data.room}`),
+  close: (socket) => socket.unsubscribe(`room:${socket.data.data.room}`),
+})
+```
+
+Three things have already happened by the time `upgrade` runs: the auth brick populated `ctx.user`,
+the guard refused an anonymous request, and the `params` schema rejected a malformed room id. Only
+then does membership get checked, and only then does a socket exist.
+
+<Aside type="caution" title="Authenticated is not authorised">
+  `auth: true` proves who they are. It does not prove they belong in room `4f2a` — and a socket
+  endpoint that skips that check is how someone reads a room they were removed from. The check is
+  the same `requireMember` the HTTP routes use, which is the point of having written it once.
+</Aside>
+
+## Broadcasting
+
+Add one line to the send route:
+
+```ts title="src/routes/rooms/[id]/messages.post.ts" ins={11}
+export default async (ctx) => {
+  await requireMember(ctx.db, ctx.params.id, ctx.user.id)
+
+  const [message] = await ctx.db
+    .insert(messages)
+    .values({ id: crypto.randomUUID(), roomId: ctx.params.id, authorId: ctx.user.id, body: ctx.body.body })
+    .returning()
+
+  // After the write, so nobody is shown a message that then failed to save.
+  app.publish(`room:${ctx.params.id}`, JSON.stringify({ type: 'message', message }))
+
+  ctx.status = 201
+  return message
+}
+```
+
+`publish` is Bun's own pub/sub — the broadcast does not walk a list of connections in JavaScript.
+
+The ordering matters: publish after the insert. Publishing first is faster and occasionally sends a
+message that the database then rejects, which the sender sees and the readers do not.
+
+## The client
+
+```js
+const socket = new WebSocket(`wss://${location.host}/rooms/${roomId}/ws?access_token=${token}`)
+
+socket.onmessage = (event) => {
+  const { type, message } = JSON.parse(event.data)
+  if (type === 'message') append(message)
+}
+
+socket.onclose = () => setTimeout(connect, 1000)
+```
+
+A browser `WebSocket` cannot set an `Authorization` header, so core also reads `?access_token=`. On
+a same-origin socket prefer the cookie — `new WebSocket(url)` sends it automatically and it never
+touches your JavaScript.
+
+## Typing indicators
+
+Ephemeral by nature, so they never touch the database:
+
+```ts
+app.ws('/rooms/:id/ws', { auth: true, params }, {
+  upgrade: async (ctx) => { /* as above */ },
+  open: (socket) => socket.subscribe(`room:${socket.data.data.room}`),
+
+  message: (socket, raw) => {
+    const parsed = JSON.parse(String(raw))
+    if (parsed.type !== 'typing') return
+
+    app.publish(
+      `room:${socket.data.data.room}`,
+      JSON.stringify({ type: 'typing', userId: socket.data.data.userId }),
+    )
+  },
+
+  close: (socket) => socket.unsubscribe(`room:${socket.data.data.room}`),
+})
+```
+
+Note what the handler does **not** trust: the room comes from `socket.data`, set during `upgrade`,
+never from the incoming frame. A client that sends `{ type: 'typing', room: 'someone-elses' }` gets
+its own room published to, because the frame's opinion is ignored.
+
+## Where this stops working
+
+- **One process.** `publish` reaches connections held by *this* server. Behind a load balancer, two
+  people in the same room on different instances cannot see each other. The fix is Redis pub/sub
+  between instances, and it is not built in.
+- **No delivery guarantee.** Someone offline gets nothing. History is the record; the socket is the
+  fast path. That is why the send route writes first and publishes second.
+- **No presence.** Bun's topics are strings; who is currently in a room is yours to track.
+- **`app.publish()` returns `0`** when a `Request` was dispatched directly, which is what happens
+  in tests — assert on the row and the response, not the broadcast.
+- **No read receipts, edits or deletes.** Each is a column and a route; none changes the shape
+  above.
+
+## What you built
+
+| | |
+| --- | --- |
+| Rooms, membership, join and leave | with the last-owner case handled |
+| History | cursor-paged, verified over 25 messages and three pages |
+| Sending | membership-checked, size-capped before the handler |
+| Live delivery | guarded by the same check as the HTTP routes |
+
+Next: [Trello](/docs/projects/trello/) for permissions and ordering, or
+[YouTube](/docs/projects/youtube/) for uploads and background work.

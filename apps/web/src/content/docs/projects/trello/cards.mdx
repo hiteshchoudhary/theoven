@@ -1,0 +1,149 @@
+---
+title: 'Trello: lists and cards'
+description: The straightforward half — creating lists and cards, and reading a board in one query.
+sidebar:
+  order: 3
+  label: 3. Lists & cards
+---
+
+## A list
+
+```ts title="src/routes/boards/[id]/lists.post.ts"
+import { desc, eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { requireRole } from '../../../boards'
+import { lists } from '../../../schema'
+
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({ title: z.string().min(1).max(80) })
+
+const STEP = 1024
+
+export default async ({ body, db, params, user }) => {
+  await requireRole(db, params.id, user.id, 'editor')
+
+  // Append: one step past whatever is currently last.
+  const [last] = await db
+    .select({ position: lists.position })
+    .from(lists)
+    .where(eq(lists.boardId, params.id))
+    .orderBy(desc(lists.position))
+    .limit(1)
+
+  const [created] = await db
+    .insert(lists)
+    .values({
+      id: crypto.randomUUID(),
+      boardId: params.id,
+      title: body.title,
+      position: (last?.position ?? 0) + STEP,
+    })
+    .returning()
+
+  return created
+}
+```
+
+`STEP = 1024` rather than `1` is the entire ordering design, and the next chapter is about why.
+
+## A card
+
+```ts title="src/routes/lists/[id]/cards.post.ts"
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(10_000).optional(),
+})
+
+export default async ({ body, db, params, user }) => {
+  const [list] = await db.select().from(lists).where(eq(lists.id, params.id))
+  if (!list) throw new NotFound('No such list.')
+
+  // The card's permission comes from the board the list belongs to.
+  await requireRole(db, list.boardId, user.id, 'editor')
+
+  const [last] = await db
+    .select({ position: cards.position })
+    .from(cards)
+    .where(eq(cards.listId, params.id))
+    .orderBy(desc(cards.position))
+    .limit(1)
+
+  const [created] = await db
+    .insert(cards)
+    .values({
+      id: crypto.randomUUID(),
+      listId: params.id,
+      title: body.title,
+      description: body.description ?? null,
+      position: (last?.position ?? 0) + STEP,
+    })
+    .returning()
+
+  return created
+}
+```
+
+Permission is looked up through the list, not passed in. A `boardId` in the request body would be a
+client asserting its own authorisation, which is not a thing a client gets to do.
+
+## Reading a whole board
+
+The screen needs the board, its lists, and every card, sorted. That is two queries, not one per
+list:
+
+```ts title="src/routes/boards/[id].get.ts"
+import { asc, eq, inArray } from 'drizzle-orm'
+
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ db, params, user }) => {
+  await requireRole(db, params.id, user.id, 'viewer')
+
+  const [board] = await db.select().from(boards).where(eq(boards.id, params.id))
+
+  const boardLists = await db
+    .select()
+    .from(lists)
+    .where(eq(lists.boardId, params.id))
+    .orderBy(asc(lists.position))
+
+  const boardCards = await db
+    .select()
+    .from(cards)
+    .where(
+      inArray(
+        cards.listId,
+        boardLists.map((list) => list.id),
+      ),
+    )
+    .orderBy(asc(cards.position))
+
+  // Grouped in memory: one pass over rows already fetched beats a query per list.
+  const byList = new Map(boardLists.map((list) => [list.id, [] as typeof boardCards]))
+  for (const card of boardCards) byList.get(card.listId)?.push(card)
+
+  return {
+    ...board,
+    lists: boardLists.map((list) => ({ ...list, cards: byList.get(list.id) ?? [] })),
+  }
+}
+```
+
+Two queries regardless of how many lists a board has. The version that loops over lists and queries
+each one is the N+1 that makes a board with twelve lists thirteen round trips — fine on a laptop
+with SQLite in-process, ruinous over a network to Postgres.
+
+One edge worth handling: `inArray` with an empty array. A brand-new board has no lists, and some
+drivers turn `IN ()` into a syntax error. Guard it:
+
+```ts
+const boardCards = boardLists.length
+  ? await db.select().from(cards).where(inArray(cards.listId, boardLists.map((l) => l.id)))
+  : []
+```
+
+[Ordering, and where it breaks →](/docs/projects/trello/ordering/)

@@ -1,0 +1,175 @@
+---
+title: 'Trello: schema and permissions'
+description: Five tables, three roles, and permissions that have names instead of being scattered through handlers.
+sidebar:
+  order: 2
+  label: 2. Schema & roles
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```ts title="src/schema.ts"
+import { sql } from 'drizzle-orm'
+import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export * from '@theoven/auth-basic/schema'
+
+export const boards = sqliteTable('boards', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+})
+
+export const boardMembers = sqliteTable(
+  'board_members',
+  {
+    boardId: text('board_id').notNull(),
+    userId: text('user_id').notNull(),
+    role: text('role', { enum: ['owner', 'editor', 'viewer'] }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.boardId, table.userId] })],
+)
+
+export const lists = sqliteTable(
+  'lists',
+  {
+    id: text('id').primaryKey(),
+    boardId: text('board_id').notNull(),
+    title: text('title').notNull(),
+    position: real('position').notNull(),
+  },
+  (table) => [index('lists_board_idx').on(table.boardId, table.position)],
+)
+
+export const cards = sqliteTable(
+  'cards',
+  {
+    id: text('id').primaryKey(),
+    listId: text('list_id').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    // A float, not an integer — see chapter 4. This is the whole ordering design.
+    position: real('position').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [index('cards_list_idx').on(table.listId, table.position)],
+)
+
+export const activity = sqliteTable(
+  'activity',
+  {
+    id: text('id').primaryKey(),
+    boardId: text('board_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    action: text('action').notNull(),
+    detail: text('detail', { mode: 'json' }).$type<Record<string, unknown>>(),
+    at: integer('at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [index('activity_board_idx').on(table.boardId, table.at)],
+)
+```
+
+## Roles, once
+
+Three roles, ordered by what they can do:
+
+```ts title="src/boards.ts"
+import { Forbidden, NotFound } from '@theoven/core'
+import { and, eq } from 'drizzle-orm'
+import { boardMembers } from './schema'
+
+const RANK = { viewer: 0, editor: 1, owner: 2 } as const
+export type Role = keyof typeof RANK
+
+/** Refuses anyone below `needed`, and returns their role when they are at or above it. */
+export async function requireRole(db, boardId: string, userId: string, needed: Role) {
+  const [membership] = await db
+    .select()
+    .from(boardMembers)
+    .where(and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId)))
+
+  // Not a member: the board's existence is not theirs to learn, so 404 rather than 403.
+  if (!membership) throw new NotFound('No such board.')
+
+  if (RANK[membership.role] < RANK[needed]) {
+    throw new Forbidden(`This needs ${needed} access; you have ${membership.role}.`)
+  }
+  return membership.role
+}
+```
+
+<Aside type="note" title="404 for a non-member, 403 for the wrong role">
+  The difference is deliberate. Someone who is not on the board should not learn that a board with
+  that id exists — that leaks which ids are real. Someone who *is* on it already knows, so telling
+  them they need editor access is helpful rather than revealing.
+</Aside>
+
+## Naming the permissions
+
+Oven does not normalise roles onto `ctx.user`, because most providers have no such concept (D17).
+Authorization is a named function instead:
+
+```ts title="src/policies.ts"
+export const policies = {
+  /** Signed in and on at least one board. Cheap gate for the board list. */
+  member: async (user, ctx) => Boolean(user.id),
+}
+```
+
+Board-level roles are per-board, so they cannot live in a policy — a policy sees the user and the
+context, not which board this request is about. That is what `requireRole` is for, and the split is
+worth stating: **policies answer "who is this", `requireRole` answers "what may they do here".**
+
+## Boards
+
+```ts title="src/routes/boards/index.post.ts"
+import { transaction } from '@theoven/db'
+import { z } from 'zod'
+import { boardMembers, boards } from '../../schema'
+
+export const auth = true
+export const body = z.object({ title: z.string().min(1).max(120) })
+
+export default async ({ body, db, user }) => {
+  const id = crypto.randomUUID()
+
+  await transaction(db, async (tx) => {
+    await tx.insert(boards).values({ id, title: body.title })
+    await tx.insert(boardMembers).values({ boardId: id, userId: user.id, role: 'owner' })
+  })
+
+  return { id, title: body.title, role: 'owner' }
+}
+```
+
+```ts title="src/routes/boards/[id]/members.post.ts"
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({ userId: z.uuid(), role: z.enum(['editor', 'viewer']) })
+
+export default async ({ body, db, params, user }) => {
+  // Only an owner adds people — and note `role` cannot be 'owner', so this endpoint
+  // cannot be used to promote someone past the person calling it.
+  await requireRole(db, params.id, user.id, 'owner')
+
+  await db
+    .insert(boardMembers)
+    .values({ boardId: params.id, userId: body.userId, role: body.role })
+    .onConflictDoUpdate({
+      target: [boardMembers.boardId, boardMembers.userId],
+      set: { role: body.role },
+    })
+
+  return { added: true }
+}
+```
+
+The enum excluding `owner` is doing real work: it makes privilege escalation through this endpoint
+impossible at the schema level, before the handler runs, rather than relying on a check somebody
+might remove.
+
+[Lists and cards →](/docs/projects/trello/cards/)

@@ -1,0 +1,63 @@
+---
+title: 'Chat: what you will build'
+description: A chat backend with rooms, membership, message history and live delivery.
+sidebar:
+  order: 1
+  label: 1. Overview
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+A chat backend: rooms people join, message history that pages backwards, and live delivery over a
+socket that refuses anyone who is not a member.
+
+By the end you will have:
+
+- `POST /rooms`, `POST /rooms/:id/join`, and a membership check every room route shares
+- `GET /rooms/:id/messages` with **cursor pagination** that does not break while people are typing
+- `POST /rooms/:id/messages`, delivered to everyone connected in under a millisecond
+- `GET /rooms/:id/ws`, guarded by the same auth as everything else *and* by room membership
+
+## The two things worth reading
+
+**Cursor pagination, not offset.** `LIMIT 20 OFFSET 40` is wrong on a feed people are writing to:
+between page one and page two, three new messages arrive, everything shifts, and the reader sees
+three they already saw. This is the single most common bug in a chat API and the fix is not
+difficult — it just has to be chosen deliberately.
+
+**The socket checks membership before it opens.** `auth: true` proves who someone is. It does not
+prove they belong in room `4f2a`. The check happens in `upgrade`, which is the last moment before a
+socket exists.
+
+<Aside type="note" title="Every query here was run">
+  The pagination on chapter 3 is real output from a table of 25 messages, not an illustration.
+</Aside>
+
+## The shape
+
+```
+src/
+  schema.ts              rooms, members, messages
+  app.ts                 bricks, and the socket route
+  rooms.ts               requireMember — the check every route shares
+  routes/rooms/
+    index.post.ts        create a room
+    [id]/join.post.ts    join one
+    [id]/messages.get.ts history, paged
+    [id]/messages.post.ts send
+```
+
+Four route files, a schema, and one shared function. Auth, validation, error shapes, request
+parsing and graceful shutdown you get without writing them.
+
+## Before you start
+
+```bash
+bun create theoven chat --db sqlite --auth basic
+cd chat && bun install
+```
+
+That gives you a working app with signup, login and password reset already mounted, which is what
+the rest of this assumes.
+
+[Set up the schema →](/docs/projects/chat/schema/)

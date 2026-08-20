@@ -1,0 +1,184 @@
+---
+title: 'YouTube: watching and visibility'
+description: One visibility rule used by four routes, and a view count that is not trivially inflatable.
+sidebar:
+  order: 4
+  label: 4. Watching
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## Four routes, one rule
+
+A private video is reachable from its own URL, the channel page, a playlist, and the feed. Four
+paths, and a rule implemented four times is a rule implemented three times and forgotten once.
+
+```ts title="src/visibility.ts"
+import { NotFound } from '@theoven/core'
+
+/**
+ * Whether this viewer may see this video.
+ *
+ * - the owner sees everything, including their own processing and failed uploads
+ * - `unlisted` is visible to anyone holding the id — that is what unlisted means
+ * - `public` is visible once it is `ready`
+ */
+export function canWatch(video, viewerId?: string): boolean {
+  if (video.ownerId === viewerId) return true
+  if (video.status !== 'ready') return false
+  return video.visibility === 'public' || video.visibility === 'unlisted'
+}
+
+/** The same rule, as a refusal. 404 rather than 403: a private video's existence is private. */
+export function assertWatchable(video, viewerId?: string) {
+  if (!video || !canWatch(video, viewerId)) throw new NotFound('No such video.')
+  return video
+}
+```
+
+<Aside type="note" title="404, not 403">
+  A `403` on a private video confirms it exists. Someone enumerating ids learns which are real,
+  which is exactly the information the setting is meant to withhold. `404` for both cases costs
+  nothing and tells them nothing.
+</Aside>
+
+## The watch route
+
+```ts title="src/routes/videos/[id].get.ts"
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { assertWatchable } from '../../visibility'
+import { channels, videos } from '../../schema'
+
+// No `auth` export — anyone can watch a public video, and `ctx.user` is still populated
+// when a token is present, which is how the owner sees their own drafts.
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ db, params, user }) => {
+  const [row] = await db
+    .select({ video: videos, ownerId: channels.ownerId, handle: channels.handle })
+    .from(videos)
+    .innerJoin(channels, eq(channels.id, videos.channelId))
+    .where(eq(videos.id, params.id))
+
+  const video = assertWatchable(
+    row && { ...row.video, ownerId: row.ownerId },
+    user?.id,
+  )
+
+  return { ...video, channel: { handle: row.handle } }
+}
+```
+
+`user?.id` — optional, because this route is public. A route with no `auth` export still populates
+`ctx.user` when a valid token is present, which is what lets one handler serve both the anonymous
+viewer and the owner previewing an unpublished video.
+
+## Counting a view
+
+The naive version is one `UPDATE` per request, and it is wrong twice over:
+
+```ts
+// Inflatable by refresh, and a write on the hottest read path in the app.
+await db.update(videos).set({ views: sql`${videos.views} + 1` }).where(eq(videos.id, id))
+```
+
+The increment itself is right — `sql\`${videos.views} + 1\`` is atomic, so two concurrent views do
+not lose one. Verified:
+
+```
+views after 2 increments: 2
+```
+
+The problem is *when* it runs. A separate endpoint, called once the player has actually played
+something, is both more honest and off the read path:
+
+```ts title="src/routes/videos/[id]/view.post.ts"
+export const params = z.object({ id: z.uuid() })
+
+export default async ({ cache, db, ip, params, user }) => {
+  const [row] = await db
+    .select({ video: videos, ownerId: channels.ownerId })
+    .from(videos)
+    .innerJoin(channels, eq(channels.id, videos.channelId))
+    .where(eq(videos.id, params.id))
+
+  assertWatchable(row && { ...row.video, ownerId: row.ownerId }, user?.id)
+
+  // One view per viewer per video per hour. Not fraud-proof — nothing this cheap is — but it
+  // stops a refresh loop, which is the entire problem at this scale.
+  const seen = `view:${params.id}:${user?.id ?? ip}`
+  if (await cache.get(seen)) return { counted: false }
+
+  await cache.set(seen, true, { ttl: 3_600_000 })
+  await db.update(videos).set({ views: sql`${videos.views} + 1` }).where(eq(videos.id, params.id))
+
+  return { counted: true }
+}
+```
+
+<Aside type="caution" title="What this does not stop">
+  Someone determined, with a script and a proxy pool. Real platforms count views in a stream
+  processor with heuristics on watch time, and that is a different system. This stops the
+  accidental case — a refresh, a player retry, a bot crawling — which is what actually inflates
+  numbers on a small platform.
+</Aside>
+
+## Serving the file
+
+```ts title="src/routes/videos/[id]/stream.get.ts"
+export const params = z.object({ id: z.uuid() })
+
+export default async (ctx) => {
+  // The same lookup and `assertWatchable` as above.
+  const video = await watchableVideo(ctx.db, ctx.params.id, ctx.user?.id)
+
+  if (ctx.storage.canPresign) {
+    // Straight from the bucket. Your server never touches the bytes.
+    return ctx.redirect(ctx.storage.presignDownload(video.sourceKey, { expiresIn: 3600 }))
+  }
+
+  return ctx.storage.download(video.sourceKey)
+}
+```
+
+The presigned branch matters more here than anywhere else in these projects: video is large, and
+proxying every byte through your application server is the difference between a small instance and
+a large one.
+
+The fallback streams — `download()` returns a lazy `Blob`, so returning it does not buffer the file
+into memory. It does not support range requests, so seeking will not work; that is the honest cost
+of the development path, and the reason production should presign.
+
+## Listing a channel's videos
+
+```ts title="src/routes/channels/[handle]/videos.get.ts"
+export default async ({ db, params, user }) => {
+  const [channel] = await db
+    .select()
+    .from(channels)
+    .where(eq(channels.handle, params.handle.toLowerCase()))
+
+  if (!channel) throw new NotFound('No such channel.')
+
+  const owner = channel.ownerId === user?.id
+
+  return db
+    .select()
+    .from(videos)
+    .where(
+      and(
+        eq(videos.channelId, channel.id),
+        // The owner sees drafts and failures; everyone else sees published videos only.
+        owner ? undefined : and(eq(videos.status, 'ready'), eq(videos.visibility, 'public')),
+      ),
+    )
+    .orderBy(desc(videos.publishedAt))
+}
+```
+
+The same rule as `canWatch`, expressed as a filter rather than a check — because filtering in the
+database is the only version that works on a list. Keeping them in agreement is a test worth
+writing: a private video must not appear here, and the owner's must.
+
+[Playlists →](/docs/projects/youtube/playlists/)

@@ -1,0 +1,152 @@
+---
+title: 'Chat: messages and pagination'
+description: Send a message, and page backwards through history without showing anyone the same message twice.
+sidebar:
+  order: 4
+  label: 4. Messages
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## Sending
+
+```ts title="src/routes/rooms/[id]/messages.post.ts"
+import { z } from 'zod'
+import { requireMember } from '../../../rooms'
+import { messages } from '../../../schema'
+
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({ body: z.string().min(1).max(4000) })
+
+export default async (ctx) => {
+  await requireMember(ctx.db, ctx.params.id, ctx.user.id)
+
+  const [message] = await ctx.db
+    .insert(messages)
+    .values({
+      id: crypto.randomUUID(),
+      roomId: ctx.params.id,
+      authorId: ctx.user.id,
+      body: ctx.body.body,
+    })
+    .returning()
+
+  ctx.status = 201
+  return message
+}
+```
+
+`requireMember` first, so a stranger's message is refused before it is written. The schema caps the
+body at 4000 characters, which happens before the handler runs at all.
+
+## Why offset pagination is wrong here
+
+The obvious version:
+
+```ts
+// Do not do this.
+db.select().from(messages).orderBy(desc(messages.createdAt)).limit(20).offset(page * 20)
+```
+
+It works on a table nobody is writing to. On a chat room it does not, and the failure is quiet:
+
+1. A reader loads page 1 — messages 100 down to 81.
+2. Three people send a message.
+3. The reader loads page 2 — offset 20, which is now messages 83 down to 64.
+
+**Messages 83, 82 and 81 appear twice**, and nothing errors. Scroll further and the drift grows.
+Offset counts from a moving end.
+
+## Cursor pagination
+
+A cursor names a **row**, not a position, so new messages above it change nothing:
+
+```ts title="src/routes/rooms/[id]/messages.get.ts"
+import { and, desc, eq, lt } from 'drizzle-orm'
+import { z } from 'zod'
+import { requireMember } from '../../../rooms'
+import { messages } from '../../../schema'
+
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const query = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  before: z.uuid().optional(),
+})
+
+export default async (ctx) => {
+  await requireMember(ctx.db, ctx.params.id, ctx.user.id)
+
+  // The cursor is a message id; its timestamp is what the comparison actually uses.
+  const cursor = ctx.query.before
+    ? (await ctx.db.select().from(messages).where(eq(messages.id, ctx.query.before)))[0]
+    : undefined
+
+  const rows = await ctx.db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.roomId, ctx.params.id),
+        cursor ? lt(messages.createdAt, cursor.createdAt) : undefined,
+      ),
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(ctx.query.limit)
+
+  return {
+    messages: rows,
+    // Null means the end. Returning the last id unconditionally makes a client loop forever.
+    next: rows.length === ctx.query.limit ? (rows[rows.length - 1]?.id ?? null) : null,
+  }
+}
+```
+
+`and(...)` with an `undefined` member simply drops it, which is why the first page and every later
+page are the same query rather than two branches.
+
+### It was run
+
+Against a room with 25 messages, `limit=10`:
+
+```
+page 1  : message 24, 23, 22, 21, 20, 19, 18, 17, 16, 15   next = m15
+page 2  : message 14, 13, 12, 11, 10,  9,  8,  7,  6,  5   next = m5
+page 3  : message  4,  3,  2,  1,  0                       next = null
+```
+
+Twenty-five messages, no repeats, and the third page reports the end rather than looping.
+
+<Aside type="caution" title="Two messages in the same millisecond">
+  `lt(createdAt)` on a non-unique column can skip a row when two messages share a timestamp. It is
+  rare and it is real.
+
+  The fix is to compare on a tuple — `(createdAt, id)` — so ties break deterministically. In
+  SQLite that is `where (created_at, id) < (?, ?)` via `sql`; in Postgres it is the same. Worth
+  doing on a busy room; the code above is the simpler version, and this is the caveat that makes
+  choosing it deliberate rather than accidental.
+</Aside>
+
+## Why `before` is validated as a uuid
+
+`z.uuid()` on the cursor means a malformed one is a `422` rather than a lookup that returns nothing
+and silently restarts the reader at the top of history. A cursor that fails closed is far easier to
+debug than one that quietly resets.
+
+## What a client does with this
+
+```js
+let before = null
+async function older() {
+  const url = `/rooms/${roomId}/messages?limit=50${before ? `&before=${before}` : ''}`
+  const page = await fetch(url, { headers }).then((r) => r.json())
+  before = page.next
+  return { messages: page.messages, done: page.next === null }
+}
+```
+
+The client holds one string. It does not count, and it does not care how many messages arrived
+while the reader was scrolling.
+
+[Live delivery →](/docs/projects/chat/realtime/)

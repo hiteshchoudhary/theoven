@@ -1,0 +1,142 @@
+---
+title: 'YouTube: channels and accounts'
+description: A channel per account, handles that cannot collide, and Google sign-in dropped in.
+sidebar:
+  order: 2
+  label: 2. Channels
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## The schema so far
+
+```ts title="src/schema.ts"
+import { sql } from 'drizzle-orm'
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+
+export * from '@theoven/auth-basic/schema'
+export * from '@theoven/auth-basic/schema/accounts'
+
+export const channels = sqliteTable(
+  'channels',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    /** The @handle. Lowercased on write; the index is what actually enforces uniqueness. */
+    handle: text('handle').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    avatarKey: text('avatar_key'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    uniqueIndex('channels_handle_idx').on(table.handle),
+    index('channels_owner_idx').on(table.ownerId),
+  ],
+)
+```
+
+The accounts export is there because this app offers Google sign-in — the [recipe](/docs/recipes/google-login/)
+is the setup, and it changes nothing else on this page.
+
+## Creating a channel
+
+```ts title="src/routes/channels/index.post.ts"
+import { Conflict } from '@theoven/core'
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { channels } from '../../schema'
+
+export const auth = true
+export const body = z.object({
+  // Handles are a namespace: constrain the characters, or you get `@ada`, `@Ada` and `@a.d.a`
+  // all meaning different channels and nobody able to type any of them.
+  handle: z
+    .string()
+    .min(3)
+    .max(30)
+    .regex(/^[a-z0-9_]+$/, 'Lowercase letters, numbers and underscores only.'),
+  name: z.string().min(1).max(80),
+})
+
+export default async ({ body, db, user }) => {
+  const [existing] = await db.select().from(channels).where(eq(channels.ownerId, user.id))
+  if (existing) throw new Conflict('You already have a channel.')
+
+  try {
+    const [channel] = await db
+      .insert(channels)
+      .values({ id: crypto.randomUUID(), ownerId: user.id, handle: body.handle, name: body.name })
+      .returning()
+
+    return channel
+  } catch {
+    // The unique index is what actually decides. Checking first and inserting second has a
+    // window between them, and two people claiming `@ada` at once would both pass the check.
+    throw new Conflict(`@${body.handle} is taken.`)
+  }
+}
+```
+
+<Aside type="note" title="Why the try/catch rather than a lookup">
+  A `SELECT` before the `INSERT` is a race: both requests see the handle free, both insert, one
+  gets a constraint error anyway. Catching the constraint is not a shortcut — it is the only place
+  the answer is actually decided.
+
+  The lookup for "you already have a channel" is different: it is not a uniqueness rule, and the
+  worst case is a rare duplicate that a background check can clean up.
+</Aside>
+
+## Reading one
+
+```ts title="src/routes/channels/[handle].get.ts"
+export const params = z.object({ handle: z.string() })
+
+export default async ({ db, params }) => {
+  const [channel] = await db
+    .select()
+    .from(channels)
+    .where(eq(channels.handle, params.handle.toLowerCase()))
+
+  if (!channel) throw new NotFound('No such channel.')
+
+  const [{ subscribers }] = await db
+    .select({ subscribers: count() })
+    .from(subscriptions)
+    .where(eq(subscriptions.channelId, channel.id))
+
+  return { ...channel, subscribers }
+}
+```
+
+No `auth` export — channel pages are public. Note the subscriber count is computed rather than
+stored; chapter 6 covers when that stops being the right call.
+
+## Avatars
+
+Straight from the [uploads recipe](/docs/recipes/image-uploads/):
+
+```ts title="src/routes/channels/avatar.post.ts"
+export const auth = true
+export const body = z.object({
+  file: z.file().max(2_000_000).mime(['image/png', 'image/jpeg', 'image/webp']),
+})
+
+export default async ({ body, db, storage, user }) => {
+  const [channel] = await db.select().from(channels).where(eq(channels.ownerId, user.id))
+  if (!channel) throw new NotFound('Create a channel first.')
+
+  const key = `avatars/${channel.id}`
+  await storage.upload(key, body.file)
+  await db.update(channels).set({ avatarKey: key }).where(eq(channels.id, channel.id))
+
+  return { avatarKey: key }
+}
+```
+
+Keyed by channel id, so a new avatar replaces the old one and there is nothing to clean up. Videos
+in the next chapter are keyed differently, and the reason is worth noticing when you get there.
+
+[Uploading a video →](/docs/projects/youtube/uploading/)

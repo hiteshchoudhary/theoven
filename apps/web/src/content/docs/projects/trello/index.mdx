@@ -1,0 +1,53 @@
+---
+title: 'Trello: what you will build'
+description: Boards, lists and cards — with permissions that are named, and ordering that survives drag-and-drop.
+sidebar:
+  order: 1
+  label: 1. Overview
+---
+
+A board backend: boards with members, lists inside them, cards inside those, and a drag-and-drop
+ordering that does not rewrite every row every time somebody moves a card two places up.
+
+By the end you will have:
+
+- Boards with roles — owner, editor, viewer — enforced by [named
+  policies](/docs/bricks/auth/#policies) rather than `if` statements scattered through handlers
+- Lists and cards, with a move endpoint that touches **one row**
+- An activity log, written in the same transaction as the change it records
+
+## The hard part
+
+**Ordering.** A card list has an order that users rearrange constantly. Storing `position: 0, 1,
+2, 3` means moving one card renumbers everything after it — a write per card, per drag, and two
+people dragging at once produce a list that is wrong for both.
+
+The fix is to store positions as gaps rather than counts, so a move is a single write. That works
+until it doesn't, and chapter 4 measures exactly when: **42 drags into the same gap** before
+double-precision floats can no longer produce a value between two neighbours. Then it fixes that
+too.
+
+That number is measured, not estimated.
+
+## The shape
+
+```
+src/
+  schema.ts             boards, board_members, lists, cards, activity
+  boards.ts             requireRole — the permission check
+  policies.ts           named policies, registered once
+  routes/boards/
+    index.post.ts       create
+    [id]/lists.post.ts  add a list
+    [id]/cards.post.ts  add a card
+    cards/[id]/move.patch.ts   the interesting one
+```
+
+## Before you start
+
+```bash
+bun create theoven boards --db sqlite --auth basic
+cd boards && bun install
+```
+
+[The schema →](/docs/projects/trello/schema/)

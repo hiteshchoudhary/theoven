@@ -1,0 +1,146 @@
+---
+title: 'Trello: activity and shipping'
+description: An audit trail written in the same transaction as the change, and what to fix before deploying.
+sidebar:
+  order: 5
+  label: 5. Activity
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## The log has to be in the transaction
+
+An activity row written *after* the change is a row that goes missing whenever the process dies in
+between — and an audit trail with holes is worse than none, because people trust it.
+
+```ts title="src/activity.ts"
+import { activity } from './schema'
+
+/** Records something. Call it with the transaction, never with `db`. */
+export function record(
+  tx,
+  boardId: string,
+  actorId: string,
+  action: string,
+  detail?: Record<string, unknown>,
+) {
+  return tx.insert(activity).values({
+    id: crypto.randomUUID(),
+    boardId,
+    actorId,
+    action,
+    detail: detail ?? null,
+  })
+}
+```
+
+```ts title="src/routes/lists/[id]/cards.post.ts" ins={7}
+await transaction(db, async (tx) => {
+  const [created] = await tx
+    .insert(cards)
+    .values({ id, listId: params.id, title: body.title, position })
+    .returning()
+
+  await record(tx, list.boardId, user.id, 'card.created', { cardId: id, title: body.title })
+  return created
+})
+```
+
+Both rows or neither.
+
+<Aside type="caution" title="Passing `db` instead of `tx` is the bug to watch for">
+  It compiles, it works in tests, and it silently writes the log outside the transaction — so a
+  rollback leaves an activity entry describing a card that does not exist. The signature above
+  takes the transaction as its first argument to make the right thing the easy thing, but nothing
+  stops you passing the wrong one. It is worth a review comment.
+</Aside>
+
+## A per-request transaction instead
+
+If most routes on a board write more than one row, scope it once rather than per handler:
+
+```ts title="src/app.ts"
+import { transactional } from '@theoven/db'
+
+app.use('/boards', transactional())
+```
+
+`ctx.db` becomes the transaction-scoped client for those requests, so handlers need no change and a
+request that throws — from a handler, from validation, from a middleware inside it — rolls back
+everything it wrote.
+
+Scoped to `/boards` deliberately. Applied globally it holds a transaction open for the length of
+every request including the slow ones, which is how a connection pool runs out.
+
+## Reading the log
+
+```ts title="src/routes/boards/[id]/activity.get.ts"
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const query = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  before: z.uuid().optional(),
+})
+
+export default async (ctx) => {
+  await requireRole(ctx.db, ctx.params.id, ctx.user.id, 'viewer')
+
+  const cursor = ctx.query.before
+    ? (await ctx.db.select().from(activity).where(eq(activity.id, ctx.query.before)))[0]
+    : undefined
+
+  const rows = await ctx.db
+    .select()
+    .from(activity)
+    .where(and(eq(activity.boardId, ctx.params.id), cursor ? lt(activity.at, cursor.at) : undefined))
+    .orderBy(desc(activity.at))
+    .limit(ctx.query.limit)
+
+  return { activity: rows, next: rows.length === ctx.query.limit ? rows.at(-1)?.id : null }
+}
+```
+
+The same cursor shape as [chat history](/docs/projects/chat/messages/), and for the same reason: an
+append-only feed with offsets shows the reader duplicates.
+
+## Live boards
+
+```ts title="src/app.ts"
+app.ws('/boards/:id/ws', { auth: true, params: z.object({ id: z.uuid() }) }, {
+  upgrade: async (ctx) => {
+    await requireRole(ctx.db, ctx.params.id, ctx.user.id, 'viewer')
+    return { board: ctx.params.id }
+  },
+  open: (socket) => socket.subscribe(`board:${socket.data.data.board}`),
+  close: (socket) => socket.unsubscribe(`board:${socket.data.data.board}`),
+})
+```
+
+`viewer`, not `editor` — watching a board is not editing it. Then publish after each mutation,
+outside the transaction, so nobody is told about a change that then rolled back:
+
+```ts
+app.publish(`board:${boardId}`, JSON.stringify({ type: 'card.moved', card: moved }))
+```
+
+## Before you deploy
+
+| | |
+| --- | --- |
+| Move the queue and cache off memory | both refuse to boot in production, which is the reminder |
+| `transactional()` scoped to write paths | not globally |
+| Rebalance on collapse | chapter 4 — without it, ordering silently breaks after 42 drags into one gap |
+| The empty-list `inArray` guard | chapter 3 — a brand-new board is the first thing anyone creates |
+| Consider a unique index on `(list_id, position)` | turns a concurrent tie into a refusal you can retry |
+
+## What this does not do
+
+- **No card assignment, labels, due dates or comments.** Each is a table and a route; none changes
+  the shapes here.
+- **No board-level sharing links.** Access is membership only.
+- **Ordering ties are possible** under concurrent moves into the same gap — cosmetic, and it
+  self-corrects.
+- **The activity log is never pruned.** It grows forever; a [cron job](/docs/bricks/queue/#cron)
+  is the place for a retention policy.
+
+Next: [YouTube](/docs/projects/youtube/) for uploads and background work.

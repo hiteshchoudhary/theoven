@@ -1,0 +1,185 @@
+---
+title: 'Trello: ordering that survives dragging'
+description: Move a card by writing one row — and the measured point at which that stops working.
+sidebar:
+  order: 4
+  label: 4. Ordering
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+## Why not an integer
+
+The obvious schema is `position: 0, 1, 2, 3`. Moving the last card to the front means renumbering
+every card in the list — four writes for one drag, forty for a real board. Two people dragging at
+once interleave those writes and produce an order that is wrong for both.
+
+## Gaps instead of counts
+
+Store positions spaced apart, and a move becomes **one write**: put the card halfway between its
+new neighbours.
+
+```ts title="src/order.ts"
+/** The gap between appended items. Large enough that inserts rarely need neighbours close. */
+export const STEP = 1024
+
+/**
+ * A position between two neighbours.
+ *
+ * `undefined` means "no neighbour on that side" — dropping at the very top or the very bottom.
+ */
+export function between(before?: number, after?: number): number {
+  if (before === undefined && after === undefined) return STEP
+  if (before === undefined) return after / 2
+  if (after === undefined) return before + STEP
+  return (before + after) / 2
+}
+```
+
+## The move endpoint
+
+```ts title="src/routes/cards/[id]/move.patch.ts"
+import { and, asc, eq, gt, lt, desc } from 'drizzle-orm'
+import { z } from 'zod'
+import { between } from '../../../order'
+
+export const auth = true
+export const params = z.object({ id: z.uuid() })
+export const body = z.object({
+  listId: z.uuid(),
+  /** The card this one should land after. Omitted means "to the top". */
+  after: z.uuid().optional(),
+})
+
+export default async ({ body, db, params, user }) => {
+  const [card] = await db.select().from(cards).where(eq(cards.id, params.id))
+  if (!card) throw new NotFound('No such card.')
+
+  const [target] = await db.select().from(lists).where(eq(lists.id, body.listId))
+  if (!target) throw new NotFound('No such list.')
+
+  await requireRole(db, target.boardId, user.id, 'editor')
+
+  // The neighbour above, and whatever is directly below it.
+  const above = body.after
+    ? (await db.select().from(cards).where(eq(cards.id, body.after)))[0]
+    : undefined
+
+  const [below] = await db
+    .select()
+    .from(cards)
+    .where(
+      and(
+        eq(cards.listId, body.listId),
+        above ? gt(cards.position, above.position) : undefined,
+      ),
+    )
+    .orderBy(asc(cards.position))
+    .limit(1)
+
+  const [moved] = await db
+    .update(cards)
+    .set({ listId: body.listId, position: between(above?.position, below?.position) })
+    .where(eq(cards.id, params.id))
+    .returning()
+
+  return moved
+}
+```
+
+One `UPDATE`, whatever the list length. Moving a card between lists is the same operation — the
+`listId` changes alongside the position.
+
+Verified:
+
+```
+initial : a@1024 b@2048 c@3072
+moved c : a@1024 c@1536 b@2048
+```
+
+## Where it breaks, measured
+
+Every drop into the same gap halves it. Doubles have a 52-bit mantissa, so the halving cannot
+continue forever:
+
+```
+between 1024 and 2048 : 52 moves
+between 1024 and 1025 : 42 moves
+```
+
+After that, `(before + after) / 2` returns a value **equal to one of its neighbours** and the order
+becomes ambiguous — two cards with the same position, sorted by whatever the database feels like.
+
+<Aside type="caution" title="42 is smaller than it sounds">
+  Not 42 drags on the board — 42 drags into *the same gap*. A team rearranging one column of a
+  sprint board reaches that in an afternoon, and the symptom is cards that swap places on reload
+  with no error anywhere.
+</Aside>
+
+## Rebalancing
+
+Detect the collapse and respace the list:
+
+```ts title="src/order.ts"
+/** True when the gap can no longer be halved. */
+export function collapsed(position: number, before?: number, after?: number): boolean {
+  return position === before || position === after
+}
+
+export async function rebalance(db, listId: string) {
+  const rows = await db
+    .select({ id: cards.id })
+    .from(cards)
+    .where(eq(cards.listId, listId))
+    .orderBy(asc(cards.position))
+
+  // Rewrites the list — the thing gaps exist to avoid — but only when arithmetic ran out,
+  // which is rare enough to be worth the occasional expensive write.
+  await transaction(db, async (tx) => {
+    for (const [index, row] of rows.entries()) {
+      await tx.update(cards).set({ position: (index + 1) * STEP }).where(eq(cards.id, row.id))
+    }
+  })
+}
+```
+
+In the move endpoint:
+
+```ts ins={3-6}
+const position = between(above?.position, below?.position)
+
+if (collapsed(position, above?.position, below?.position)) {
+  await rebalance(db, body.listId)
+  return moveCard(db, params.id, body) // retry once, against fresh positions
+}
+```
+
+Verified:
+
+```
+before rebalance : a@1024 c@1536 b@2048
+after rebalance  : a@1024 c@2048 b@3072
+```
+
+In a transaction, because a half-rebalanced list is worse than a collapsed one.
+
+## The alternative
+
+Lexicographic keys — strings like `"n"`, `"n5"`, `"nF"` — subdivide forever without floating-point
+limits. That is what Figma and Jira use, and there is no rebalance.
+
+The trade is that the keys are opaque, sort as text, and need a library to generate. For a board
+app, floats plus a rare rebalance is less machinery for the same result, and the failure mode is
+now measured rather than a surprise. If you are building something where a rebalance is
+unacceptable, reach for lexorank.
+
+## Concurrency
+
+Two people moving different cards into the same gap can both compute the same midpoint. Both writes
+succeed and the cards tie.
+
+For a board app that is cosmetic and self-corrects on the next move. If it matters, put a unique
+index on `(list_id, position)` and retry on conflict — which turns a silent tie into a refusal you
+can handle.
+
+[Activity and shipping →](/docs/projects/trello/activity/)

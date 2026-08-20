@@ -1,0 +1,44 @@
+---
+title: Projects
+description: Three realistic backends, built end to end — a chat app, a Trello clone, and a video platform.
+sidebar:
+  order: 0
+  label: Overview
+---
+
+[Recipes](/docs/recipes/) add one feature to an app you have. These are the other end: **a whole
+backend, built in order**, including the parts that are genuinely hard rather than the CRUD around
+them.
+
+| Project | The hard part | Uses |
+| --- | --- | --- |
+| [Chat](/docs/projects/chat/) | cursor pagination, and a socket that checks membership before it opens | Drizzle, WebSockets, auth |
+| [Trello](/docs/projects/trello/) | ordering cards under drag-and-drop without rewriting the list | Drizzle, transactions, policies |
+| [YouTube](/docs/projects/youtube/) | an upload pipeline, and a feed that stays fast | storage, queue, Drizzle, auth |
+
+<div />
+
+## What makes these different from a tutorial
+
+Each one has a section on the thing that is actually difficult, and each is honest about where the
+design stops working. The Trello chapter measures how many drags it takes before floating-point
+positions collapse — 42 — and then fixes it. The chat chapter explains why offset pagination breaks
+on a feed that people are writing to. The YouTube chapter has a video that is uploaded but not yet
+watchable, because that state is real and pretending it is not produces a broken player.
+
+## What they share
+
+All three assume the SQLite default and say what changes for Postgres. All three use
+[`auth-basic`](/docs/bricks/auth-basic/) — the [Google sign-in
+recipe](/docs/recipes/google-login/) drops straight in if you want it.
+
+Every schema and every query on these pages was executed before it was written. Where a page quotes
+a result, that is the real output.
+
+## Where to start
+
+New to Oven, start with [the tutorial](/docs/tutorial/first-route/) — these assume you know what a
+route file and a brick are.
+
+Otherwise pick by what you want to learn: **chat** for real-time and pagination, **Trello** for
+permissions and ordering, **YouTube** for background work and file handling.

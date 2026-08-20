@@ -142,6 +142,7 @@ you already wrote.
 
 - [Installation](https://theoven.app/docs/start/installation/) · [Tutorial](https://theoven.app/docs/tutorial/first-route/) · [Build a todo API](https://theoven.app/docs/build/)
 - [Recipes](https://theoven.app/docs/recipes/) — [sign in with Google](https://theoven.app/docs/recipes/google-login/), [image uploads](https://theoven.app/docs/recipes/image-uploads/), [share links](https://theoven.app/docs/recipes/file-sharing/), [real-time](https://theoven.app/docs/recipes/realtime/)
+- [Projects](https://theoven.app/docs/projects/) — full backends: [chat](https://theoven.app/docs/projects/chat/), [Trello](https://theoven.app/docs/projects/trello/), [YouTube](https://theoven.app/docs/projects/youtube/)
 - [Coming from Express](https://theoven.app/docs/guides/coming-from-express/)
 - [Brick catalogue](https://theoven.app/docs/bricks/) — every brick, with what it **cannot** do
 - [`llms.txt`](https://theoven.app/llms.txt) · [`llms-full.txt`](https://theoven.app/llms-full.txt) — the whole documentation set for a coding agent
