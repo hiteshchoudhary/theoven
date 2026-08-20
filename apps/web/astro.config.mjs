@@ -38,6 +38,9 @@ export default defineConfig({
         // A guided project, in order. Distinct from the tutorial: that teaches one idea per
         // chapter, this builds one application end to end.
         { label: 'Build a todo API', items: [{ autogenerate: { directory: 'build' } }] },
+        // Short, self-contained builds. Distinct from `build/`, which is one application in
+        // order — these are things you drop into an application you already have.
+        { label: 'Recipes', items: [{ autogenerate: { directory: 'recipes' } }] },
         { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
         // The catalogue. One page per shipped brick, all following the same shape so a reader
         // — or a model — can find "what endpoints does this add" without hunting.

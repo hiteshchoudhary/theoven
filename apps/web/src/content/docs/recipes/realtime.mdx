@@ -1,0 +1,146 @@
+---
+title: Real-time notifications
+description: Push updates to a signed-in user over a WebSocket that is guarded by the same auth as everything else.
+sidebar:
+  order: 4
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+A socket per signed-in user, a way to push to them from anywhere in your app, and a browser client
+that reconnects. Twenty-five minutes, and no extra package — WebSockets are in core.
+
+<Steps>
+
+1. ### The socket route
+
+   ```ts title="src/app.ts"
+   import { z } from 'zod'
+
+   app.ws('/ws', { auth: true }, {
+     // Runs *before* the socket exists. Throwing here refuses the connection.
+     upgrade: (ctx) => ({ userId: ctx.user.id }),
+     open: (socket) => socket.subscribe(`user:${socket.data.data.userId}`),
+     close: (socket) => socket.unsubscribe(`user:${socket.data.data.userId}`),
+   })
+   ```
+
+   That is the whole server side. Each connection subscribes to a topic named after its own user,
+   so pushing to one person is publishing to one topic.
+
+   <Aside type="caution" title="`auth: true` is why this is worth doing">
+     `app.ws()` registers an **ordinary route** that happens to upgrade, so the guard runs before a
+     socket exists. A separate socket entry point means a second, weaker authentication story —
+     and that is how a socket endpoint becomes the unguarded way into an application. Here there
+     is one guard, and it runs first.
+   </Aside>
+
+2. ### Push from anywhere
+
+   ```ts title="src/routes/orders/index.post.ts"
+   export const auth = true
+
+   export default async ({ body, db, user }) => {
+     const [order] = await db.insert(orders).values({ ...body, userId: user.id }).returning()
+
+     app.publish(`user:${user.id}`, JSON.stringify({ type: 'order.created', order }))
+
+     return order
+   }
+   ```
+
+   `publish` is Bun's own pub/sub, so a broadcast does not walk a list of connections in
+   JavaScript.
+
+3. ### The browser side
+
+   ```js
+   const socket = new WebSocket(`wss://${location.host}/ws?access_token=${token}`)
+
+   socket.onmessage = (event) => {
+     const message = JSON.parse(event.data)
+     if (message.type === 'order.created') addOrderToList(message.order)
+   }
+
+   // Browsers do not reconnect WebSockets. This is yours to write.
+   socket.onclose = () => setTimeout(connect, 1000)
+   ```
+
+   <Aside type="note" title="Why the token is in the query string">
+     A browser `WebSocket` cannot send an `Authorization` header. Core reads `?access_token=` as
+     well as the header and the cookie, so the guard works either way.
+
+     Query strings end up in access logs and `Referer` headers, so prefer the cookie when the
+     socket is same-origin — `new WebSocket(url)` sends cookies automatically, and the refresh
+     cookie is already httpOnly.
+   </Aside>
+
+</Steps>
+
+## Rooms, not just users
+
+The topic is a string, so anything can be a channel:
+
+```ts
+const rooms = routerFor<typeof app>({ prefix: '/rooms', auth: true })
+
+rooms.ws('/:id', { params: z.object({ id: z.uuid() }) }, {
+  upgrade: (ctx) => ({ room: ctx.params.id, userId: ctx.user.id }),
+  open: (socket) => socket.subscribe(socket.data.data.room),
+  message: (socket, text) => app.publish(socket.data.data.room, String(text)),
+  close: (socket) => socket.unsubscribe(socket.data.data.room),
+})
+
+app.use(rooms)
+```
+
+On a [router](/docs/reference/routers/), the prefix, tags and `auth` apply to sockets too — one
+declaration guards every socket in the group.
+
+<Aside type="caution" title="Being in a room is not the same as being allowed in it">
+  `auth: true` proves who they are. It does not prove they belong in room `:id`. Check that in
+  `upgrade` and throw — it is the last moment before a socket exists:
+
+  ```ts
+  upgrade: async (ctx) => {
+    if (!(await isMember(ctx.user.id, ctx.params.id))) throw new Forbidden('Not in this room.')
+    return { room: ctx.params.id, userId: ctx.user.id }
+  }
+  ```
+</Aside>
+
+## When you do not need a socket at all
+
+If the browser only listens — a progress bar, a feed, tokens streaming from a model — server-sent
+events are less to get wrong. Plain HTTP, and the browser reconnects on its own:
+
+```ts
+import { sse } from '@theoven/core'
+
+export default async (ctx) =>
+  sse(
+    async (stream) => {
+      for await (const update of watchJob(ctx.params.id)) {
+        stream.send({ event: 'progress', data: update })
+      }
+    },
+    { signal: ctx.req.signal },
+  )
+```
+
+Pass `ctx.req.signal`. Without it, a closed tab leaves the producer running and writing into
+nothing, forever.
+
+## What this does not do
+
+- **`app.publish()` needs a listening server.** It returns `0` when a `Request` was dispatched
+  directly, which is what happens in tests — assert on the handler, not the broadcast.
+- **No delivery guarantee.** A user who is offline gets nothing. If a notification must survive
+  being missed, write it to a table and have the client fetch on connect; the socket is the
+  fast path, not the record.
+- **No presence.** Bun's topics are strings; who is in a room is your application's to track.
+- **One process.** `publish` reaches the connections held by *this* server. Behind a load
+  balancer, a user connected to another instance hears nothing — you need Redis pub/sub between
+  instances, which is not built in.
+- **No reconnect state.** SSE's `Last-Event-ID` arrives as a header, and resuming from it is
+  yours to implement.

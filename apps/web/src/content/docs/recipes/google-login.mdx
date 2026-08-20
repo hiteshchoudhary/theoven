@@ -1,0 +1,220 @@
+---
+title: Sign in with Google
+description: A working Google sign-in, from an empty app to a signed-in user, including the console setup everyone gets wrong.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+By the end you will have `GET /auth/oauth/google`, a callback that creates or finds the user, and a
+protected route that knows who they are. About twenty minutes, most of it in Google's console.
+
+<Steps>
+
+1. ### Install
+
+   ```bash
+   bun add @theoven/auth @theoven/auth-basic drizzle-orm
+   ```
+
+2. ### Get credentials from Google
+
+   In the [Google Cloud console](https://console.cloud.google.com/apis/credentials): **Create
+   credentials → OAuth client ID → Web application**.
+
+   Add one **Authorised redirect URI**, and it must match exactly what your app will send —
+   scheme, host, port, path, no trailing slash:
+
+   ```
+   http://localhost:3000/auth/oauth/google/callback
+   ```
+
+   <Aside type="caution" title="This is the step that wastes an afternoon">
+     `redirect_uri_mismatch` is the error you will get, and it means the URI Google has and the
+     one Oven sent are not byte-identical. `http` vs `https`, `localhost` vs `127.0.0.1`, and a
+     trailing slash are all mismatches. Add your production URL as a second entry now, rather than
+     discovering this at deploy time.
+   </Aside>
+
+   Copy the client ID and secret into `.env`:
+
+   ```bash title=".env"
+   GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   APP_URL=http://localhost:3000
+   AUTH_SECRET=a-long-random-string
+   COOKIE_SECRET=another-long-random-string
+   ```
+
+3. ### Add the accounts table
+
+   Linked provider accounts live in their own table, on a separate export path — so an app that
+   never uses social sign-in never gets it:
+
+   ```ts title="src/schema.ts" ins={2}
+   export * from '@theoven/auth-basic/schema'
+   export * from '@theoven/auth-basic/schema/accounts'
+   ```
+
+   ```bash
+   bun run db:generate && bun run db:migrate
+   ```
+
+4. ### Configure the provider
+
+   ```ts title="src/app.ts"
+   import { createApp, env } from '@theoven/core'
+   import { auth, google } from '@theoven/auth'
+   import { basicAuth } from '@theoven/auth-basic'
+   import { db } from '@theoven/db'
+   import { drizzleSqlite } from '@theoven/db-drizzle'
+   import { Database } from 'bun:sqlite'
+   import { drizzle } from 'drizzle-orm/bun-sqlite'
+   import * as schema from './schema'
+
+   const sqlite = new Database('./data.db')
+   const client = drizzle(sqlite, { schema })
+
+   export const app = createApp({ cookies: { secret: env.string('COOKIE_SECRET') } })
+     .use(db(drizzleSqlite({ client: sqlite, schema })))
+     .use(
+       auth(
+         basicAuth({
+           db: client,
+           secret: env.string('AUTH_SECRET'),
+           callbackUrl: (provider) =>
+             `${env.string('APP_URL')}/auth/oauth/${provider}/callback`,
+           oauth: {
+             google: {
+               provider: google,
+               clientId: env.string('GOOGLE_CLIENT_ID'),
+               clientSecret: env.string('GOOGLE_CLIENT_SECRET'),
+             },
+           },
+         }),
+       ),
+     )
+   ```
+
+   `cookies.secret` is not optional here — the sign-in handshake is carried in a **signed** cookie,
+   and signing without a secret throws rather than quietly not signing.
+
+5. ### Try it
+
+   ```bash
+   bun run dev
+   open http://localhost:3000/auth/oauth/google
+   ```
+
+   You land back on the callback with a user and an access token:
+
+   ```json
+   {
+     "user": { "id": "0f8e…", "email": "ada@example.com", "name": "Ada" },
+     "accessToken": "eyJhbGciOi…",
+     "expiresIn": 900,
+     "created": true
+   }
+   ```
+
+6. ### Use it on a route
+
+   ```ts title="src/routes/me.get.ts"
+   export const auth = true
+
+   export default async ({ user }) => ({ id: user.id, email: user.email, name: user.name })
+   ```
+
+   ```bash
+   curl localhost:3000/me -H "Authorization: Bearer <accessToken>"
+   ```
+
+</Steps>
+
+## Sending the browser somewhere afterwards
+
+Returning JSON is right for an API. A web app wants a redirect:
+
+```ts
+basicAuth({
+  // …
+  afterOAuth: '/dashboard',
+})
+```
+
+Or per sign-in, which is how you send someone back to the page they were on:
+
+```
+/auth/oauth/google?redirect=/settings/billing
+```
+
+The refresh token is set as an httpOnly cookie either way, so the browser can call
+`POST /auth/refresh` for a new access token without your JavaScript ever holding it.
+
+## What just happened
+
+| | |
+| --- | --- |
+| A first sign-in | created the user, linked the Google account, issued a session |
+| A returning sign-in | found them by the Google account id — not the email |
+| Their password | an unusable sentinel; they have none, and `change-password` answers `409` |
+| The session | the same access JWT a password login issues, so `logout` and sign-out-everywhere work |
+
+## Adding GitHub too
+
+```ts
+import { github, google } from '@theoven/auth'
+
+const providers = {
+  google: {
+    provider: google,
+    clientId: env.string('GOOGLE_CLIENT_ID'),
+    clientSecret: env.string('GOOGLE_CLIENT_SECRET'),
+  },
+  github: {
+    provider: github,
+    clientId: env.string('GITHUB_CLIENT_ID'),
+    clientSecret: env.string('GITHUB_CLIENT_SECRET'),
+  },
+}
+```
+
+GitHub's callback URL is set under **Settings → Developer settings → OAuth Apps**. Its default
+scopes include `user:email`, which is required: GitHub omits the address from the profile whenever
+the user has kept it private, and without that scope the sign-in fails rather than creating an
+account with no email.
+
+## Keeping password sign-in, or not
+
+Both work side by side by default — someone can sign up with a password *and* attach Google, and
+they are one user.
+
+For a Google-only application, turn the password endpoints off:
+
+```ts
+basicAuth({ db: client, secret, password: false, callbackUrl, oauth: { google: googleConfig } })
+```
+
+That mounts no `signup`, `login`, `forgot-password`, `reset-password` or `change-password`.
+`refresh`, `logout` and `me` stay — a session is a session however it began.
+
+<Aside type="note" title="Leaving signup mounted is not harmless">
+  On an app that meant to be Google-only, a live `/auth/signup` quietly accepts passwords behind
+  you. That is a way in nobody intended, which is why this is a switch rather than something you
+  are expected to notice.
+</Aside>
+
+## What this does not do
+
+- **No "link Google" button for someone already signed in.** Linking happens as a side effect of
+  signing in, so a password user has to sign out first. An endpoint for the settings-page case is
+  not built yet.
+- **No Apple.** Its client secret is a JWT you sign yourself and its callback is a form POST;
+  it needs its own work.
+- **Provider tokens are not stored**, so you cannot call Google's API on the user's behalf. Pass
+  `storeTokens: true` on the provider if you need to — and only then, because stored tokens are a
+  liability.
+- **Someone signing in with Google at an address that already has a password account** is linked
+  only because Google says it verified the address. A provider that does not verify is refused,
+  with a message telling them to sign in and link from settings.

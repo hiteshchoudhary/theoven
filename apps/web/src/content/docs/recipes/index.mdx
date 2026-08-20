@@ -1,0 +1,34 @@
+---
+title: Recipes
+description: Short, self-contained builds — sign in with Google, upload images, share files, go real-time.
+sidebar:
+  order: 0
+  label: Overview
+---
+
+The [tutorial](/docs/tutorial/first-route/) teaches one idea per chapter. [Build a todo
+API](/docs/build/) builds one application end to end. These are the third thing: **a feature you
+drop into an application you already have**, finished, in one sitting.
+
+Each one is complete code, not fragments, and each says what it does *not* handle.
+
+| | | Uses |
+| --- | --- | --- |
+| [Sign in with Google](/docs/recipes/google-login/) | 20 min | `auth`, `auth-basic` |
+| [Image uploads](/docs/recipes/image-uploads/) | 20 min | `storage`, validation |
+| [Share a file with a link](/docs/recipes/file-sharing/) | 30 min | `storage`, `queue`, `db` |
+| [Real-time notifications](/docs/recipes/realtime/) | 25 min | core WebSockets, `auth` |
+
+<div />
+
+## What they assume
+
+An app that boots — the [installation guide](/docs/start/installation/) or
+`bun create theoven my-app` gets you there. Where a recipe needs a database it assumes the SQLite
+default, and says what changes for Postgres.
+
+## The code runs
+
+Every snippet is copied from something that was built and executed while the page was written,
+including the failures each recipe claims to produce. If one does not work for you, it is a bug in
+Oven or in these instructions.

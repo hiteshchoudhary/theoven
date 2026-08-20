@@ -1,0 +1,182 @@
+---
+title: Share a file with a link
+description: Upload a file, get a link that expires, and have the file clean itself up afterwards.
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+Upload something, get back a link anyone can open until it expires, and let a background job delete
+what nobody needs any more. Storage, a table, and a cron job — about thirty minutes.
+
+<Steps>
+
+1. ### Install
+
+   ```bash
+   bun add @theoven/storage @theoven/queue
+   ```
+
+2. ### A table for the shares
+
+   The file lives in storage; this row is what makes a link resolvable and expirable.
+
+   ```ts title="src/schema.ts"
+   import { sql } from 'drizzle-orm'
+   import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+   export const shares = sqliteTable('shares', {
+     id: text('id').primaryKey(),
+     key: text('key').notNull(),
+     filename: text('filename').notNull(),
+     size: integer('size').notNull(),
+     ownerId: text('owner_id').notNull(),
+     expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+     createdAt: integer('created_at', { mode: 'timestamp_ms' })
+       .notNull()
+       .default(sql`(unixepoch() * 1000)`),
+   })
+   ```
+
+3. ### Upload and create the link
+
+   ```ts title="src/routes/shares/index.post.ts"
+   import { z } from 'zod'
+   import { shares } from '../../schema'
+
+   export const auth = true
+   export const body = z.object({
+     file: z.file().max(25_000_000),
+     // Coerced, so `?days=3` from a form is a number by the time you read it.
+     days: z.coerce.number().int().min(1).max(30).default(7),
+   })
+
+   export default async ({ body, db, storage, user }) => {
+     const id = crypto.randomUUID()
+     const key = `shares/${id}/${body.file.name}`
+
+     await storage.upload(key, body.file)
+
+     const [share] = await db
+       .insert(shares)
+       .values({
+         id,
+         key,
+         filename: body.file.name,
+         size: body.file.size,
+         ownerId: user.id,
+         expiresAt: new Date(Date.now() + body.days * 86_400_000),
+       })
+       .returning()
+
+     return { id: share.id, url: `/shares/${share.id}`, expiresAt: share.expiresAt }
+   }
+   ```
+
+4. ### Resolve it
+
+   Public on purpose — the id is the secret — but expiry is checked on every read:
+
+   ```ts title="src/routes/shares/[id].get.ts"
+   import { eq } from 'drizzle-orm'
+   import { NotFound } from '@theoven/core'
+   import { z } from 'zod'
+   import { shares } from '../../schema'
+
+   export const params = z.object({ id: z.uuid() })
+
+   export default async (ctx) => {
+     const [share] = await ctx.db.select().from(shares).where(eq(shares.id, ctx.params.id))
+
+     // The same answer for "never existed" and "expired": a different one tells a stranger
+     // which ids were once real.
+     if (!share || share.expiresAt < new Date()) throw new NotFound('No such file.')
+
+     ctx.set('content-disposition', `attachment; filename="${share.filename}"`)
+     return ctx.storage.download(share.key)
+   }
+   ```
+
+5. ### Delete what expired
+
+   ```ts title="src/jobs.ts"
+   import { defineJob } from '@theoven/queue'
+   import { lt } from 'drizzle-orm'
+   import { shares } from './schema'
+
+   export const sweepShares = defineJob({
+     name: 'sweep-shares',
+     handler: async ({ log }) => {
+       const expired = await db.select().from(shares).where(lt(shares.expiresAt, new Date()))
+
+       for (const share of expired) {
+         // Storage first: a row without an object is a 404, an object without a row is a file
+         // nobody can reach and nobody will ever delete.
+         await storage.delete(share.key)
+         await db.delete(shares).where(eq(shares.id, share.id))
+       }
+
+       log.info('swept expired shares', { count: expired.length })
+     },
+   })
+   ```
+
+   ```ts title="src/app.ts"
+   import { memoryQueue, queue } from '@theoven/queue'
+   import { sweepShares } from './jobs'
+
+   app.use(
+     queue(memoryQueue(), {
+       jobs: [sweepShares],
+       cron: { nightly: { schedule: '0 3 * * *', job: sweepShares } },
+     }),
+   )
+   ```
+
+</Steps>
+
+## The ordering in the sweep is the interesting part
+
+Delete the row first and a crash leaves an object with no row — unreachable, and nothing will ever
+look for it again. Delete the object first and a crash leaves a row whose download 404s, which the
+next sweep fixes. One failure mode is self-healing and the other is a slow leak of storage you pay
+for.
+
+## Skipping your server entirely
+
+With S3, hand out a presigned link and let the browser fetch from the bucket:
+
+```ts
+if (!ctx.storage.canPresign) return ctx.storage.download(share.key)
+
+const remaining = Math.floor((share.expiresAt.getTime() - Date.now()) / 1000)
+return ctx.redirect(ctx.storage.presignDownload(share.key, { expiresIn: Math.min(remaining, 3600) }))
+```
+
+`canPresign` is `false` on the disk driver, so the branch is what keeps this working in
+development. Capping the signed URL at the share's own expiry matters: without the `min`, a link
+signed for an hour outlives a share that expired in ten minutes.
+
+## Production
+
+Swap two drivers and change nothing else:
+
+```ts
+app.use(storage(s3Storage({ bucket: env.string('S3_BUCKET') })))
+app.use(queue(sqlQueue({ url: env.string('DATABASE_URL') }), { jobs: [sweepShares], cron }))
+```
+
+The memory queue refuses to boot in production anyway — a deploy would silently drop every pending
+sweep — so this is a change you will be told to make rather than one you can forget.
+
+## What this does not do
+
+- **The id is the only secret.** Anyone with the link can download. That is the point of a share
+  link, but it means no revocation beyond deleting the row, and no per-recipient access.
+- **No download limits or counts.** Both are a column and a check away.
+- **No virus scanning, and no content-type sniffing.** `Content-Disposition: attachment` is doing
+  the work of making a hostile upload not render in a browser; serve from a separate origin if
+  that matters.
+- **The sweep runs on one schedule.** A share that expires at noon is still downloadable until the
+  3am sweep unless the read path checks expiry — which is why the read path checks expiry.

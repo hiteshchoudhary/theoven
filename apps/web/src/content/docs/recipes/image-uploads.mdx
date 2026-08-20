@@ -1,0 +1,155 @@
+---
+title: Image uploads
+description: Accept an avatar, validate it before your code runs, store it, and serve it back.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components'
+
+An upload endpoint that rejects anything too large or the wrong type **before your handler runs**,
+stores the file, and hands back a URL. Twenty minutes, and no `multer`.
+
+<Steps>
+
+1. ### Install
+
+   ```bash
+   bun add @theoven/storage
+   ```
+
+2. ### Pick a driver
+
+   ```ts title="src/app.ts"
+   import { createApp, env } from '@theoven/core'
+   import { diskStorage, s3Storage, storage } from '@theoven/storage'
+
+   export const app = createApp().use(
+     storage(
+       env.has('S3_BUCKET')
+         ? s3Storage({ bucket: env.string('S3_BUCKET') })
+         : diskStorage({ dir: './uploads' }),
+     ),
+   )
+   ```
+
+   Disk in development, S3 in production, and the same `ctx.storage` either way.
+
+   <Aside type="caution" title="The disk driver refuses to boot in production">
+     Uploads on a container filesystem vanish on the next deploy, and that failure looks like
+     nothing at all until someone asks where their avatar went. Configure S3 — or pass
+     `allowDiskInProduction` if a disk that resets is genuinely what you want.
+   </Aside>
+
+3. ### The endpoint
+
+   ```ts title="src/routes/avatar.post.ts"
+   import { z } from 'zod'
+
+   export const auth = true
+   export const body = z.object({
+     file: z.file().max(2_000_000).mime(['image/png', 'image/jpeg', 'image/webp']),
+   })
+
+   export default async ({ body, storage, user }) => {
+     const object = await storage.upload(`avatars/${user.id}`, body.file)
+     return { key: object.key, size: object.size, type: object.type }
+   }
+   ```
+
+   That is the whole thing. The file arrives as a web `File` — core parses multipart bodies
+   already — and the schema rejects an oversize or wrong-typed upload with a `422` **before** the
+   handler runs, so your code never sees it.
+
+4. ### Try it
+
+   ```bash
+   curl -X POST localhost:3000/avatar \
+     -H "Authorization: Bearer $TOKEN" \
+     -F file=@portrait.png
+   ```
+
+   ```json
+   { "key": "avatars/0f8e…", "size": 20481, "type": "image/png" }
+   ```
+
+   And the failure, which is the part worth checking:
+
+   ```bash
+   curl -X POST localhost:3000/avatar -H "Authorization: Bearer $TOKEN" -F file=@huge.png
+   # 422 — the handler never ran
+   ```
+
+5. ### Serve it back
+
+   ```ts title="src/routes/avatar/[id].get.ts"
+   import { z } from 'zod'
+
+   export const params = z.object({ id: z.uuid() })
+
+   export default async ({ params, storage }) => storage.download(`avatars/${params.id}`)
+   ```
+
+   `download()` returns a lazy `Blob` — nothing is fetched until the response is written, and
+   returning it streams rather than buffering.
+
+</Steps>
+
+## Keying by something stable
+
+`avatars/${user.id}` overwrites the previous avatar, which is usually what you want. If you need
+history, or cache-friendly URLs that never go stale, key by content instead:
+
+```ts
+const key = `avatars/${user.id}/${Bun.hash(await body.file.arrayBuffer())}.png`
+```
+
+Then the URL changes when the image does, and you can cache it forever.
+
+## Letting the browser upload straight to S3
+
+For large files, sending them through your server twice is wasted bandwidth. With S3, hand the
+browser a URL to `PUT` to:
+
+```ts title="src/routes/avatar/presign.post.ts"
+export const auth = true
+
+export default async ({ storage, user }) => ({
+  url: storage.presignUpload(`avatars/${user.id}`, { expiresIn: 300 }),
+})
+```
+
+<Aside type="note" title="Check before you rely on it">
+  `storage.canPresign` is `true` on S3 and **`false` on disk** — the local driver has no signed
+  URLs, and Bunny and ImageKit can sign downloads but not uploads. Branch on it rather than
+  assuming, or the feature works in development and 500s in production.
+</Aside>
+
+The trade is that your server never sees the bytes, so the size and type limits in the schema no
+longer apply — set them on the bucket policy instead.
+
+## Resizing
+
+Storage stores. If you want thumbnails, either generate them yourself in a
+[queue job](/docs/bricks/queue/), or use a driver that resizes on delivery:
+
+```ts
+import { imagekitStorage } from '@theoven/storage-imagekit'
+
+const media = imagekitStorage({ privateKey, urlEndpoint })
+
+media.url('avatars/0f8e', { transform: { width: 200, height: 200, format: 'auto' } })
+```
+
+Upload once, serve any size from the URL, and store no thumbnails.
+
+## What this does not do
+
+- **No image inspection.** `.mime()` checks the declared content type, not the bytes. Someone can
+  label anything `image/png`. If that matters — and it does if you ever render it inline — verify
+  the magic bytes, or serve from a separate origin with `Content-Disposition: attachment`.
+- **No virus scanning.**
+- **No cleanup.** Overwriting an avatar leaves the old object if you keyed by hash. A
+  [queue job](/docs/bricks/queue/) is the place for that.
+- **Large uploads spill to a temp file** rather than being held in memory, but the request still
+  passes through your server unless you presign.
