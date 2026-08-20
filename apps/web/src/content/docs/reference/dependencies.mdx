@@ -1,0 +1,168 @@
+---
+title: Dependencies
+description: Per-request, per-route values — composable, cached within a request, with teardown and a testing seam.
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```ts
+import { dependency } from '@theoven/core'
+
+const tenant = dependency('tenant', (ctx) => resolveTenant(ctx.header('host')))
+
+const member = dependency('member', async (ctx, use) => {
+  const current = await use(tenant)
+  const found = await findMember(current.id, ctx.user.id)
+  if (!found) throw new Forbidden('Not a member of this tenant.')
+  return found
+})
+
+export default route({ auth: true, deps: { member } }, (ctx) => ctx.deps.member.role)
+//                                                              ^ typed
+```
+
+## Why not a brick
+
+[Bricks](/docs/reference/bricks/) are **app-level**: built once at boot, present on every request.
+A dependency is the other scale.
+
+| | Brick | Dependency |
+| --- | --- | --- |
+| Lifetime | the app | one request |
+| Applies to | every route | the routes that name it |
+| Built | once, at boot | per request, cached within it |
+| Teardown | `onShutdown` | after the request |
+| Reaches the handler as | `ctx.<name>` | `ctx.deps.<name>` |
+| Use for | a pool, a client, a service | a tenant, a permission, a transaction |
+
+Before this, resolving something per request meant a brick — which then ran on every route in the
+app — or repeating it at the top of every handler. `ctx.deps.x` rather than `ctx.x` keeps the two
+namespaces apart, so "where did this come from" is answerable by reading the route (D31).
+
+## Composing
+
+A resolver's second argument resolves other dependencies:
+
+```ts
+const db = dependency('db', (ctx) => ctx.db)
+const account = dependency('account', async (ctx, use) => findAccount(await use(db), ctx.user.id))
+const plan = dependency('plan', async (_ctx, use) => (await use(account)).plan)
+```
+
+**Each resolves once per request**, however many others ask for it — `use` caches the promise, not
+just the value, so two concurrent asks share one resolution rather than racing to start two.
+
+Throwing from a resolver rejects the request before the handler runs, which is what makes
+`member` above a guard as well as a value.
+
+## Teardown
+
+An async generator yields its value and cleans up afterwards:
+
+```ts
+const tx = dependency('tx', async function* (ctx) {
+  const handle = await begin(ctx.db)
+  try {
+    yield handle
+    await handle.commit()
+  } catch (error) {
+    await handle.rollback()
+    throw error
+  }
+})
+
+export default route({ deps: { tx } }, async (ctx) => {
+  await ctx.deps.tx.insert(orders).values(order)
+  return { ok: true }
+})
+```
+
+When the request succeeds the generator is resumed normally. When it fails, **the error is thrown
+in at the `yield`** — which is what lets `catch` tell a rollback from a commit.
+
+<Aside type="caution" title="Guaranteed cleanup goes in `finally`">
+  Because the failure arrives *at the `yield`*, statements after it are skipped on the failure
+  path — ordinary JavaScript, and the same rule as Python's `@contextmanager` that FastAPI's
+  `yield` dependencies are built on.
+
+  ```ts
+  // Leaks on a failed request: the close is never reached.
+  const bad = dependency('bad', async function* () {
+    const c = await open()
+    yield c
+    await c.close()
+  })
+
+  // Always closes.
+  const good = dependency('good', async function* () {
+    const c = await open()
+    try {
+      yield c
+    } finally {
+      await c.close()
+    }
+  })
+  ```
+
+  It is easy to miss because both work on the success path. There is a test named for this.
+</Aside>
+
+Teardowns run in **reverse order** of resolution, so a dependency can rely on the ones it used
+still being alive while it cleans up.
+
+A teardown that throws on a **successful** request makes that request a `500` — a commit that did
+not commit means the response about to go out is a lie. On an already-failing request it is logged
+instead, because replacing the original error with a cleanup error loses the thing worth reading.
+
+## Testing
+
+```ts
+app.override(tenant, () => ({ id: 'test-tenant', plan: 'pro' }))
+```
+
+Overrides apply to sub-dependencies too, so replacing `tenant` also changes what `member` sees
+without touching `member`. `app.clearOverrides()` puts the real ones back.
+
+This is the seam dependency injection is supposed to buy: a test swaps what a route depends on
+without reaching into the route, and without a module mock.
+
+## When they run
+
+After validation and after the [brick hooks](/docs/reference/middleware/#the-order-everything-runs-in),
+before the handler. So a resolver can read `ctx.params` and `ctx.body` already validated, and
+`ctx.user` is populated.
+
+## Cost
+
+Nothing at all on a route that declares none — no scope, no map, no array. On a route that does,
+about **590 ns**, and roughly 110 ns for each additional dependency. The cache and the teardown
+stack are allocated on first use rather than per request, because the common shape is one
+dependency with no sub-dependencies and no teardown.
+
+## Limitations
+
+- **Routers cannot carry dependencies yet.** `router({ deps })` — FastAPI's
+  `APIRouter(dependencies=[...])` — is not implemented; declare them per route.
+- **No cycle detection.** A dependency that uses itself recurses until the stack runs out rather
+  than failing with a readable message.
+- **Not in the OpenAPI document.** A dependency that acts as a guard does not appear as a security
+  requirement; use [`auth` with a policy](/docs/bricks/auth/#policies) for anything that should be
+  documented.
+- **Resolution is sequential**, in declaration order. Independent dependencies are not resolved
+  concurrently.
+- **No app-wide dependencies.** Every route names what it needs. That is the point, but it means
+  no equivalent to FastAPI's `FastAPI(dependencies=[...])`.
+
+## How it is verified
+
+The behaviours that carry risk each have a test, and the subtle ones were confirmed to fail when
+broken: caching (resolves once per request, and concurrent asks share one resolution), reverse
+teardown order, and the commit-versus-rollback distinction.
+
+Two came out of tests that were wrong first. One asserted on a variable nothing ever assigned — it
+passed while proving nothing, and rewriting it to observe real ordering exposed a **leak**: a
+dependency that threw part-way through the list left the ones before it open, because resolution
+ran outside the `try` that disposes them. The other was written with cleanup after `yield` and no
+`finally`, and failing it is what pinned down the semantics now documented above.

@@ -11,6 +11,7 @@ import {
 } from './brick'
 import { Context, type ContextInit } from './context'
 import type { CookieJarInit } from './cookies'
+import { type Dependency, DependencyScope, type Overrides } from './dependency'
 import { OvenError, toOvenError } from './errors'
 import { ConsoleLogger, type Logger, type LogLevel } from './logger'
 import { appliesTo, compose, type Middleware } from './middleware'
@@ -185,6 +186,8 @@ export class App<Ext = unknown> implements BrickHost {
   private shutdownHooks: Array<() => unknown> = []
 
   private readonly middleware: Array<{ prefix: string | undefined; handler: Middleware }> = []
+  /** Dependency overrides. Undefined until something calls `override`, so apps that do not pay nothing. */
+  private overrides: Overrides | undefined
   /**
    * Composed chains, keyed by which middleware apply.
    *
@@ -384,6 +387,31 @@ export class App<Ext = unknown> implements BrickHost {
     }
 
     this.bricks.push(brick)
+    return this
+  }
+
+  /**
+   * Replaces a dependency's resolver for this app.
+   *
+   * The testing seam dependency injection is supposed to buy (D31): swap what a route depends on
+   * without reaching into the route.
+   *
+   * ```ts
+   * app.override(currentTenant, () => ({ id: 'test-tenant' }))
+   * ```
+   */
+  override<Value>(
+    target: Dependency<Value>,
+    resolve: (ctx: Context, use: <V>(d: Dependency<V>) => Promise<V>) => Value | Promise<Value>,
+  ): this {
+    this.overrides ??= new Map()
+    this.overrides.set(target as Dependency<unknown>, resolve as never)
+    return this
+  }
+
+  /** Removes every override. */
+  clearOverrides(): this {
+    this.overrides?.clear()
     return this
   }
 
@@ -912,6 +940,53 @@ export class App<Ext = unknown> implements BrickHost {
       return UPGRADED
     }
 
+    /**
+     * Dependencies resolve here: after validation, so a resolver can read `ctx.params` and
+     * `ctx.body`, and after the brick hooks, so `ctx.user` is populated (D31).
+     *
+     * Nothing is allocated for a route that declares none, which is the same guard the brick
+     * contributors use.
+     */
+    let scope: DependencyScope | undefined
+
+    // Resolution is *inside* the try, not before it. A dependency that throws part-way through
+    // the list has already opened the ones before it, and leaving the scope undisposed would
+    // leak them — an open transaction that never commits or rolls back.
+    try {
+      if (schema?.deps) {
+        scope = new DependencyScope(ctx, this.overrides)
+        const resolved: Record<string, unknown> = {}
+        for (const key in schema.deps) {
+          const target = schema.deps[key]
+          if (target) resolved[key] = await scope.use(target)
+        }
+        // Plain assignment, not `defineProperty`: `deps` shadows nothing on the prototype, so
+        // there is no getter to override — unlike the brick contributions above it.
+        ;(ctx as Context & { deps?: Record<string, unknown> }).deps = resolved
+      }
+
+      return await this.runHandler(ctx, handler, schema, headOfGet)
+    } catch (thrown) {
+      // Taken out of `scope` so the `finally` below does not dispose a second time.
+      const failed = scope
+      scope = undefined
+      await failed?.dispose(thrown)
+      throw thrown
+    } finally {
+      // Success path. Disposing here rather than after the Response is written means a commit
+      // that fails still turns into a 500, instead of a response that claims work was saved.
+      await scope?.dispose()
+    }
+  }
+
+  /** The handler, its response schema and the after-handle hooks. Split out so the dependency
+   * scope in `routeAndHandle` can wrap all three in one try/finally. */
+  private async runHandler(
+    ctx: Context,
+    handler: (ctx: Context) => unknown,
+    schema: RouteSchema | undefined,
+    headOfGet: boolean,
+  ): Promise<unknown> {
     let result = await handler(ctx)
 
     // `tookControl` first: a handler that returned a Response or a stream is not describable by

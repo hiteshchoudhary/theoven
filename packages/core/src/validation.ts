@@ -1,4 +1,5 @@
 import type { Context } from './context'
+import type { Dependency } from './dependency'
 import { UnprocessableContent } from './errors'
 import type { ParsedQuery } from './query'
 import type { RouteParams } from './router/types'
@@ -33,6 +34,13 @@ export interface RouteSchema {
    * core knows the shape, core owns auth, and auth stops being replaceable.
    */
   auth?: unknown
+  /**
+   * Things this route needs, resolved per request (D31).
+   *
+   * Core never resolves these itself beyond calling them — what a dependency *is* stays the
+   * caller's business, the same way `auth` is carried and not interpreted.
+   */
+  deps?: Record<string, Dependency<unknown>>
   /** Shown in the generated OpenAPI document. */
   summary?: string
   description?: string
@@ -93,7 +101,14 @@ export type ValidatedContext<Schema extends RouteSchema, Ext> = Omit<
       ? StandardSchemaV1.InferOutput<Schema['body']>
       : Promise<unknown>
     headers: Output<Schema['headers'], never>
+    deps: ResolvedDeps<Schema['deps']>
   }
+
+/** Maps a route's declared dependencies to the values they resolve to. */
+export type ResolvedDeps<Declared> =
+  Declared extends Record<string, Dependency<unknown>>
+    ? { [Key in keyof Declared]: Declared[Key] extends Dependency<infer Value> ? Value : never }
+    : Record<never, never>
 
 /** A handler for a route that declares schemas. */
 export type ValidatedHandler<Schema extends RouteSchema, Ext> = (

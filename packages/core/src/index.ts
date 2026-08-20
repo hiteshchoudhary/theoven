@@ -31,6 +31,17 @@ export {
 } from './brick'
 export { Context, type ContextInit } from './context'
 export { type CookieJarInit, type CookieOptions, Cookies } from './cookies'
+// The radix tree, exported under a name that says what it is. `Router` now names the thing
+// users actually build (D30); this one is the structure underneath and is rarely imported.
+export {
+  type Dependency,
+  DependencyScope,
+  dependency,
+  isDependency,
+  type ScopedResolver,
+  type Use,
+  type ValueResolver,
+} from './dependency'
 export {
   createEnvReader,
   defineEnv,
@@ -113,8 +124,6 @@ export {
 } from './openapi'
 export { type ParsedQuery, parseQuery, type QueryOptions, type QueryValue } from './query'
 export { toResponse } from './response'
-// The radix tree, exported under a name that says what it is. `Router` now names the thing
-// users actually build (D30); this one is the structure underneath and is rarely imported.
 export { normalisePath, RouteConflictError, Router as RadixRouter } from './router/router'
 export {
   HTTP_METHODS,

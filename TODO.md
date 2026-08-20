@@ -858,8 +858,13 @@ its own nested 0.7.2 and still benchmarks.
             `MountRegistrar`, which third-party auth adapters implement — that deserves its own
             change rather than riding along with a new feature.
       - [ ] Follow-up: `router.ws()`. WebSocket routes are app-only today.
-- [ ] **D31 — dependencies.** Per-request, per-route, composable; `ctx.deps.<name>`; generator
-      teardown; `app.override()` for tests. Wants D30 first so routers can carry deps.
+- [x] **D31 — dependencies.** Shipped. `dependency()`, `deps` on a route, `ctx.deps.<name>`,
+      sub-dependencies, per-request caching, generator teardown, `app.override()`.
+      - [ ] Follow-up: `router({ deps })`, the equivalent of FastAPI's
+            `APIRouter(dependencies=[...])`. The reason D30 landed first, and still not done.
+      - [ ] Follow-up: cycle detection. A dependency that uses itself recurses to a stack
+            overflow rather than naming the cycle.
+      - [ ] Follow-up: resolve independent dependencies concurrently. Sequential today.
 
 - [x] ~~**Bug:** a handler returning a `Response` 500s when its route declares a `response`
       schema.~~ **Fixed.** It affected all six documented take-control return types, not just
