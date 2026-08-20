@@ -877,7 +877,10 @@ its own nested 0.7.2 and still benchmarks.
       - [x] ~~Follow-up: cycle detection.~~ **Done.** `DependencyCycleError` naming the path,
             e.g. `a -> b -> c -> a`. A diamond is not a cycle. The chain is popped when a
             dependency finishes so a later cycle's message describes only the cycle.
-      - [ ] Follow-up: resolve independent dependencies concurrently. Sequential today.
+      - [x] ~~Follow-up: resolve independent dependencies concurrently.~~ **Done.** Three 10ms
+            dependencies went from 33ms to 11ms. Cost: ~400ns on routes declaring more than one.
+            Doing it exposed that cycle detection used one shared chain, which conflated
+            concurrent branches — replaced with per-branch ancestry.
 
 - [x] ~~**Bug:** a handler returning a `Response` 500s when its route declares a `response`
       schema.~~ **Fixed.** It affected all six documented take-control return types, not just

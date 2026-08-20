@@ -1,6 +1,6 @@
 {
   "name": "@theoven/auth-basic",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Email and password auth for Oven — signup, login, refresh, reset — stored with Drizzle",
   "keywords": [
     "bun",

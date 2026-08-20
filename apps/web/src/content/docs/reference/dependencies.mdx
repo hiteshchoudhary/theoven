@@ -148,6 +148,34 @@ After validation and after the [brick hooks](/docs/reference/middleware/#the-ord
 before the handler. So a resolver can read `ctx.params` and `ctx.body` already validated, and
 `ctx.user` is populated.
 
+## They resolve concurrently
+
+A route's declared dependencies start together:
+
+```ts
+export default route({ deps: { user, subscription, features } }, handler)
+```
+
+Three dependencies each doing 10 ms of I/O cost **~11 ms, not 33 ms** — a route waits for the
+slowest, not the sum. That is the usual shape: a dependency exists because something has to be
+fetched.
+
+Sub-dependencies are still ordered by what needs what — `use()` inside a resolver is awaited
+normally. To run two of *those* together, say so:
+
+```ts
+const both = dependency('both', async (_ctx, use) =>
+  Promise.all([use(profile), use(settings)]),
+)
+```
+
+**A failure is reported in declaration order**, not by whichever rejected first. Two dependencies
+that both fail would otherwise produce different errors on different runs, which makes the same
+bug look like two.
+
+Siblings still get torn down. A dependency that opened a transaction and a sibling that then
+threw will not leave the transaction open.
+
 ## Cycles
 
 A dependency that depends on itself, directly or through others, fails with the path rather than
@@ -163,8 +191,17 @@ and it resolves the shared one once.
 
 ## Cost
 
-Nothing at all on a route that declares none — no scope, no map, no array. On a route that does,
-about **590 ns**, and roughly 110 ns for each additional dependency. The cache and the teardown
+Nothing at all on a route that declares none — no scope, no map, no array.
+
+| | |
+| --- | --- |
+| one dependency | ~590 ns |
+| two or more | ~+400 ns on top, for the concurrency machinery |
+| three 10 ms I/O dependencies | ~11 ms, against ~33 ms resolved one at a time |
+
+The fixed cost of resolving concurrently is only paid by routes declaring more than one, and it is
+paid back many times over by anything that touches the network. If two dependencies are both
+synchronous, they were probably function calls in disguise. The cache and the teardown
 stack are allocated on first use rather than per request, because the common shape is one
 dependency with no sub-dependencies and no teardown.
 
@@ -176,8 +213,6 @@ dependency with no sub-dependencies and no teardown.
 - **Not in the OpenAPI document.** A dependency that acts as a guard does not appear as a security
   requirement; use [`auth` with a policy](/docs/bricks/auth/#policies) for anything that should be
   documented.
-- **Resolution is sequential**, in declaration order. Independent dependencies are not resolved
-  concurrently.
 - **No app-wide dependencies.** Every route names what it needs. That is the point, but it means
   no equivalent to FastAPI's `FastAPI(dependencies=[...])`.
 

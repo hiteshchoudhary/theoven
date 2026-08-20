@@ -59,7 +59,7 @@
     },
     "packages/auth": {
       "name": "@theoven/auth",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
         "zod": "^4.4.3",
@@ -70,7 +70,7 @@
     },
     "packages/auth-basic": {
       "name": "@theoven/auth-basic",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/auth": "workspace:^",
         "@theoven/core": "workspace:^",
@@ -85,7 +85,7 @@
     },
     "packages/auth-better": {
       "name": "@theoven/auth-better",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/auth": "workspace:^",
         "@theoven/core": "workspace:^",
@@ -99,7 +99,7 @@
     },
     "packages/auth-clerk": {
       "name": "@theoven/auth-clerk",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/auth": "workspace:^",
         "@theoven/core": "workspace:^",
@@ -111,7 +111,7 @@
     },
     "packages/auth-mongo": {
       "name": "@theoven/auth-mongo",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/auth": "workspace:^",
         "@theoven/core": "workspace:^",
@@ -125,7 +125,7 @@
     },
     "packages/cache": {
       "name": "@theoven/cache",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
       },
@@ -135,7 +135,7 @@
     },
     "packages/cli": {
       "name": "@theoven/cli",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "bin": {
         "oven": "./src/index.ts",
       },
@@ -145,14 +145,14 @@
     },
     "packages/core": {
       "name": "@theoven/core",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "dependencies": {
         "zod": "^4.0.0",
       },
     },
     "packages/create-theoven": {
       "name": "create-theoven",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "bin": {
         "create-theoven": "./src/index.ts",
       },
@@ -162,7 +162,7 @@
     },
     "packages/db": {
       "name": "@theoven/db",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
       },
@@ -172,7 +172,7 @@
     },
     "packages/db-drizzle": {
       "name": "@theoven/db-drizzle",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
         "@theoven/db": "workspace:^",
@@ -185,7 +185,7 @@
     },
     "packages/db-mongoose": {
       "name": "@theoven/db-mongoose",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
         "@theoven/db": "workspace:^",
@@ -199,7 +199,7 @@
     },
     "packages/mail": {
       "name": "@theoven/mail",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
         "@theoven/queue": "workspace:^",
@@ -210,7 +210,7 @@
     },
     "packages/queue": {
       "name": "@theoven/queue",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
       },
@@ -220,7 +220,7 @@
     },
     "packages/storage": {
       "name": "@theoven/storage",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
       },
@@ -230,7 +230,7 @@
     },
     "packages/storage-bunny": {
       "name": "@theoven/storage-bunny",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
         "@theoven/storage": "workspace:^",
@@ -242,7 +242,7 @@
     },
     "packages/storage-imagekit": {
       "name": "@theoven/storage-imagekit",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@theoven/core": "workspace:^",
         "@theoven/storage": "workspace:^",
@@ -254,7 +254,7 @@
     },
     "packages/telemetry": {
       "name": "@theoven/telemetry",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@opentelemetry/api": "^1.9.1",
         "@theoven/core": "workspace:^",

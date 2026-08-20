@@ -9,6 +9,9 @@ import type { Context } from './context'
  */
 const DEPENDENCY = Symbol.for('oven.dependency')
 
+/** Shared empty ancestry, so the common top-level resolution allocates nothing extra. */
+const EMPTY: readonly Dependency<unknown>[] = []
+
 /** Resolves other dependencies from inside a resolver. Results are shared within a request. */
 export type Use = <Value>(dependency: Dependency<Value>) => Promise<Value>
 
@@ -132,15 +135,6 @@ export class DependencyScope {
     | Array<{ name: string; generator: AsyncGenerator<unknown, void, unknown> }>
     | undefined
   private disposed = false
-  /**
-   * Dependencies currently resolving, innermost last.
-   *
-   * A cycle is caught by membership here rather than by the cache, because the cache entry is
-   * only written once `start` has returned — and a cycle closes *inside* the resolver's
-   * synchronous prefix, before that happens. Without it, `a → b → a` recursed to a stack
-   * overflow and reported "Maximum call stack size exceeded", which names neither dependency.
-   */
-  private chain: Array<Dependency<unknown>> | undefined
 
   constructor(
     private readonly ctx: Context,
@@ -153,41 +147,60 @@ export class DependencyScope {
    * The **promise** is cached rather than the value, so two concurrent `use()` calls for the
    * same dependency share one resolution instead of racing to start two.
    */
-  use = <Value>(target: Dependency<Value>): Promise<Value> => {
+  use = <Value>(target: Dependency<Value>): Promise<Value> => this.useWith(target, EMPTY)
+
+  /**
+   * Resolves a dependency, once per request, tracking who asked for it.
+   *
+   * `ancestry` is the chain that led here, and it is **per branch** rather than one shared stack.
+   * That matters because independent dependencies resolve concurrently: a single stack would
+   * interleave unrelated branches, and a genuine cycle would then be reported with every
+   * dependency the request happened to be resolving at the time attached to its path.
+   *
+   * The cycle check cannot be the cache: a cycle closes inside the resolver's *synchronous*
+   * prefix, before `start` has returned the promise the cache stores.
+   */
+  private useWith<Value>(
+    target: Dependency<Value>,
+    ancestry: readonly Dependency<unknown>[],
+  ): Promise<Value> {
     const existing = this.cache?.get(target as Dependency<unknown>)
     if (existing) return existing as Promise<Value>
 
-    if (this.chain?.includes(target as Dependency<unknown>)) {
-      const path = [...this.chain, target].map((entry) => entry.name).join(' -> ')
+    if (ancestry.includes(target as Dependency<unknown>)) {
+      const path = [...ancestry, target].map((entry) => entry.name).join(' -> ')
       throw new DependencyCycleError(`Dependency cycle: ${path}.`)
     }
 
-    const work = this.start(target)
+    const work = this.start(target, ancestry)
     this.cache ??= new Map()
     this.cache.set(target as Dependency<unknown>, work)
     return work as Promise<Value>
   }
 
-  private async start<Value>(target: Dependency<Value>): Promise<Value> {
-    const resolve = this.overrides?.get(target as Dependency<unknown>) ?? target.resolve
-
-    this.chain ??= []
-    this.chain.push(target as Dependency<unknown>)
-    try {
-      return await this.run(target, resolve as ValueResolver<Value> | ScopedResolver<Value>)
-    } finally {
-      // Popped when this dependency has fully resolved, not when the resolver returns: a cycle
-      // that closes after an `await` is still a cycle.
-      const at = this.chain.lastIndexOf(target as Dependency<unknown>)
-      if (at !== -1) this.chain.splice(at, 1)
-    }
-  }
-
-  private async run<Value>(
+  private async start<Value>(
     target: Dependency<Value>,
-    resolve: ValueResolver<Value> | ScopedResolver<Value>,
+    ancestry: readonly Dependency<unknown>[],
   ): Promise<Value> {
-    const produced = resolve(this.ctx, this.use)
+    const resolve = (this.overrides?.get(target as Dependency<unknown>) ?? target.resolve) as
+      | ValueResolver<Value>
+      | ScopedResolver<Value>
+
+    /**
+     * The `use` handed to this resolver knows what led here, so anything it asks for is checked
+     * against its own branch and not against whatever else the request is doing.
+     *
+     * The extended chain is built on first use rather than up front. Most dependencies have no
+     * sub-dependencies and never call this, and allocating an array for each of them was
+     * measurable — ~180ns on a route with one dependency.
+     */
+    let extended: readonly Dependency<unknown>[] | undefined
+    const branch: Use = (dependency) => {
+      extended ??= [...ancestry, target as Dependency<unknown>]
+      return this.useWith(dependency, extended)
+    }
+
+    const produced = resolve(this.ctx, branch)
 
     if (!isAsyncGenerator(produced)) return await produced
 
@@ -206,6 +219,51 @@ export class DependencyScope {
     this.open ??= []
     this.open.push({ name: target.name, generator })
     return first.value
+  }
+
+  /**
+   * Resolves a route's declared dependencies, concurrently.
+   *
+   * Independent dependencies are usually I/O — a query, a cache read, a call to something else.
+   * Resolving them one after another made a route wait for the sum rather than the slowest, which
+   * on three 10ms dependencies was 33ms instead of 11ms.
+   *
+   * `allSettled` rather than `all`: a rejection from `all` leaves its siblings running with
+   * nobody awaiting them, which is both an unhandled rejection and a generator that yielded with
+   * no one to tear it down. Settling everything means the scope knows about all of them before
+   * anything throws.
+   *
+   * The failure reported is the **first in declaration order**, not the first to reject, so the
+   * error a route produces does not depend on which of its dependencies happened to lose a race.
+   */
+  async resolveAll(
+    declared: Record<string, Dependency<unknown>>,
+  ): Promise<Record<string, unknown>> {
+    const names = Object.keys(declared)
+
+    // The single-dependency case is the common one and does not need the machinery.
+    if (names.length === 1) {
+      const only = names[0] as string
+      return { [only]: await this.use(declared[only] as Dependency<unknown>) }
+    }
+
+    const settled = await Promise.allSettled(
+      names.map((name) => this.use(declared[name] as Dependency<unknown>)),
+    )
+
+    const resolved: Record<string, unknown> = {}
+    let failure: { reason: unknown } | undefined
+
+    for (const [index, outcome] of settled.entries()) {
+      if (outcome.status === 'fulfilled') {
+        resolved[names[index] as string] = outcome.value
+      } else if (!failure) {
+        failure = { reason: outcome.reason }
+      }
+    }
+
+    if (failure) throw failure.reason
+    return resolved
   }
 
   /**

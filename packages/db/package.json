@@ -1,6 +1,6 @@
 {
   "name": "@theoven/db",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "The database contract for Oven — lifecycle, not queries",
   "keywords": [
     "bun",

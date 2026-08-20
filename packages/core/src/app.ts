@@ -964,14 +964,11 @@ export class App<Ext = unknown> implements BrickHost {
     try {
       if (schema?.deps) {
         scope = new DependencyScope(ctx, this.overrides)
-        const resolved: Record<string, unknown> = {}
-        for (const key in schema.deps) {
-          const target = schema.deps[key]
-          if (target) resolved[key] = await scope.use(target)
-        }
         // Plain assignment, not `defineProperty`: `deps` shadows nothing on the prototype, so
         // there is no getter to override — unlike the brick contributions above it.
-        ;(ctx as Context & { deps?: Record<string, unknown> }).deps = resolved
+        ;(ctx as Context & { deps?: Record<string, unknown> }).deps = await scope.resolveAll(
+          schema.deps,
+        )
       }
 
       return await this.runHandler(ctx, handler, schema, headOfGet)

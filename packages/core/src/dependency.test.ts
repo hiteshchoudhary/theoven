@@ -459,3 +459,104 @@ describe('cycles', () => {
     expect(await (await send(app, '/x')).text()).toBe('SS')
   })
 })
+
+/**
+ * A route's declared dependencies resolve concurrently.
+ *
+ * They are usually I/O — a query, a cache read, a call to something else — and resolving them one
+ * after another made a route wait for the sum rather than the slowest.
+ */
+describe('concurrency', () => {
+  test('independent dependencies overlap', async () => {
+    let inFlight = 0
+    let peak = 0
+    const gate = (name: string) =>
+      dependency(name, async () => {
+        inFlight++
+        peak = Math.max(peak, inFlight)
+        await Bun.sleep(5)
+        inFlight--
+        return name
+      })
+
+    const app = make().get('/x', { deps: { a: gate('a'), b: gate('b'), c: gate('c') } }, () => 'ok')
+    await send(app, '/x')
+
+    // Counted rather than timed: a wall-clock assertion is a flake waiting for a loaded machine.
+    expect(peak).toBe(3)
+  })
+
+  test('a sub-dependency still resolves before the dependency that uses it', async () => {
+    const order: string[] = []
+    const inner = dependency('inner', async () => {
+      await Bun.sleep(5)
+      order.push('inner')
+      return 'i'
+    })
+    const outer = dependency('outer', async (_ctx, use) => {
+      await use(inner)
+      order.push('outer')
+      return 'o'
+    })
+
+    const app = make().get('/x', { deps: { outer } }, () => 'ok')
+    await send(app, '/x')
+
+    expect(order).toEqual(['inner', 'outer'])
+  })
+
+  /**
+   * Which dependency fails a request must not depend on which one lost a race, or the same bug
+   * reports two different errors on two runs.
+   */
+  test('the failure reported is the first in declaration order, not the first to reject', async () => {
+    const slowFail = dependency('slowFail', async () => {
+      await Bun.sleep(10)
+      throw new Forbidden('declared first')
+    })
+    const fastFail = dependency('fastFail', () => {
+      throw new BadRequest('rejected first')
+    })
+
+    const app = make().get('/x', { deps: { slowFail, fastFail } }, () => 'ok')
+
+    expect((await send(app, '/x')).status).toBe(403)
+  })
+
+  test('a sibling that fails does not leave another dependency untorn-down', async () => {
+    const cleaned: string[] = []
+    const scoped = dependency('scoped', async function* () {
+      try {
+        yield 'value'
+      } finally {
+        cleaned.push('scoped')
+      }
+    })
+    const failing = dependency('failing', async () => {
+      await Bun.sleep(2)
+      throw new BadRequest('no')
+    })
+
+    const app = make().get('/x', { deps: { scoped, failing } }, () => 'ok')
+
+    expect((await send(app, '/x')).status).toBe(400)
+    expect(cleaned).toEqual(['scoped'])
+  })
+
+  test('a cycle in one branch is not confused by another resolving beside it', async () => {
+    const unrelated = dependency('unrelated', async () => {
+      await Bun.sleep(5)
+      return 'u'
+    })
+    // biome-ignore lint/suspicious/noExplicitAny: the cycle is the point
+    const loopA: any = dependency('loopA', async (_ctx, use) => use(loopB))
+    // biome-ignore lint/suspicious/noExplicitAny: see above
+    const loopB: any = dependency('loopB', async (_ctx, use) => use(loopA))
+
+    const app = make({ development: true }).get('/x', { deps: { unrelated, loopA } }, () => 'ok')
+    const body = await (await send(app, '/x')).text()
+
+    expect(body).toContain('Dependency cycle: loopA -> loopB -> loopA')
+    expect(body).not.toContain('unrelated')
+  })
+})

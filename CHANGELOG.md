@@ -4,6 +4,25 @@ Every package is versioned together. Pre-1.0, minor versions may break.
 
 ---
 
+## 0.4.1
+
+### Dependencies resolve concurrently
+
+A route's declared dependencies now start together. Three dependencies each doing 10 ms of I/O
+cost **~11 ms instead of ~33 ms** — a route waits for the slowest, not the sum.
+
+A failure is reported in **declaration order**, not by whichever rejected first, so the same bug
+does not produce different errors on different runs. Siblings are still torn down: a dependency
+that opened a transaction and a sibling that then threw will not leave it open.
+
+Costs ~400 ns on routes declaring more than one dependency; routes with one are unchanged.
+
+Doing this exposed that cycle detection used a single shared chain, which conflated concurrently
+resolving branches and attached unrelated dependencies to a reported cycle's path. It now tracks
+ancestry per branch.
+
+---
+
 ## 0.4.0
 
 ### WebSocket routes on a router
