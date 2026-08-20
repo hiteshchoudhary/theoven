@@ -850,7 +850,26 @@ its own nested 0.7.2 and still benchmarks.
 - [ ] Integration test strategy for Postgres/Redis/MinIO — testcontainers or docker-compose in CI?
 - [ ] Temp-file spill threshold for uploads — what default? (16MB?)
 
-## Next up — proposal 0002
+## Next phase — proposal 0003 (draft, awaiting decisions)
+
+[AI, sandboxes, ingest and payments](docs/proposals/0003-ai-sandboxes-ingest-payments.md).
+
+- [ ] **D38** — AI: wrap the Vercel AI SDK rather than write a model adapter per provider. The
+      obvious version reimplements something better-maintained that tracks a landscape changing
+      weekly; the defensible version is the infrastructure *around* inference.
+- [ ] **D39** — Payments: narrow contract (checkout, webhook verification, fetch, refund).
+      Subscriptions stay provider-specific — Paddle is a merchant of record and Stripe is not, and
+      a contract unifying them would lie to one.
+- [ ] **D40** — Sandboxes: isolation is a declared capability; timeouts and resource limits are
+      required arguments, not defaults.
+- [ ] **D41** — Which "ingest"? RAG document pipeline, or Inngest-style durable workflows. They
+      share a name and nothing else.
+
+Also surfaced while drafting: the middleware docs and `middleware.ts` both promise "a Redis-backed
+limiter arrives with `@theoven/queue`". It never arrived. `@theoven/ratelimit` is in the proposal
+to pay that off.
+
+## Proposal 0002 — done
 
 [Google and GitHub sign-in](docs/proposals/0002-social-login.md) — two optional flows beside the
 password flow, no second brick and no breaking migration.
