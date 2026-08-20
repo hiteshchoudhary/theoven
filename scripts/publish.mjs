@@ -120,3 +120,19 @@ if (bad.length > 0) {
   process.exit(1)
 }
 console.log(`All ${targets.length} verified: readable, with resolvable peer ranges.`)
+
+/**
+ * Tags what was published.
+ *
+ * `changeset publish` did this; taking over the publish step meant taking this over too, and
+ * the first run without it left the broken 0.6.0 tagged and the 0.6.1 that fixed it untagged —
+ * exactly backwards for anyone bisecting later. Tagged only after the registry check passes, so
+ * a tag means "this version is out and installable".
+ */
+for (const one of published) {
+  const tag = one
+  const existing = Bun.spawnSync({ cmd: ['git', 'tag', '-l', tag], cwd: ROOT, stdout: 'pipe' })
+  if (existing.stdout.toString().trim()) continue
+  Bun.spawnSync({ cmd: ['git', 'tag', tag], cwd: ROOT })
+}
+console.log(`Tagged ${published.length}. Push them with: git push --tags`)
