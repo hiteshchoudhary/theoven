@@ -20,18 +20,23 @@ Add a brick. Oven does every piece of setup, wiring, connection management and l
 handling for you, then hands you a small, obvious, fully-typed API on the request context.
 
 ```ts
-// oven.config.ts
-import { defineConfig } from '@theoven/core'
-
-export default defineConfig({
-  routes:  { dir: './src/routes' },
-  db:      { driver: 'postgres', url: process.env.DATABASE_URL },
-  auth:    { providers: ['github', 'google'] },
-  storage: { driver: 's3', bucket: 'uploads' },
-  mail:    { driver: 'resend' },
-  queue:   { driver: 'redis' },
-})
+// src/app.ts — bricks chain, and each one's type flows into the context (D5)
+export const app = createApp()
+  .use(db(drizzlePostgres({ url: env.string('DATABASE_URL'), schema })))
+  .use(auth(basicAuth({ db: client, secret: env.string('AUTH_SECRET') })))
+  .use(storage(s3Storage({ bucket: 'uploads' })))
+  .use(mail(resendMail({ apiKey: env.string('RESEND_KEY'), from: 'hi@acme.com' })))
+  .use(queue(redisQueue(), { jobs: [resizeAvatar] }))
 ```
+
+`defineConfig({ ...appOptions, bricks: [...] })` is the flat surface over the same mechanism, and
+returns an `App` typed as `App` rather than carrying each contribution — a runtime array cannot
+express that in the type system, which is why both surfaces exist.
+
+> **Note.** This block used to show a `defineConfig({ db: { driver }, auth: { providers } })`
+> shape that was never built. D5 settled on chained bricks with `defineConfig` as sugar over
+> them; the aspirational version outlived the decision that replaced it, in this file and in the
+> README, until 0.2.0.
 
 ```ts
 // src/routes/users/[id]/avatar.post.ts
@@ -42,9 +47,10 @@ export const params = z.object({ id: z.uuid() })
 export const body   = z.object({ file: z.file() })
 
 export default async ({ params, body, user, storage, db, queue }) => {
-  const { url } = await storage.upload(`avatars/${params.id}`, body.file)
-  await queue.dispatch('resize-avatar', { url })
-  return db.user.update(params.id, { avatar: url })
+  const { key } = await storage.upload(`avatars/${params.id}`, body.file)
+  await queue.dispatch(resizeAvatar, { key })
+  // `ctx.db` is the Drizzle client itself — no invented query API (D16).
+  return db.update(users).set({ avatar: key }).where(eq(users.id, params.id)).returning()
 }
 ```
 
@@ -188,16 +194,31 @@ teach the framework.
 
 ```
 oven/
-├─ packages/
-│  ├─ core/         @theoven/core     router, context, bricks, validation, OpenAPI
-│  ├─ auth/         @theoven/auth     better-auth integration
-│  ├─ db/           @theoven/db       drizzle integration + migrations
-│  ├─ storage/      @theoven/storage  S3 / R2 / MinIO via Bun.S3Client
-│  ├─ mail/         @theoven/mail     Resend / SES / SMTP + dev preview inbox
-│  ├─ queue/        @theoven/queue    background jobs, retries, DLQ, cron
-│  └─ cli/          @theoven/cli      bin: `oven`, plus `bun create oven`
+├─ packages/                          18 published packages
+│  ├─ core/               router, context, bricks, validation, OpenAPI, WS/SSE,
+│  │                      routers (D30), dependencies (D31)
+│  ├─ cli/                bin: `oven` — dev, build, routes, db, worker, doctor
+│  ├─ create-theoven/     `bun create theoven my-app` (D27)
+│  ├─ db/                 contract — connect, health, close, transactions (D16)
+│  │  ├─ db-drizzle/      SQLite + Postgres
+│  │  └─ db-mongoose/     MongoDB — the adapter that proves the contract
+│  ├─ auth/               contract + the security-critical flows (D26)
+│  │  ├─ auth-basic/      email/password over Drizzle
+│  │  ├─ auth-mongo/      the same flows over Mongoose (D25)
+│  │  ├─ auth-clerk/      Clerk-hosted, verified locally — mounts nothing
+│  │  └─ auth-better/     better-auth, mounted wholesale
+│  ├─ storage/            contract + S3 and disk drivers
+│  │  ├─ storage-bunny/   Bunny.net
+│  │  └─ storage-imagekit/ ImageKit, plus transformation URLs
+│  ├─ mail/               Resend / SES / SMTP + dev preview inbox
+│  ├─ queue/              jobs, retries, DLQ, cron — memory / Redis / Postgres
+│  ├─ cache/              tags + stampede protection — memory / Redis
+│  └─ telemetry/          OpenTelemetry spans, named by route pattern
 ├─ apps/
-│  └─ web/          theoven.app — Astro + Starlight (landing + docs)
+│  ├─ web/          theoven.app — Astro + Starlight docs
+│  └─ landing/      the landing page, built into the same site
+├─ docs/proposals/  design docs for anything that needs a decision first
+├─ benchmarks/      http (real sockets), dispatch, router
 ├─ examples/
 │  ├─ minimal/      smallest possible app
 │  └─ kitchen-sink/ every module enabled, used as an integration test

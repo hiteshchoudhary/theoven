@@ -121,7 +121,28 @@ const known = new Map()
 let checked = 0
 let imports = 0
 
-for (const file of mdxFiles(DOCS).sort()) {
+/**
+ * Every README as well as the docs site.
+ *
+ * The root README claimed a `defineConfig({ db: { driver } })` API that never existed, and said
+ * "nothing is published to npm yet" long after eighteen packages were. It survived because this
+ * check only ever looked at `apps/web`. The front page is the most-read documentation there is.
+ */
+function readmes() {
+  const found = [join(ROOT, 'README.md')]
+  const packages = join(ROOT, 'packages')
+  for (const entry of readdirSync(packages)) {
+    const path = join(packages, entry, 'README.md')
+    try {
+      if (statSync(path).isFile()) found.push(path)
+    } catch {
+      // A package without a README is caught by check-publish, not here.
+    }
+  }
+  return found
+}
+
+for (const file of [...mdxFiles(DOCS), ...readmes()].sort()) {
   const relative = file.replace(`${ROOT}/`, '')
   const source = readFileSync(file, 'utf8')
 
