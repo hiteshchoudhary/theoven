@@ -832,10 +832,25 @@ its own nested 0.7.2 and still benchmarks.
 
 - [x] ~~`ctx` as plain object or class with getters?~~ **Class.** Lazy getters need a
       prototype, and a shared hidden class keeps construction to one allocation.
-- [x] ~~Response validation in prod: on or off by default?~~ **Off.** It validates our own
-      code, not untrusted input, and costs a check on every success. Opt in with
-      `validateResponses: true`.
+- [~] ~~Response validation in prod: on or off by default?~~ **Off** — but **reopened** for
+      *serialisation* rather than validation, see
+      [proposal 0001](docs/proposals/0001-serialization-routers-di.md). The original answer
+      covers checking our own output for drift, which is genuinely a development concern. It does
+      not cover *filtering* the output, which is a security control: Zod already strips unknown
+      keys and we discard the result, so a `passwordHash` that reaches a handler's return value
+      reaches the client. Awaiting a decision on D29.
 - [x] ~~Ship our own logger or wrap pino?~~ **Our own, pluggable.** A small built-in so
       `ctx.log` always works with zero setup; `createApp({ logger })` swaps in pino.
 - [ ] Integration test strategy for Postgres/Redis/MinIO — testcontainers or docker-compose in CI?
 - [ ] Temp-file spill threshold for uploads — what default? (16MB?)
+
+## Next up — proposal 0001
+
+[Response serialisation, routers, dependencies](docs/proposals/0001-serialization-routers-di.md)
+— the three gaps against FastAPI that matter for larger codebases. Awaiting decisions D29–D31.
+
+- [ ] **Bug, independent of the proposal:** a handler returning a `Response` 500s when its route
+      declares a `response` schema — the `Response` object is validated against the schema.
+      Development-only today because `validateResponses` is off in production; it becomes an
+      outage the moment serialisation is enabled. `ReadableStream`, `Blob` and `Bun.file` will
+      behave the same way. Fix: skip validation and serialisation for those return types.
