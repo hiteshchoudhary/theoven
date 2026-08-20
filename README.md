@@ -154,7 +154,7 @@ you already wrote.
 
 ## Status
 
-**0.6.0, on npm.** Core, the CLI and twenty-two bricks are published and installable.
+**0.6.1, on npm.** Core, the CLI and twenty-two bricks are published and installable.
 
 Pre-1.0, so APIs can still change between minor versions — that freedom is deliberate while the
 contracts settle. See [CHANGELOG.md](./CHANGELOG.md) for what each release changed.

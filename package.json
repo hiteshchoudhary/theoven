@@ -16,14 +16,15 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "changeset": "changeset",
-    "release": "changeset publish",
+    "release": "bun run check:publish && bun scripts/publish.mjs",
     "docs:build": "bun run --cwd apps/web build",
     "docs:preview": "bun run --cwd apps/web preview",
     "site:build": "bash scripts/build-site.sh",
     "site:preview": "bun x serve dist",
     "check:links": "bun scripts/check-links.mjs",
     "check:docs": "bun scripts/check-docs.mjs",
-    "check:publish": "bun scripts/check-publish.mjs"
+    "check:publish": "bun scripts/check-publish.mjs",
+    "release:dry": "bun scripts/publish.mjs --dry-run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.9",

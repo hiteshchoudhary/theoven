@@ -1,6 +1,6 @@
 {
   "name": "@theoven/image",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Image processing for Oven on Bun.Image — resize, convert and guard user uploads with no dependencies",
   "keywords": [
     "bun",

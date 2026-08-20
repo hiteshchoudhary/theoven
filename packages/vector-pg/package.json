@@ -1,6 +1,6 @@
 {
   "name": "@theoven/vector-pg",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "pgvector as a vector store for Oven",
   "keywords": [
     "bun",

@@ -1,5 +1,12 @@
 # @theoven/queue
 
+## 0.6.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @theoven/core@0.6.1
+
 ## 0.6.0
 
 ### Patch Changes

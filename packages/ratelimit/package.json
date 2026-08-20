@@ -1,6 +1,6 @@
 {
   "name": "@theoven/ratelimit",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Rate limiting for Oven that counts across every instance \u2014 Redis or Postgres",
   "keywords": [
     "bun",

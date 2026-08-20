@@ -1,5 +1,21 @@
 # @theoven/core
 
+## 0.6.1
+
+### Patch Changes
+
+- Fixes 0.6.0, which was published with `"@theoven/core": "workspace:^"` in `peerDependencies` on
+  every package. That is a protocol no installer resolves, so 0.6.0 cannot be installed. Use
+  0.6.1; 0.6.0 has been deprecated on npm.
+  
+  The cause: `changeset publish` shells out to **npm**, and npm does not rewrite Bun's `workspace:`
+  protocol — `bun publish` does. `check-publish.mjs` had documented this exact trap in its own
+  docstring for months, and still missed it, because it packed with `bun pm pack` while the release
+  ran npm. The guard was testing a different code path than the release used.
+  
+  `bun run release` now runs the guard and then `bun scripts/publish.mjs`, which publishes with
+  `bun publish` — one tool for both, so what is checked is what ships.
+
 ## 0.6.0
 
 ### Minor Changes

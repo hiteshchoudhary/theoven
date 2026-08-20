@@ -1,6 +1,6 @@
 {
   "name": "@theoven/vector",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Vector search for Oven \u2014 an embedded scan, pgvector or Qdrant behind one contract",
   "keywords": [
     "bun",

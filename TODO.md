@@ -2,7 +2,7 @@
 
 **Current state:** **Phases 0–5 complete**, plus the post-1.0 stretch (real-time, cache, CDN
 storage, telemetry) and proposal 0001 (response filtering, routers, dependencies).
-**All 25 packages are published at 0.6.0** and `theoven.app` is live — core, the CLI and
+**All 25 packages are published at 0.6.1** and `theoven.app` is live — core, the CLI and
 twenty-two bricks, including `webhooks`, `ratelimit`, `vector` (+pg, +qdrant), `ai` and `image`.
 1680 tests.
 

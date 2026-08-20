@@ -1,6 +1,6 @@
 {
   "name": "@theoven/ai",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "The infrastructure around AI SDK calls — SSE streaming, caching, token accounting and budgets",
   "keywords": [
     "bun",
