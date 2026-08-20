@@ -147,18 +147,16 @@ you already wrote.
 
 ## Status
 
-**0.2.0, on npm.** Core, the CLI and fifteen bricks are published and installable.
+**0.3.0, on npm.** Core, the CLI and fifteen bricks are published and installable.
 
 Pre-1.0, so APIs can still change between minor versions — that freedom is deliberate while the
-contracts settle. Upgrading to 0.2.0 has two breaking changes:
+contracts settle. See [CHANGELOG.md](./CHANGELOG.md) for what each release changed.
 
-- A `response` schema now **filters** the body rather than only checking it. Fields it does not
-  declare are no longer sent. Add them, or set `serializeResponses: false`.
-- The radix tree exported as `Router` is now `RadixRouter`; `Router` names the route group you
-  build.
-
-If you are on **0.1.2 or earlier, upgrade**: a route file declaring `export const auth = true`
-was not guarded and answered anonymously with a `200`.
+- **On 0.1.2 or earlier — upgrade.** A route file declaring `export const auth = true` was not
+  guarded and answered anonymously with a `200`.
+- **Upgrading to 0.2.0:** a `response` schema now **filters** the body rather than only checking
+  it, and the radix tree exported as `Router` is now `RadixRouter`.
+- **Upgrading to 0.3.0:** `/_oven/*` is excluded from the generated OpenAPI document.
 
 ## Contributing
 

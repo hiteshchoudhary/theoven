@@ -115,7 +115,7 @@ are per-request values that compose, cache within a request, and clean up after 
 
 ## Status
 
-**0.2.0, on npm.** Everything documented here is published and installable:
+**0.3.0, on npm.** Everything documented here is published and installable:
 
 ```bash
 bun create theoven my-app --db sqlite --auth basic
@@ -124,7 +124,9 @@ bun create theoven my-app --db sqlite --auth basic
 Core, the CLI, and fifteen bricks — database (Drizzle, Mongoose), auth (email/password on SQL or
 Mongo, Clerk, better-auth), storage (S3, disk, Bunny, ImageKit), mail, queues, cache and
 OpenTelemetry. See the [brick catalogue](/docs/bricks/) for what each one does, and the
-[roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for what is next.
+[roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for what is next, and the
+[changelog](https://github.com/hiteshchoudhary/theoven/blob/main/CHANGELOG.md) for what each
+release changed.
 
 <Aside type="caution" title="Upgrading">
   **From 0.1.2 or earlier — do it.** A route file declaring `export const auth = true` was **not
@@ -137,6 +139,10 @@ OpenTelemetry. See the [brick catalogue](/docs/bricks/) for what each one does, 
     does not declare are no longer sent. Add them, or set `serializeResponses: false`.
   - The radix tree exported as `Router` is now `RadixRouter`; `Router` names the
     [route group](/docs/reference/routers/) you build. Almost nobody imports the former.
+
+  **To 0.3.0**, one: `/_oven/*` — the mail preview inbox and the queue dashboard — no longer
+  appears in the generated OpenAPI document. It is still served; it was never meant to be in a
+  client generated from your API.
 </Aside>
 
 Pre-1.0, so APIs can still change between minor versions — that freedom is deliberate while the

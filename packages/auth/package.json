@@ -1,6 +1,6 @@
 {
   "name": "@theoven/auth",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The auth contract for Oven — identity, guards, policies, and the flows every storage brick shares",
   "keywords": [
     "bun",
