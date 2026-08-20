@@ -1,6 +1,6 @@
 {
   "name": "@theoven/auth-mongo",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Email and password auth for Oven, stored in MongoDB with Mongoose",
   "keywords": [
     "bun",
@@ -22,7 +22,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

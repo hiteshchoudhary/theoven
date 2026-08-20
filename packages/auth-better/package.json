@@ -1,7 +1,7 @@
 {
   "name": "@theoven/auth-better",
-  "version": "0.5.1",
-  "description": "better-auth for Oven — it mounts its own routes and owns its sessions",
+  "version": "0.5.2",
+  "description": "better-auth for Oven \u2014 it mounts its own routes and owns its sessions",
   "keywords": [
     "bun",
     "oven",
@@ -21,7 +21,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

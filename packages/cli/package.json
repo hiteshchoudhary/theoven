@@ -1,7 +1,7 @@
 {
   "name": "@theoven/cli",
-  "version": "0.5.1",
-  "description": "The Oven CLI — scaffold, run, build and inspect Oven apps",
+  "version": "0.5.2",
+  "description": "The Oven CLI \u2014 scaffold, run, build and inspect Oven apps",
   "keywords": [
     "bun",
     "oven",
@@ -20,7 +20,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "bin": {
     "oven": "./src/index.ts"

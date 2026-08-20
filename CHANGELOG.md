@@ -4,6 +4,29 @@ Every package is versioned together. Pre-1.0, minor versions may break.
 
 ---
 
+## 0.5.2
+
+### Fixed — deep imports actually work now
+
+0.5.1 removed 56 internal exports and told you that reaching one anyway meant importing from its
+file:
+
+```ts
+import { parseCron } from '@theoven/queue/src/cron'
+```
+
+That did not work. Every package's `exports` map allowed only `.` and a couple of named subpaths,
+so the import failed to resolve — a documented escape hatch that was not one. Caught by running the
+example from the published package rather than from the repo.
+
+Every package now exposes `./src/*`. It carries **no version promise** — an internal can be
+renamed or deleted in a patch, which is the whole distinction from the root export.
+
+`check-publish` now understands wildcard subpaths, so an export pattern that matches nothing in the
+tarball fails the release instead of shipping.
+
+---
+
 ## 0.5.1
 
 ### Breaking — 56 internal exports removed

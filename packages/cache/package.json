@@ -1,7 +1,7 @@
 {
   "name": "@theoven/cache",
-  "version": "0.5.1",
-  "description": "Caching for Oven — memory and Redis, with tag invalidation and stampede protection",
+  "version": "0.5.2",
+  "description": "Caching for Oven \u2014 memory and Redis, with tag invalidation and stampede protection",
   "keywords": [
     "bun",
     "oven",
@@ -22,7 +22,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/conformance.ts"
+    "./testing": "./src/conformance.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

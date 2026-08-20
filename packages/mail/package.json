@@ -1,7 +1,7 @@
 {
   "name": "@theoven/mail",
-  "version": "0.5.1",
-  "description": "Transactional email for Oven — console and memory drivers included, Resend and SMTP when configured",
+  "version": "0.5.2",
+  "description": "Transactional email for Oven \u2014 console and memory drivers included, Resend and SMTP when configured",
   "keywords": [
     "bun",
     "oven",
@@ -20,7 +20,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

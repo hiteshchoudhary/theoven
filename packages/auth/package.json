@@ -1,7 +1,7 @@
 {
   "name": "@theoven/auth",
-  "version": "0.5.1",
-  "description": "The auth contract for Oven — identity, guards, policies, and the flows every storage brick shares",
+  "version": "0.5.2",
+  "description": "The auth contract for Oven \u2014 identity, guards, policies, and the flows every storage brick shares",
   "keywords": [
     "bun",
     "oven",
@@ -22,7 +22,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/store-conformance.ts"
+    "./testing": "./src/store-conformance.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

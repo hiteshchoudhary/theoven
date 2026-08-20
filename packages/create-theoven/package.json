@@ -1,7 +1,7 @@
 {
   "name": "create-theoven",
-  "version": "0.5.1",
-  "description": "Scaffold an Oven app — bun create theoven my-app",
+  "version": "0.5.2",
+  "description": "Scaffold an Oven app \u2014 bun create theoven my-app",
   "keywords": [
     "bun",
     "oven",
@@ -21,7 +21,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "bin": {
     "create-theoven": "./src/index.ts"

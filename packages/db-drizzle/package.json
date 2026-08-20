@@ -1,7 +1,7 @@
 {
   "name": "@theoven/db-drizzle",
-  "version": "0.5.1",
-  "description": "Drizzle ORM for Oven — SQLite via bun:sqlite, Postgres, MySQL",
+  "version": "0.5.2",
+  "description": "Drizzle ORM for Oven \u2014 SQLite via bun:sqlite, Postgres, MySQL",
   "keywords": [
     "bun",
     "oven",
@@ -21,7 +21,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

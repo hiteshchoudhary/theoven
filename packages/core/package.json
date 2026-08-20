@@ -1,6 +1,6 @@
 {
   "name": "@theoven/core",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Router, context, bricks, validation and OpenAPI for Oven",
   "keywords": [
     "bun",
@@ -23,7 +23,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

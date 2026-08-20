@@ -1,7 +1,7 @@
 {
   "name": "@theoven/queue",
-  "version": "0.5.1",
-  "description": "Background jobs, retries, dead-letter and cron for Oven — in-memory, Redis or Postgres",
+  "version": "0.5.2",
+  "description": "Background jobs, retries, dead-letter and cron for Oven \u2014 in-memory, Redis or Postgres",
   "keywords": [
     "bun",
     "oven",
@@ -24,7 +24,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/driver-conformance.ts"
+    "./testing": "./src/driver-conformance.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

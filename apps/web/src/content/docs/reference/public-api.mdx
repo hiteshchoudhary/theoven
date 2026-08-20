@@ -166,6 +166,15 @@ the next person can see it and a version bump can break it without anyone claimi
 [`raw` escape hatches](/docs/reference/bricks/#raw--the-escape-hatch) exist for the same reason and
 carry the same warning.
 
+<Aside type="caution" title="Deep imports carry no version promise">
+  `./src/*` is a real subpath from 0.5.2 onward, and that is the entire distinction from the root
+  export: the root is a promise, this is a door. An internal can be renamed, resplit or deleted in
+  any release, including a patch.
+
+  It was **not** a real subpath in 0.5.1 — that release documented this and the `exports` map did
+  not allow it, so the import failed. Fixed in 0.5.2.
+</Aside>
+
 ## The rule going forward
 
 An export needs a caller outside the framework, and a sentence explaining who. If neither exists,

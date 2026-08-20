@@ -1,7 +1,7 @@
 {
   "name": "@theoven/db",
-  "version": "0.5.1",
-  "description": "The database contract for Oven — lifecycle, not queries",
+  "version": "0.5.2",
+  "description": "The database contract for Oven \u2014 lifecycle, not queries",
   "keywords": [
     "bun",
     "oven",
@@ -20,7 +20,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
   },
   "files": [
     "src",

@@ -106,8 +106,22 @@ for (const name of readdirSync(PACKAGES).sort()) {
 
   // Every export has to resolve inside the tarball, or the package installs and cannot import.
   for (const [subpath, target] of Object.entries(shipped.exports ?? {})) {
-    const file = `package/${String(target).replace(/^\.\//, '')}`
-    if (!listing.includes(file)) {
+    const path = String(target).replace(/^\.\//, '')
+
+    if (path.includes('*')) {
+      // A wildcard subpath — `./src/*` for deliberate deep imports (D37). It matches no single
+      // file, so the check is that it matches *something*: a pattern pointing at a directory the
+      // tarball does not ship is a deep-import path that 404s on every use.
+      const prefix = `package/${path.split('*')[0]}`
+      if (!listing.some((file) => file.startsWith(prefix) && file.endsWith('.ts'))) {
+        problems.push(
+          `${manifest.name}: exports["${subpath}"] → ${target} matches nothing in the tarball`,
+        )
+      }
+      continue
+    }
+
+    if (!listing.includes(`package/${path}`)) {
       problems.push(`${manifest.name}: exports["${subpath}"] → ${target}, which is not in the tarball`)
     }
   }
