@@ -1,6 +1,6 @@
 {
   "name": "@theoven/cache",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Caching for Oven \u2014 memory and Redis, with tag invalidation and stampede protection",
   "keywords": [
     "bun",

@@ -120,18 +120,25 @@ are per-request values that compose, cache within a request, and clean up after 
 
 ## Status
 
-**0.5.2, on npm.** Everything documented here is published and installable:
+**0.6.0, on npm.** Everything documented here is published and installable:
 
 ```bash
 bun create theoven my-app --db sqlite --auth basic
 ```
 
-Core, the CLI, and fifteen bricks — database (Drizzle, Mongoose), auth (email/password on SQL or
-Mongo, Clerk, better-auth), storage (S3, disk, Bunny, ImageKit), mail, queues, cache and
-OpenTelemetry. See the [brick catalogue](/docs/bricks/) for what each one does, and the
+Core, the CLI, and twenty-two bricks — database (Drizzle, Mongoose), auth (email/password on SQL
+or Mongo, Clerk, better-auth), storage (S3, disk, Bunny, ImageKit), mail, queues, cache,
+OpenTelemetry, webhooks, rate limiting, vector search (embedded, pgvector, Qdrant), AI and
+images. See the [brick catalogue](/docs/bricks/) for what each one does, and the
 [roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for what is next, and the
 [changelog](https://github.com/hiteshchoudhary/theoven/blob/main/CHANGELOG.md) for what each
 release changed.
+
+<Aside type="note" title="0.6.0 requires Bun 1.4">
+  Every package now declares `"bun": ">=1.4.0"`. Nothing changed for existing code — the whole
+  suite passed unchanged on the new runtime — but an older Bun will refuse to install. The bump
+  is what lets [`image`](/docs/bricks/image/) use `Bun.Image` rather than a native module.
+</Aside>
 
 <Aside type="caution" title="Upgrading">
   **From 0.1.2 or earlier — do it.** A route file declaring `export const auth = true` was **not

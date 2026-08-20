@@ -1,6 +1,6 @@
 {
   "name": "@theoven/queue",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Background jobs, retries, dead-letter and cron for Oven \u2014 in-memory, Redis or Postgres",
   "keywords": [
     "bun",

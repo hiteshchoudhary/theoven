@@ -1,10 +1,10 @@
 # Oven — Task Tracker
 
 **Current state:** **Phases 0–5 complete**, plus the post-1.0 stretch (real-time, cache, CDN
-storage, telemetry) and proposal 0001 (response filtering, routers, dependencies). Eighteen
-packages are published at **0.2.0** and `theoven.app` is live; **`webhooks`, `ratelimit`,
-`vector` (+pg, +qdrant), `ai` and `image` are built and unpublished at 0.5.2** — 25 packages in
-the repo, 1680 tests.
+storage, telemetry) and proposal 0001 (response filtering, routers, dependencies).
+**All 25 packages are published at 0.6.0** and `theoven.app` is live — core, the CLI and
+twenty-two bricks, including `webhooks`, `ratelimit`, `vector` (+pg, +qdrant), `ai` and `image`.
+1680 tests.
 
 The whole repo now requires **Bun 1.4** (D9), which is what `@theoven/image` is built on.
 

@@ -1,6 +1,6 @@
 {
   "name": "@theoven/vector-qdrant",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Qdrant as a vector store for Oven",
   "keywords": [
     "bun",

@@ -1,6 +1,6 @@
 {
   "name": "@theoven/storage-imagekit",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "ImageKit for Oven \u2014 uploads through the storage contract, plus transformation URLs",
   "keywords": [
     "bun",

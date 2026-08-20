@@ -1,6 +1,6 @@
 {
   "name": "@theoven/auth-better",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "better-auth for Oven \u2014 it mounts its own routes and owns its sessions",
   "keywords": [
     "bun",

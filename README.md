@@ -103,16 +103,11 @@ CORS, rate limiting, compression and security headers ship configured rather tha
 | [`@theoven/queue`](https://www.npmjs.com/package/@theoven/queue) | jobs, retries, backoff, dead letter, cron — memory, Redis or Postgres |
 | [`@theoven/cache`](https://www.npmjs.com/package/@theoven/cache) | tag invalidation and stampede protection — memory or Redis |
 | [`@theoven/telemetry`](https://www.npmjs.com/package/@theoven/telemetry) | OpenTelemetry spans named by route pattern |
-
-**Built, not yet published** — in this repo, shipping in the next release
-
-| Package | |
-|---|---|
-| `@theoven/webhooks` | signature verification for inbound deliveries, with replay windows |
-| `@theoven/ratelimit` | counting that holds across instances, atomically — Redis or Postgres |
-| `@theoven/vector` | one contract over an embedded scan, pgvector and Qdrant |
-| `@theoven/ai` | SSE streaming, caching, token accounting and budgets around the AI SDK |
-| `@theoven/image` | resize, convert and guard uploads on `Bun.Image` — no native module |
+| [`@theoven/webhooks`](https://www.npmjs.com/package/@theoven/webhooks) | signature verification for inbound deliveries, with replay windows |
+| [`@theoven/ratelimit`](https://www.npmjs.com/package/@theoven/ratelimit) | counting that holds across instances, atomically — Redis or Postgres |
+| [`@theoven/vector`](https://www.npmjs.com/package/@theoven/vector) | one contract over an embedded scan · [`vector-pg`](https://www.npmjs.com/package/@theoven/vector-pg) · [`vector-qdrant`](https://www.npmjs.com/package/@theoven/vector-qdrant) |
+| [`@theoven/ai`](https://www.npmjs.com/package/@theoven/ai) | SSE streaming, caching, token accounting and budgets around the AI SDK |
+| [`@theoven/image`](https://www.npmjs.com/package/@theoven/image) | resize, convert and guard uploads on `Bun.Image` — no native module |
 
 ## Beyond the batteries
 
@@ -159,7 +154,7 @@ you already wrote.
 
 ## Status
 
-**0.5.2, on npm.** Core, the CLI and fifteen bricks are published and installable.
+**0.6.0, on npm.** Core, the CLI and twenty-two bricks are published and installable.
 
 Pre-1.0, so APIs can still change between minor versions — that freedom is deliberate while the
 contracts settle. See [CHANGELOG.md](./CHANGELOG.md) for what each release changed.
@@ -169,6 +164,9 @@ contracts settle. See [CHANGELOG.md](./CHANGELOG.md) for what each release chang
 - **Upgrading to 0.2.0:** a `response` schema now **filters** the body rather than only checking
   it, and the radix tree exported as `Router` is now `RadixRouter`.
 - **Upgrading to 0.3.0:** `/_oven/*` is excluded from the generated OpenAPI document.
+- **Upgrading to 0.6.0:** every package now requires **Bun 1.4 or newer**. Nothing else
+  changed for existing code — the whole suite passed unchanged on the new runtime — but an
+  older Bun will refuse to install.
 
 ## Contributing
 

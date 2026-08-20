@@ -1,6 +1,6 @@
 {
   "name": "create-theoven",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Scaffold an Oven app \u2014 bun create theoven my-app",
   "keywords": [
     "bun",

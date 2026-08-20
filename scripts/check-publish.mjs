@@ -139,7 +139,8 @@ for (const name of readdirSync(PACKAGES).sort()) {
   console.log(`  ${shipped.name}@${shipped.version} — ${listing.filter(Boolean).length} files`)
 }
 
-// Not a rule npm enforces, but this repo releases in lockstep, and a straggler on an old version
+// Not a rule npm enforces, but this repo releases in lockstep (see `fixed` in
+// .changeset/config.json), and a straggler on an old version
 // means someone's install resolves a peer range to a package that predates the API it needs.
 const distinct = new Set(versions.values())
 if (distinct.size > 1) {
