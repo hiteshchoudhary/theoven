@@ -4,6 +4,45 @@ Every package is versioned together. Pre-1.0, minor versions may break.
 
 ---
 
+## 0.5.0
+
+### Sign in with Google and GitHub
+
+```ts
+basicAuth({
+  db: client,
+  secret: env.string('AUTH_SECRET'),
+  callbackUrl: (provider) => `${env.string('APP_URL')}/auth/oauth/${provider}/callback`,
+  oauth: { google: { provider: google, clientId, clientSecret } },
+})
+```
+
+Two optional flows beside the password flow. Each configured provider mounts two endpoints and
+nothing else, and an OAuth sign-in issues the **same** session a password login does — so
+`auth: true`, your policies, logout and sign-out-everywhere keep working untouched.
+
+`password: false` mounts no `signup`, `login` or password-reset endpoints, for an application that
+authenticates only through providers. The session endpoints stay.
+
+**Entirely additive.** An app that never configures `oauth` gets no new tables, no new endpoints
+and no migration. Users created by a provider are stored with an *unusable* password rather than a
+null one, so `auth_users` is untouched.
+
+The rules that matter:
+
+- Linking to an existing user happens **only** when the provider verified the email address. A
+  bare email match is an account-takeover path (D33).
+- A provider returning no verified email is **refused** rather than creating an account that could
+  never be linked or recovered (D34).
+- Provider tokens are **not stored** unless you opt in per provider with `storeTokens` (D35).
+- Identity is keyed on the provider's subject id, never the email, so changing your address at
+  Google does not create a second user.
+
+Adding it takes two steps: add `@theoven/auth-basic/schema/accounts` to your schema, and configure
+a provider. Doing one without the other fails at **boot**, naming both fixes.
+
+---
+
 ## 0.4.1
 
 ### Dependencies resolve concurrently
