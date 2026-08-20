@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "oven-monorepo",
@@ -207,6 +208,16 @@
         "@theoven/core": "workspace:^",
         "@theoven/db": "workspace:^",
         "mongoose": "^8.0.0",
+      },
+    },
+    "packages/image": {
+      "name": "@theoven/image",
+      "version": "0.5.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
       },
     },
     "packages/mail": {
@@ -755,6 +766,8 @@
     "@theoven/example-kitchen-sink": ["@theoven/example-kitchen-sink@workspace:examples/kitchen-sink"],
 
     "@theoven/example-minimal": ["@theoven/example-minimal@workspace:examples/minimal"],
+
+    "@theoven/image": ["@theoven/image@workspace:packages/image"],
 
     "@theoven/mail": ["@theoven/mail@workspace:packages/mail"],
 

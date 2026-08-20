@@ -1,0 +1,169 @@
+---
+title: Oven on Bun 1.4
+description: We moved the whole monorepo to Bun 1.4, shipped an image brick built on Bun.Image, and re-ran the benchmarks — including the one that now says something we would rather it did not.
+sidebar:
+  order: 100
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+*21 August 2026*
+
+[Bun 1.4](https://bun.com/blog/bun-v1.4) landed yesterday. We have moved every package to it,
+shipped a new brick on the back of it, and re-run the benchmarks. One of those benchmarks now
+contradicts something this site used to claim, so let us start there.
+
+## We were beating Hono on dispatch. We are not any more.
+
+Our [benchmarks page](/docs/guides/benchmarks/) has always published two tables: dispatch
+overhead (`Request` in, `Response` out, no socket) and real HTTP throughput. On Bun 1.2.23, Oven
+dispatched faster than Hono on a parameterised route and on a 404, and lost on static routes.
+
+On Bun 1.4:
+
+| scenario | oven | hono | previously: oven | hono |
+| --- | ---: | ---: | ---: | ---: |
+| static root | 1051 ns | 406 ns | 1258 ns | 1086 ns |
+| param + json | 1255 ns | 916 ns | 1519 ns | 1838 ns |
+| deep static | 1176 ns | 477 ns | 1423 ns | 1193 ns |
+| 404 miss | 1228 ns | 956 ns | 1530 ns | 1922 ns |
+
+Oven got about 17% faster. Hono got **2.0–2.7×** faster, and now leads every scenario.
+
+The likely cause is in Bun's own release notes: 1.4 rewrote the RegExp engine, with figures like
+138× on `marked.parse()`. Hono's router is regular-expression driven. Ours walks a radix tree by
+hand, character by character, which is why a faster RegExp engine does comparatively little for
+us. A runtime improvement that lands squarely on a competitor's hot path is still a real result,
+and we are not going to write it up as an asterisk.
+
+**What did not change is the table that describes a deployment.** At the socket:
+
+| framework | runtime | static text req/s | param + json req/s |
+| --- | --- | ---: | ---: |
+| hono | bun | 94,765 | 95,911 |
+| **oven** | **bun** | **93,805** | **94,087** |
+| fastify | node | 80,084 | 77,824 |
+| express | node | 18,155 | 18,072 |
+
+A 2.6× dispatch advantage becomes a **1.0%** socket advantage. Once a real connection exists,
+syscalls and TCP dominate and a few hundred nanoseconds of framework overhead compresses into
+nothing. That was the lesson of publishing both tables when the microbenchmark flattered us, and
+it is the same lesson now that it does not.
+
+<Aside type="note" title="Everything also got slower, and we do not know why">
+Every row of the socket table is below the 1.2.23 run. Express and Fastify did not change
+runtime — same Node 22.22, same code — and moved −1.7% and −3.8%, which sets the floor for how
+much this machine drifts between sessions. Both Bun frameworks fell roughly three times further,
+and fell together.
+
+One laptop running its own load generator is not evidence of a Bun regression, and we are not
+going to quietly restate the numbers as though nothing happened either. The ranking is unchanged
+and the Oven-to-Hono gap is unchanged. If you have a two-machine setup, we would genuinely like
+the help.
+</Aside>
+
+## A new brick: `image`
+
+Our own front page has always used `resizeAvatar` as the canonical example of a queue job. Until
+this week, **Oven had no way to resize an image.** You installed `sharp`, or you proxied the work
+to a CDN. For a framework whose entire pitch is "you should never wire infrastructure by hand
+again", that is a promise we were not keeping.
+
+`Bun.Image` closes it, with no native module to compile and nothing to install:
+
+```ts
+app.use(image({ format: 'webp' }))
+```
+
+```ts
+const avatar = await ctx.image.transform(file, { width: 256, height: 256 })
+await ctx.storage.upload(`avatars/${ctx.user.id}.webp`, avatar.bytes)
+```
+
+Resize, rotate, flip, convert between formats, ThumbHash placeholders for blur-up loading, and
+`variants()` for a `srcset` ladder. [The full page is here.](/docs/bricks/image/)
+
+### The part that made it worth being a brick
+
+If the brick were only a thin wrapper over `Bun.Image`, we would have written a recipe instead.
+What justifies it is the thing that is easy to leave out.
+
+A 4000×4000 PNG of flat colour compresses to about **70 KB**. Nothing about that request looks
+unusual. Decoding it allocates 16 megapixels, and a handful arriving together will end a small
+server. This is the classic decompression bomb, and a byte limit cannot see it coming.
+
+The defence is to read the header first — and the reason the defence is practical is the ratio:
+
+| source | on the wire | header read | resize + encode |
+| --- | ---: | ---: | ---: |
+| 800×600 | 3 KB | 0.8 µs | 3.8 ms |
+| 2000×1500 | 15 KB | 0.4 µs | 7.7 ms |
+| 4000×4000 | 70 KB | 0.6 µs | 44.4 ms |
+
+Header reads are constant time. Decoding is linear in pixels. **The bigger the attack, the wider
+the margin.** Every method in the brick checks dimensions against your limits before anything is
+decoded, and an oversized upload comes back as a `413` problem document.
+
+It also refuses to upscale unless asked. `Bun.Image` will happily render a 200 px upload at
+8000 px if a request says so.
+
+### The portability trap we nearly shipped
+
+`Bun.Image` runs on two backends: `system` on macOS and Windows, using the OS codecs, and `bun`
+everywhere else — including **every Linux server**.
+
+| format | `system` | `bun` (Linux) |
+| --- | --- | --- |
+| JPEG, PNG, WebP | yes | yes — byte-identical |
+| AVIF, HEIC | yes | **no** |
+
+AVIF encodes perfectly on a Mac and throws `ERR_IMAGE_FORMAT_UNSUPPORTED` on the server. A
+developer would configure it, see it work, ship it, and find out from users.
+
+So the brick encodes a single pixel at **boot** and refuses to start if the configured format
+cannot be written here, naming the format, the backend and the fix. And because the three
+portable formats are byte-identical across backends — verified buffer-to-buffer in the test
+suite, not assumed — you can set `backend: 'bun'` in development and get exactly what production
+will produce.
+
+We found this by reading Bun's type declarations rather than by testing on Linux, and then
+reproduced it on macOS by pinning the backend. That trick is also how the test suite covers it.
+
+## Everything else in the upgrade
+
+The whole monorepo now declares `"bun": ">=1.4.0"` — 25 packages. All **1656 existing tests
+passed unchanged** on the new runtime before a line of new code was written, which is the main
+thing we wanted to know. With the image brick's own 24, the suite is now 1680.
+
+A few 1.4 features are relevant to what we are building next, and we are not rushing them:
+
+- **`Bun.Terminal` and `spawn({ cgroup })`** arrive right before `@theoven/sandbox` was due, and
+  change how we would build its local driver. Worth a design pass first.
+- **`bun test --shard` / `--changed` / `--retry`** are real CI wins on 48 test files plus a Docker
+  integration job.
+- **`Bun.serve` static directory routes** with ETags and Range support — tempting for core, but
+  plenty of APIs serve no files at all, so it needs an argument rather than an impulse.
+- **`Bun.cron()`** overlaps `@theoven/queue` less than it appears. Ours is in-process with
+  retries and a dead-letter queue; Bun's interesting mode registers with the OS scheduler and
+  survives the process dying. Different tools.
+
+One thing we checked and did not change: `URLPattern` is now native in Bun with 408 Web Platform
+Tests passing. Our own radix router stays, for the reason it was chosen in the first place — a
+third-party matcher's shape leaks into the Context, permanently.
+
+## Try it
+
+```bash
+bun create theoven my-app
+```
+
+Everything above is reproducible:
+
+```bash
+git clone https://github.com/hiteshchoudhary/theoven.git
+cd theoven && bun install
+bun benchmarks/http.bench.ts
+bun benchmarks/image.bench.ts
+```
+
+If your numbers disagree with ours, that is worth an issue — particularly the socket table.

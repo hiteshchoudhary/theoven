@@ -214,8 +214,8 @@ avoid.
 
 - **No portable transactions** — see above.
 - **Mongoose 8, not 9.** Mongoose 9 pulls `bson@7`, which calls a `node:v8` API Bun has not
-  implemented (`isBuildingSnapshot`); importing it fails outright under Bun 1.2. The peer range
-  is `^8.0.0` until that lands.
+  implemented (`isBuildingSnapshot`); importing it fails outright. Still missing as of Bun 1.4, so
+  the peer range stays `^8.0.0` until it lands.
 - **No migration commands.** `oven db` covers Drizzle and Prisma; Mongo's schema lives in your
   models, and there is no equivalent worth wrapping.
 - **Integration tests run in CI, not on your laptop**, against a real `mongo:8` service. Locally

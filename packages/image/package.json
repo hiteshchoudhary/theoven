@@ -1,24 +1,25 @@
 {
-  "name": "@theoven/storage-bunny",
+  "name": "@theoven/image",
   "version": "0.5.2",
-  "description": "Bunny.net Storage for Oven \u2014 object storage plus signed pull-zone URLs",
+  "description": "Image processing for Oven on Bun.Image — resize, convert and guard user uploads with no dependencies",
   "keywords": [
     "bun",
     "oven",
     "brick",
-    "storage",
-    "bunny",
-    "bunnycdn",
-    "cdn"
+    "image",
+    "resize",
+    "webp",
+    "avif",
+    "thumbnail"
   ],
-  "homepage": "https://theoven.app/docs/bricks/storage-bunny/",
+  "homepage": "https://theoven.app/docs/bricks/image/",
   "bugs": {
     "url": "https://github.com/hiteshchoudhary/theoven/issues"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hiteshchoudhary/theoven.git",
-    "directory": "packages/storage-bunny"
+    "directory": "packages/image"
   },
   "license": "MIT",
   "type": "module",
@@ -42,11 +43,9 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@theoven/core": "workspace:^",
-    "@theoven/storage": "workspace:^"
+    "@theoven/core": "workspace:^"
   },
   "devDependencies": {
-    "@theoven/core": "workspace:^",
-    "@theoven/storage": "workspace:^"
+    "@theoven/core": "workspace:^"
   }
 }

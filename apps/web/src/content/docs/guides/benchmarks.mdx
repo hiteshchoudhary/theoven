@@ -12,7 +12,10 @@ reproduce are marketing, not measurement.
 bun benchmarks/http.bench.ts       # real sockets, all four frameworks
 bun benchmarks/dispatch.bench.ts   # Request -> Response, no socket
 bun benchmarks/router.bench.ts     # router lookup alone
+bun benchmarks/image.bench.ts      # Bun.Image, and the cost of the upload guard
 ```
+
+Recorded on **Bun 1.4.0** / Node 22.22, Apple Silicon, 2026-08-21.
 
 ## HTTP throughput
 
@@ -21,24 +24,43 @@ runtime it is actually deployed on.
 
 | framework | runtime | static text req/s | param + json req/s | p99 |
 | --- | --- | ---: | ---: | ---: |
-| hono | bun | 114,874 | 108,845 | &lt;1 ms |
-| **oven** | **bun** | **110,316** | **108,250** | **&lt;1 ms** |
-| fastify | node | 85,120 | 80,896 | 1 ms |
-| express | node | 18,570 | 18,389 | 5 ms |
+| hono | bun | 94,765 | 95,911 | 1 ms |
+| **oven** | **bun** | **93,805** | **94,087** | **1 ms** |
+| fastify | node | 80,084 | 77,824 | 1 ms |
+| express | node | 18,155 | 18,072 | 5 ms |
 
-Oven is about **5.9× Express** and **1.34× Fastify**, and level with Hono on the parameterised
-route — 0.5%, inside run-to-run variance. Hono is about 4% ahead on plain static text.
+Oven is about **5.2× Express** and **1.21× Fastify**, and level with Hono — 1.9% behind on the
+parameterised route and 1.0% behind on static text, both inside run-to-run variance.
+
+<Aside type="note" title="Everything slowed down between Bun 1.2.23 and 1.4">
+  Every row here is lower than the previous run. Express and Fastify did not change runtime —
+  same Node 22.22, same code — and moved −1.7% and −3.8%, which sets the floor for how much this
+  machine drifts between sessions. Both Bun frameworks fell roughly three times further, and
+  fell together.
+
+  We are not going to call that a Bun regression on the strength of one laptop running its own
+  load generator, and we are not going to restate the numbers as though nothing moved. The
+  ranking is unchanged and the Oven-to-Hono gap is unchanged. The
+  [benchmarks README](https://github.com/hiteshchoudhary/theoven/blob/main/benchmarks/README.md)
+  has the before-and-after table.
+</Aside>
 
 ## Dispatch overhead
 
 `Request` in, `Response` out, with no socket involved. Express and Fastify cannot appear here —
 they are built on Node's `req`/`res` and have no `Request` entry point.
 
-| scenario | oven | hono |
-| --- | ---: | ---: |
-| static root | 1258 ns | 1086 ns |
-| param + json | 1519 ns | 1838 ns |
-| 404 miss | 1530 ns | 1922 ns |
+| scenario | oven | hono | on Bun 1.2.23: oven | hono |
+| --- | ---: | ---: | ---: | ---: |
+| static root | 1051 ns | 406 ns | 1258 ns | 1086 ns |
+| param + json | 1255 ns | 916 ns | 1519 ns | 1838 ns |
+| 404 miss | 1228 ns | 956 ns | 1530 ns | 1922 ns |
+
+**This page used to say Oven dispatched faster than Hono on two of these three rows. On Bun 1.4
+that is no longer true.** Oven got about 17% faster; Hono got 2.0–2.7× faster and now leads every
+scenario. The likely cause is in Bun's own release notes: 1.4 rewrote the RegExp engine, and
+Hono's router is regular-expression driven where ours walks a radix tree by hand. A runtime
+improvement landing squarely on a competitor's hot path is still a real result.
 
 <Aside type="caution" title="This is not the ceiling">
   A framework that compiles each route into a specialised function at boot — with `new Function`,
@@ -52,14 +74,15 @@ they are built on Node's `req`/`res` and have no `Request` entry point.
 
 This is the point: the two tables do not rank the same way.
 
-Hono dispatches **1.16× faster** on a static root. Oven dispatches **1.21× faster** on a
-parameterised route and **1.26× faster** on a 404. At the socket both advantages collapse — to
-under 1% on the parameterised route, about 4% on static text. Once a real connection exists,
-syscalls and TCP dominate and a few hundred nanoseconds of framework overhead vanishes.
+Hono dispatches **2.6× faster** on a static root and **1.37× faster** on a parameterised route.
+At the socket, those advantages collapse to **1.0%** and **1.9%**. Once a real connection exists,
+syscalls and TCP dominate and several hundred nanoseconds of framework overhead vanishes.
 
 The dispatch table is a useful signal about where our own overhead lives, and a bad basis for
 choosing a framework. We publish both, because publishing only the flattering one would be
-dishonest — and publishing only the microbenchmark would mislead in the other direction.
+dishonest — and publishing only the microbenchmark would mislead in the other direction. That
+was an easy sentence to write when the microbenchmark flattered us. It is the same sentence now
+that it does not.
 
 ## Reproducing them
 
@@ -94,5 +117,24 @@ router microbenchmark; Bun makes everything fast. What we compete on is the time
 `bun create` and an app shaped like production — and no benchmark measures that.
 
 Caveats worth knowing: loopback only, empty handlers, and the load generator shares a CPU with
-the server, which compresses the top of the table. Treat anything above 100k req/s as "at the
+the server, which compresses the top of the table. Treat anything above 90k req/s as "at the
 ceiling".
+
+## Image processing
+
+`Bun.Image`, which is what [the image brick](/docs/bricks/image/) is built on. The number that
+matters is not how fast a resize is — it is how much cheaper reading a header is than decoding
+the pixels, because that ratio is the whole basis for guarding an upload.
+
+| source | on the wire | header read | resize + encode |
+| --- | ---: | ---: | ---: |
+| 800×600 (0.5 MP) | 3 KB | 0.8 µs | 3.8 ms |
+| 2000×1500 (3.0 MP) | 15 KB | 0.4 µs | 7.7 ms |
+| 4000×4000 (16 MP) | 70 KB | 0.6 µs | 44.4 ms |
+
+Reading the header is **constant time**; decoding is linear in pixels. A 70 KB request body
+carrying 16 megapixels is refused in well under a microsecond, and the gap only widens as the
+attack gets bigger — which is why a byte limit alone is not a defence.
+
+Image work also does not block the event loop: a 110 ms resize saw 87 timer ticks. A resize in a
+handler costs that request its latency, not the whole process's.

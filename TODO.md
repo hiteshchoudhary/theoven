@@ -1,8 +1,12 @@
 # Oven — Task Tracker
 
 **Current state:** **Phases 0–5 complete**, plus the post-1.0 stretch (real-time, cache, CDN
-storage, telemetry) and proposal 0001 (response filtering, routers, dependencies). All
-**eighteen** packages are published at **0.2.0**, and `theoven.app` is live.
+storage, telemetry) and proposal 0001 (response filtering, routers, dependencies). Eighteen
+packages are published at **0.2.0** and `theoven.app` is live; **`webhooks`, `ratelimit`,
+`vector` (+pg, +qdrant), `ai` and `image` are built and unpublished at 0.5.2** — 25 packages in
+the repo, 1680 tests.
+
+The whole repo now requires **Bun 1.4** (D9), which is what `@theoven/image` is built on.
 
 One item is yours: **launch** — and, separately, revoke the npm tokens and the Gemini key that
 were pasted in chat during the 0.1.x releases.
@@ -867,10 +871,46 @@ its own nested 0.7.2 and still benchmarks.
       - [ ] `sqlite-vec` cannot load under Bun (no dynamic extension support in the bundled
             SQLite). Revisit if Bun ships extension loading — it would replace the scan with an
             index and lift the ~50k ceiling.
-- [ ] `@theoven/ai` — AI SDK as a peer dependency
+- [x] `@theoven/ai` — AI SDK as a peer dependency. SSE streaming, caching with in-flight
+      deduplication, token accounting, per-request budgets. 43 tests on the SDK's mock models.
+      - [ ] Core has the same 429-header bug this brick worked around: `RateLimit-*` headers are
+            dropped when the response comes from a thrown error. Logged during ratelimit, still
+            open.
+- [x] `@theoven/image` — resize / convert / guard uploads on `Bun.Image` (D42). 24 tests.
+      - [ ] Storage pairing: `Bun.Image.write()` accepts an `S3File`, so a transform could stream
+            straight to the bucket without holding the encoded result in memory. Worth measuring
+            before adding a method for it.
+      - [ ] No cropping. `Bun.Image` has no crop, so a "square avatar from a rectangle" needs
+            `fit: 'fill'` or a real crop upstream. Revisit if Bun adds one.
 - [ ] `@theoven/payments` + stripe / razorpay / paddle
 - [ ] `@theoven/sandbox` + daytona / e2b / docker
 - [ ] `@theoven/inngest`
+
+## Bun 1.4 — adopted and deferred
+
+Adopted: the runtime itself (all 25 packages at `>=1.4.0`), and `Bun.Image` as `@theoven/image`.
+
+- [ ] `bun test --shard` / `--changed` / `--timings` in CI. 49 test files plus a Docker
+      integration job; `--changed` is the obvious first win.
+- [ ] `bun test --retry` — relevant given the flaky queue test fixed during the queue work.
+- [ ] `Bun.Terminal` and `spawn({ cgroup })` land right before `@theoven/sandbox`. Re-read
+      proposal 0003's sandbox section before building the local/docker driver: a pty with no
+      `node-pty` and cgroup limits change what that driver should be.
+- [ ] `Bun.serve` static directory routes (`{ dir }`) with ETags, Range and conditional requests.
+      Core serves no files today. Principle 2 says core is for what ~all apps need, and plenty of
+      APIs serve none — so this needs an argument, not an impulse.
+- [ ] `socket.upgradeTLS` may now be typed; `mail/src/smtp.ts:271` casts through
+      `as unknown as` to reach it. Drop the cast when `@types/bun` catches up — it was still
+      1.3.14 against a 1.4.0 runtime on the day of the upgrade.
+- [ ] `Response.textStream()` could simplify the AI brick's SSE bridge slightly.
+- [ ] HTTP/3 (`http3: true`) is a `Bun.serve` passthrough. Experimental; wait.
+- [ ] Re-run the socket benchmark on a two-machine setup. Both Bun frameworks dropped ~12–13%
+      versus the 1.2.23 run while the Node ones moved 2–4%, and one laptop cannot tell a
+      regression from thermal drift. See `benchmarks/README.md`.
+
+Checked and **not** adopted: `URLPattern` (native now, but a third-party matcher's shape leaks
+into the Context permanently — D2 stands) and `Bun.cron()` (OS-level scheduling is a different
+product from the queue's in-process cron with retries and a DLQ).
 
 ## Proposal 0003 — decisions (all answered)
 

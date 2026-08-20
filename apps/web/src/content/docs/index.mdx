@@ -39,7 +39,8 @@ Pick the one that matches why you are here.
 export const app = createApp()
   .use(db(drizzleSqlite({ url: './data.db', schema })))
   .use(storage(s3Storage({ bucket: 'uploads' })))
-  .use(queue(redisQueue(), { jobs: [resizeAvatar] }))
+  .use(image({ format: 'webp' }))
+  .use(queue(redisQueue(), { jobs: [buildVariants] }))
   .use(auth(basicAuth({ db: client, secret })))
 ```
 
@@ -51,8 +52,9 @@ export default route(
     response: { 200: z.object({ id: z.uuid(), avatar: z.string() }) },
   },
   async (ctx) => {
-    const { key } = await ctx.storage.upload(`avatars/${ctx.params.id}`, ctx.body.file)
-    await ctx.queue.dispatch(resizeAvatar, { key })
+    const avatar = await ctx.image.transform(ctx.body.file, { width: 256, height: 256 })
+    const { key } = await ctx.storage.upload(`avatars/${ctx.params.id}.webp`, avatar.bytes)
+    await ctx.queue.dispatch(buildVariants, { key })
     return ctx.db.update(users).set({ avatar: key }).returning()
   },
 )

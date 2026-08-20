@@ -1,0 +1,265 @@
+---
+title: image
+description: Resize, convert and guard uploads on Bun.Image — no native module, and a decompression bomb refused in under a microsecond.
+sidebar:
+  order: 21
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/image` |
+| **Adds to context** | `ctx.image` |
+| **Endpoints** | none |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/image
+```
+
+Requires **Bun 1.4 or newer**, which is where `Bun.Image` arrived. There is no native module to
+compile and nothing else to install.
+
+```ts title="src/app.ts"
+import { createApp } from '@theoven/core'
+import { image } from '@theoven/image'
+
+export const app = createApp().use(image({ format: 'webp' }))
+```
+
+```ts title="src/routes/avatar.post.ts"
+export const auth = true
+
+export default async (ctx) => {
+  const [file] = (await ctx.files()).avatar
+  if (!file) throw new BadRequest('Expected an "avatar" file.')
+
+  const avatar = await ctx.image.transform(file, { width: 256, height: 256 })
+  await ctx.storage.upload(`avatars/${ctx.user.id}.webp`, avatar.bytes)
+  return { ok: true }
+}
+```
+
+## What it does
+
+Resizes, rotates, flips and re-encodes images, and **refuses the ones that would hurt you**.
+
+That second half is the reason this is a brick rather than a note telling you to call
+`Bun.Image` yourself. Image handling is one of the few places where taking a request at face
+value is a denial-of-service vector, because the cost lives in the *decoded* size and the
+request only shows you the compressed one.
+
+<Aside type="caution" title="A 70 KB upload can cost 16 megapixels">
+A 4000×4000 PNG of flat colour compresses to about 70 KB. Nothing about that request looks
+unusual. Decoding it allocates the full bitmap, and a handful arriving together will end a small
+server — this is the classic decompression bomb, and a byte limit does not see it coming.
+
+Reading the header first costs **0.6 µs**; decoding costs **44 ms**. Header reads are constant
+time, decoding is linear in pixels, so the bigger the attack the wider the margin. Every method
+here reads the header and checks it against your limits before anything is decoded.
+</Aside>
+
+It also **never upscales unless asked**. `Bun.Image` will happily render a 200 px upload at
+8000 px, spending real time and memory inventing detail that is not in the source; here the
+source's own dimensions are the ceiling unless you pass `allowUpscale`.
+
+## Endpoints
+
+This brick adds no endpoints.
+
+## Configuration
+
+```ts title="src/app.ts"
+export const app = createApp().use(
+  image({
+    format: 'webp',
+    quality: 82,
+    maxBytes: 25 * 1024 * 1024,
+    maxPixels: 40_000_000,
+    // In development, behave exactly like the Linux server will.
+    backend: Bun.env.NODE_ENV === 'production' ? undefined : 'bun',
+  }),
+)
+```
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `format` | `'jpeg' \| 'png' \| 'webp' \| 'avif' \| 'heic'` | keep the source's, when portable | Default output format. Checked at boot. |
+| `quality` | `number` | `82` | 1–100. Ignored by PNG, which is lossless. |
+| `maxBytes` | `number` | 25 MB | Reject a larger encoded upload, before decoding. |
+| `maxPixels` | `number` | 50,000,000 | Reject a larger decoded image, from the header. |
+| `backend` | `'system' \| 'bun'` | platform default | Pin the codec backend. See below. |
+
+### Portability, which will bite you otherwise
+
+`Bun.Image` runs on one of two backends. `system` is the default on macOS and Windows and uses
+the operating system's codecs. `bun` is what **every Linux server** runs.
+
+| format | `system` (macOS, Windows) | `bun` (Linux) |
+| --- | --- | --- |
+| JPEG, PNG, WebP | yes | yes — **byte-identical** |
+| AVIF, HEIC | yes | **no** |
+
+So a developer on a Mac who configures `format: 'avif'` gets a working laptop and a production
+deployment that rejects every image. This brick encodes one pixel at **boot** to check, and
+refuses to start with a message naming the format, the backend and the fix — so the failure
+lands on the deploy rather than on a user's upload weeks later.
+
+The three portable formats are byte-identical across backends, which is verified in the test
+suite rather than assumed. That is what makes `backend: 'bun'` in development worth doing: you
+get exactly the bytes production will produce, not something similar.
+
+## What it creates
+
+Nothing. No files, no tables, no migrations.
+
+## Usage
+
+### Read before you decide
+
+```ts
+const meta = await ctx.image.metadata(file)
+// { width, height, format, pixels, bytes }
+
+if (meta.width < 512) throw new BadRequest('Please upload an image at least 512px wide.')
+```
+
+Cheap enough to call on every upload — that is the point.
+
+### Transform
+
+```ts
+const result = await ctx.image.transform(file, {
+  width: 1024,          // height follows the aspect ratio
+  format: 'webp',
+  quality: 82,
+})
+
+result.bytes    // Uint8Array, ready to upload
+result.width    // 1024
+result.height   // whatever the ratio gave
+result.source   // what it was before: { width, height, format, pixels, bytes }
+```
+
+| Option | What it does |
+| --- | --- |
+| `width`, `height` | Give one and the other follows the source ratio. |
+| `fit` | `inside` (default) fits within the box; `fill` stretches to it exactly. |
+| `allowUpscale` | Permit an output larger than the source. Off by default. |
+| `format`, `quality` | Override the brick's defaults for this call. |
+| `rotate` | Degrees clockwise. 90 and 270 swap width and height. |
+| `flip`, `flop` | Mirror vertically or horizontally. |
+
+### A `srcset` ladder
+
+```ts
+const sizes = await ctx.image.variants(file, { widths: [320, 640, 1280] })
+for (const size of sizes) {
+  await ctx.storage.upload(`photos/${id}-${size.width}.webp`, size.bytes)
+}
+```
+
+Each width is a separate decode — pipelines do not share one — so a three-width ladder costs
+about **83 ms**. Put it in a queue job rather than a request:
+
+```ts title="src/jobs.ts"
+import { defineJob } from '@theoven/queue'
+import { app } from './app'
+
+export const processUpload = defineJob<{ key: string }>({
+  name: 'process-upload',
+  retries: 3,
+  handler: async ({ payload, log }) => {
+    // A job handler gets `{ payload, signal, log }`, not a request context — so the bricks come
+    // from the app itself, which is the same configured instance the routes use.
+    const storage = app.service('storage')
+    const image = app.service('image')
+
+    const original = storage.download(payload.key)
+    for (const size of await image.variants(original, { widths: [320, 640, 1280] })) {
+      await storage.upload(`${payload.key}-${size.width}.webp`, size.bytes)
+    }
+    log.info('variants written', { key: payload.key })
+  },
+})
+```
+
+### Blur-up placeholders
+
+```ts
+const lqip = await ctx.image.placeholder(file)
+// "data:image/png;base64,iVBORw0KGgoAAAANSUhE…"
+```
+
+A [ThumbHash](https://github.com/evanw/thumbhash)-rendered blur of the source at ≤32 px, roughly
+400–700 bytes — small enough to inline into the HTML that references the real image, so the
+layout settles and something is on screen before the full picture is requested. Drops straight
+into `<img src>` or Next's `blurDataURL`. Costs about 7 ms.
+
+## Capabilities
+
+**What it supports:** resize (with or without aspect ratio), rotate by multiples of 90°, flip and
+flop, format conversion between JPEG, PNG and WebP everywhere and AVIF and HEIC on macOS and
+Windows, quality control, ThumbHash placeholders, and metadata without decoding.
+
+**What fails, and when:**
+
+| Situation | What happens |
+| --- | --- |
+| `format` unwritable on this platform | fails at **boot**, naming the format and backend |
+| Upload over `maxBytes` | `ImageTooLargeError` — `413`, before decoding |
+| Image over `maxPixels` | `ImageTooLargeError` — `413`, read from the header |
+| Not an image, or an unreadable format | `UnsupportedImageError` — `415` |
+| AVIF or HEIC requested at runtime on Linux | `UnsupportedImageError` — `415`, naming the portable formats |
+
+Both are ordinary [problem documents](/docs/reference/errors/), so a route needs no special
+handling:
+
+```json
+{
+  "type": "https://theoven.app/errors/image-too-large",
+  "title": "Image too large",
+  "status": 413,
+  "width": 4000, "height": 4000, "pixels": 16000000, "maxPixels": 1000000
+}
+```
+
+## Limitations
+
+- **AVIF and HEIC cannot be produced on Linux.** The `bun` backend has no encoder for them. Not
+  something we can fix, which is why it is checked at boot.
+- **`variants()` decodes once per width.** Cost is linear in the number of widths. Queue it.
+- **No cropping, compositing, text, watermarks or colour management.** `Bun.Image` does resize,
+  rotate, flip and brightness/saturation, and this brick does not invent the rest. Anything more
+  is a different tool.
+- **No SVG.** It is not a raster format, and it is a script-execution surface besides.
+- **No animated output.** GIF decodes; the encoders here write a single frame.
+- **`quality` does nothing for PNG.** PNG is lossless. It is deliberately not remapped onto
+  `compressionLevel` — those are different scales, and silently reinterpreting one as the other
+  would make `quality: 10` mean "barely compress" instead of "small file".
+
+## How it is verified
+
+24 tests, no fixtures — images are generated as BMPs in the test file, so a test can ask for
+exactly the dimensions it needs, including sizes far too large to commit to a repository.
+
+What they actually prove:
+
+- **The bomb is refused.** A 4000×4000 PNG under 200 KB is rejected on pixel count, with the
+  header read asserted to be at least 20× cheaper than the decode. It was ~2500× when measured;
+  the assertion is deliberately loose so it reports a real regression rather than machine noise.
+- **Upscaling is off.** Asking for 4000 px from a 200 px source returns 200 px — and returns
+  4000 px only when `allowUpscale` is passed.
+- **The portable formats are byte-identical on both backends**, compared buffer-to-buffer. This
+  is what makes `backend: 'bun'` a real guarantee rather than a hope.
+- **AVIF on the Linux backend fails at boot**, with the message asserted to name both the
+  portable formats and the platforms that can do better. The test pins the backend to `bun` on
+  purpose — which is how a macOS machine reproduces a Linux failure at all.
+- **An oversized upload through a real route is a `413` problem document**, not a crash.
+
+Every one of these was confirmed to fail when the behaviour it covers is deliberately broken.

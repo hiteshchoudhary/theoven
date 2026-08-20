@@ -9,9 +9,9 @@ import { Aside, Steps } from '@astrojs/starlight/components'
 
 ## Requirements
 
-Bun 1.2 or newer. Oven is Bun-only by design — it uses `Bun.serve`, `Bun.file`, `Bun.S3Client`
-and `bun:sqlite` directly rather than abstracting over them, which is what keeps the framework
-small and fast. There is no Node build and no plan for one.
+Bun 1.4 or newer. Oven is Bun-only by design — it uses `Bun.serve`, `Bun.file`, `Bun.S3Client`,
+`Bun.Image` and `bun:sqlite` directly rather than abstracting over them, which is what keeps the
+framework small and fast. There is no Node build and no plan for one.
 
 ```bash
 bun --version   # 1.2.0 or higher

@@ -104,6 +104,16 @@ CORS, rate limiting, compression and security headers ship configured rather tha
 | [`@theoven/cache`](https://www.npmjs.com/package/@theoven/cache) | tag invalidation and stampede protection — memory or Redis |
 | [`@theoven/telemetry`](https://www.npmjs.com/package/@theoven/telemetry) | OpenTelemetry spans named by route pattern |
 
+**Built, not yet published** — in this repo, shipping in the next release
+
+| Package | |
+|---|---|
+| `@theoven/webhooks` | signature verification for inbound deliveries, with replay windows |
+| `@theoven/ratelimit` | counting that holds across instances, atomically — Redis or Postgres |
+| `@theoven/vector` | one contract over an embedded scan, pgvector and Qdrant |
+| `@theoven/ai` | SSE streaming, caching, token accounting and budgets around the AI SDK |
+| `@theoven/image` | resize, convert and guard uploads on `Bun.Image` — no native module |
+
 ## Beyond the batteries
 
 ```ts
