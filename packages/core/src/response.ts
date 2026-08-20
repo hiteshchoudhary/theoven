@@ -8,6 +8,31 @@ const BINARY_TYPE = 'application/octet-stream'
 const BODILESS = new Set([101, 204, 205, 304])
 
 /**
+ * Whether a handler took control of the response rather than returning a value to serialise.
+ *
+ * A `response` schema describes the JSON body a handler would otherwise have returned. It has
+ * nothing to say about a stream, a file or a `Response` the handler built itself — and checking
+ * one against it turned a working route into a 500, because a `Response` object has none of the
+ * fields the schema asks for.
+ *
+ * Strings are deliberately **not** here: `response: { 200: z.string() }` is a reasonable contract
+ * for a text endpoint, and validating it costs nothing.
+ *
+ * Kept beside `toResponse` so the two lists cannot drift: every branch below that bypasses JSON
+ * serialisation is a branch a schema cannot describe.
+ */
+export function tookControl(value: unknown): boolean {
+  return (
+    value instanceof Response ||
+    value instanceof Blob ||
+    value instanceof ReadableStream ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value) ||
+    value instanceof URL
+  )
+}
+
+/**
  * Turns whatever a handler returned into a `Response`.
  *
  * Handlers are not required to know about HTTP. Returning an object should mean JSON, returning

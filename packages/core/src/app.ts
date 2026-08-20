@@ -15,6 +15,7 @@ import { OvenError, toOvenError } from './errors'
 import { ConsoleLogger, type Logger, type LogLevel } from './logger'
 import { appliesTo, compose, type Middleware } from './middleware'
 import type { QueryOptions } from './query'
+import { tookControl } from './response'
 import { normalisePath, Router } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
 import type { TokenOptions } from './token'
@@ -863,7 +864,9 @@ export class App<Ext = unknown> implements BrickHost {
 
     let result = await handler(ctx)
 
-    if (schema?.response && this.settings.validateResponses) {
+    // `tookControl` first: a handler that returned a Response or a stream is not describable by
+    // a response schema, and checking it produced a 500 on a route that was working.
+    if (schema?.response && this.settings.validateResponses && !tookControl(result)) {
       const issues = await validateResponse(schema, ctx.status ?? 200, result)
       if (issues.length > 0) {
         ctx.log.error('Response does not match its declared schema', {

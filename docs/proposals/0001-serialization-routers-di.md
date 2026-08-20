@@ -48,7 +48,7 @@ parsed  { id, email }              ← the hash is already gone
 Zod strips unknown keys from `z.object` by default, so **filtering is one line: use the return
 value.** The work is not the mechanism, it is deciding the policy.
 
-### A prerequisite bug
+### A prerequisite bug — **fixed**
 
 A handler returning a `Response` — a documented, supported return type — **500s today** when the
 route declares a response schema, because the `Response` object is validated against the schema:
@@ -57,14 +57,12 @@ route declares a response schema, because the `Response` object is validated aga
 GET /x  ->  500  "Response validation failed."
 ```
 
-Reproduced on `313025d` in development with `validateResponses: true`. Same will apply to
-`ReadableStream`, `Blob` and `Bun.file`. This must be fixed regardless of the rest of this
-proposal, and it must be fixed *before* serialisation is enabled anywhere: today it is a
-development-only annoyance, but under production serialisation it would be an outage.
+Reproduced on `313025d`, and it affected **all six** take-control return types, not only
+`Response` — `ReadableStream`, `Blob`, `Bun.file`, typed arrays and `URL` redirects too.
 
-**Fix:** skip both validation and serialisation when the handler returned a `Response`,
-`ReadableStream`, `Blob` or `File`. Taking control of the response is an explicit act; the
-schema describes the JSON body, not a stream.
+Fixed: `tookControl()` in `response.ts`, beside `toResponse` so the passthrough list cannot drift
+from the coercion table it mirrors. Strings stay validated, since `z.string()` is a fair contract
+for a text endpoint. The serialisation work below inherits the same guard.
 
 ### The change
 

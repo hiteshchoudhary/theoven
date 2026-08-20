@@ -849,8 +849,11 @@ its own nested 0.7.2 and still benchmarks.
 [Response serialisation, routers, dependencies](docs/proposals/0001-serialization-routers-di.md)
 — the three gaps against FastAPI that matter for larger codebases. Awaiting decisions D29–D31.
 
-- [ ] **Bug, independent of the proposal:** a handler returning a `Response` 500s when its route
-      declares a `response` schema — the `Response` object is validated against the schema.
-      Development-only today because `validateResponses` is off in production; it becomes an
-      outage the moment serialisation is enabled. `ReadableStream`, `Blob` and `Bun.file` will
-      behave the same way. Fix: skip validation and serialisation for those return types.
+- [x] ~~**Bug:** a handler returning a `Response` 500s when its route declares a `response`
+      schema.~~ **Fixed.** It affected all six documented take-control return types, not just
+      `Response`: `ReadableStream`, `Blob`, `Bun.file`, typed arrays and `URL` redirects each
+      produced a 500 on a route that was working. `tookControl()` lives beside `toResponse` in
+      `response.ts` so the passthrough list cannot drift from the coercion table. Strings are
+      deliberately excluded — `z.string()` is a fair contract for a text endpoint. Nine tests,
+      each verified to fail before the fix, and the guard checked for over-breadth by forcing it
+      true and confirming the drift-detection tests go red.

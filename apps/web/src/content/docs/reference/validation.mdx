@@ -145,6 +145,35 @@ depends on `validateResponses`, which defaults to **on in development, off in pr
   shape.
 </Aside>
 
+### A handler that takes control is not validated
+
+Returning a `Response`, a `ReadableStream`, a `Blob`, a `Bun.file`, a typed array or a `URL`
+bypasses response validation entirely:
+
+```ts
+export default route(
+  { response: { 200: z.object({ id: z.string() }) } },
+  (ctx) => Bun.file('./report.pdf'),   // not checked against the schema
+)
+```
+
+A response schema describes the JSON body a handler would otherwise have returned. It has nothing
+to say about a stream or a file, and checking one against it used to produce a `500` on a route
+that was working correctly.
+
+A returned **string is still validated**, because `response: { 200: z.string() }` is a reasonable
+contract for a text endpoint.
+
+<Aside type="caution" title="A response schema does not filter output">
+  Today a schema only *checks* the value, and only when `validateResponses` is on — so returning a
+  row with a `passwordHash` on it sends the hash, in production, whatever the schema says. Zod
+  would strip it; Oven does not currently use the stripped value.
+
+  Until that changes, select the columns you mean to return rather than relying on the schema to
+  remove them. Making schemas serialise is
+  [proposal 0001](https://github.com/hiteshchoudhary/theoven/blob/main/docs/proposals/0001-serialization-routers-di.md).
+</Aside>
+
 ## Validating headers
 
 ```ts

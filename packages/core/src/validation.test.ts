@@ -353,6 +353,101 @@ describe('response validation', () => {
     })
     expect((await send(app, '/x')).status).toBe(201)
   })
+
+  /**
+   * Returning a `Response`, a stream, a `Blob` or a `Bun.file` is taking control of the response
+   * on purpose. The schema describes the JSON body a handler would otherwise have returned; it
+   * has nothing to say about a stream, and checking one against it produced a 500 on a route
+   * that was working correctly.
+   *
+   * These are the documented return types on the first-route page, so each gets a test rather
+   * than one standing in for the rest.
+   */
+  describe('handlers that take control of the response', () => {
+    const schema = { response: { 200: z.object({ id: z.number() }) } }
+
+    test('a returned Response is passed through, not validated', async () => {
+      const app = make().get(
+        '/x',
+        schema,
+        () =>
+          new Response(JSON.stringify({ id: 1 }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+      )
+      const response = await send(app, '/x')
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ id: 1 })
+    })
+
+    test('a Response whose body would fail the schema is still passed through', async () => {
+      // The point of taking control: the schema is not the contract any more.
+      const app = make().get('/x', schema, () => new Response('plain text'))
+      const response = await send(app, '/x')
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('plain text')
+    })
+
+    test('a ReadableStream is passed through', async () => {
+      const app = make().get(
+        '/x',
+        schema,
+        () =>
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('streamed'))
+              controller.close()
+            },
+          }),
+      )
+      const response = await send(app, '/x')
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('streamed')
+    })
+
+    test('a Blob is passed through', async () => {
+      const app = make().get('/x', schema, () => new Blob(['blobbed'], { type: 'text/plain' }))
+      const response = await send(app, '/x')
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('blobbed')
+    })
+
+    test('a Bun.file is passed through', async () => {
+      const app = make().get('/x', schema, () => Bun.file(`${import.meta.dir}/../package.json`))
+      const response = await send(app, '/x')
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain('"@theoven/core"')
+    })
+
+    test('a URL redirect is passed through', async () => {
+      const app = make().get('/x', schema, () => new URL('https://theoven.app/docs'))
+      const response = await send(app, '/x')
+      expect(response.status).toBe(302)
+      expect(response.headers.get('location')).toBe('https://theoven.app/docs')
+    })
+
+    test('a typed array is passed through', async () => {
+      const app = make().get('/x', schema, () => new TextEncoder().encode('binary'))
+      const response = await send(app, '/x')
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe('binary')
+    })
+
+    // Not in the passthrough list: `response: { 200: z.string() }` is a reasonable contract for
+    // a text endpoint, so a returned string is still checked.
+    test('a string is still validated against a string schema', async () => {
+      const ok = make().get('/x', { response: { 200: z.string() } }, () => 'fine')
+      expect((await send(ok, '/x')).status).toBe(200)
+
+      const bad = make().get('/x', { response: { 200: z.string().min(20) } }, () => 'short')
+      expect((await send(bad, '/x')).status).toBe(500)
+    })
+
+    test('an ordinary object is still validated', async () => {
+      const app = make().get('/x', schema, () => ({ id: 'wrong' }))
+      expect((await send(app, '/x')).status).toBe(500)
+    })
+  })
 })
 
 // D4 says Zod is the default, not a requirement. That is only true if something else works.
