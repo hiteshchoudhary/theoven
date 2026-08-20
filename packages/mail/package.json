@@ -1,6 +1,6 @@
 {
   "name": "@theoven/mail",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Transactional email for Oven — console and memory drivers included, Resend and SMTP when configured",
   "keywords": [
     "bun",

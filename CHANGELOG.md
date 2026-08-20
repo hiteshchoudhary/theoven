@@ -4,6 +4,35 @@ Every package is versioned together. Pre-1.0, minor versions may break.
 
 ---
 
+## 0.4.0
+
+### WebSocket routes on a router
+
+```ts
+const rooms = routerFor<typeof app>({ prefix: '/rooms', auth: true })
+rooms.ws('/:id', { params: z.object({ id: z.uuid() }) }, handlers)
+```
+
+The router's `prefix`, `tags` and `auth` apply. The last is the point: a socket endpoint that
+quietly opted out of its group's guard would be exactly the unguarded back door `app.ws()` exists
+to prevent, so a router declaring `auth` guards its sockets too.
+
+### Dependency cycles are named
+
+A dependency that depends on itself, directly or through others, now fails with the path:
+
+```
+Dependency cycle: account -> plan -> account.
+```
+
+It is a `DependencyCycleError`, so an application can tell a configuration mistake from a resolver
+that threw. Previously this recursed until the stack ran out and reported "Maximum call stack size
+exceeded", which names neither dependency.
+
+A diamond — two dependencies sharing a third — is not a cycle, and resolves the shared one once.
+
+---
+
 ## 0.3.1
 
 ### Fixed — every package declared a peer range for the wrong version
