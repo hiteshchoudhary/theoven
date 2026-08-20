@@ -100,6 +100,15 @@ export function dependency<Value>(
   }
 }
 
+/**
+ * A dependency that, directly or through others, depends on itself.
+ *
+ * Its own class so an application can tell a configuration mistake from a resolver that threw.
+ */
+export class DependencyCycleError extends Error {
+  override name = 'DependencyCycleError'
+}
+
 /** Replaces a dependency for the lifetime of an app. Used by tests. */
 export type Overrides = Map<Dependency<unknown>, ValueResolver<unknown> | ScopedResolver<unknown>>
 
@@ -123,6 +132,15 @@ export class DependencyScope {
     | Array<{ name: string; generator: AsyncGenerator<unknown, void, unknown> }>
     | undefined
   private disposed = false
+  /**
+   * Dependencies currently resolving, innermost last.
+   *
+   * A cycle is caught by membership here rather than by the cache, because the cache entry is
+   * only written once `start` has returned — and a cycle closes *inside* the resolver's
+   * synchronous prefix, before that happens. Without it, `a → b → a` recursed to a stack
+   * overflow and reported "Maximum call stack size exceeded", which names neither dependency.
+   */
+  private chain: Array<Dependency<unknown>> | undefined
 
   constructor(
     private readonly ctx: Context,
@@ -139,6 +157,11 @@ export class DependencyScope {
     const existing = this.cache?.get(target as Dependency<unknown>)
     if (existing) return existing as Promise<Value>
 
+    if (this.chain?.includes(target as Dependency<unknown>)) {
+      const path = [...this.chain, target].map((entry) => entry.name).join(' -> ')
+      throw new DependencyCycleError(`Dependency cycle: ${path}.`)
+    }
+
     const work = this.start(target)
     this.cache ??= new Map()
     this.cache.set(target as Dependency<unknown>, work)
@@ -147,7 +170,24 @@ export class DependencyScope {
 
   private async start<Value>(target: Dependency<Value>): Promise<Value> {
     const resolve = this.overrides?.get(target as Dependency<unknown>) ?? target.resolve
-    const produced = (resolve as ValueResolver<Value> | ScopedResolver<Value>)(this.ctx, this.use)
+
+    this.chain ??= []
+    this.chain.push(target as Dependency<unknown>)
+    try {
+      return await this.run(target, resolve as ValueResolver<Value> | ScopedResolver<Value>)
+    } finally {
+      // Popped when this dependency has fully resolved, not when the resolver returns: a cycle
+      // that closes after an `await` is still a cycle.
+      const at = this.chain.lastIndexOf(target as Dependency<unknown>)
+      if (at !== -1) this.chain.splice(at, 1)
+    }
+  }
+
+  private async run<Value>(
+    target: Dependency<Value>,
+    resolve: ValueResolver<Value> | ScopedResolver<Value>,
+  ): Promise<Value> {
+    const produced = resolve(this.ctx, this.use)
 
     if (!isAsyncGenerator(produced)) return await produced
 

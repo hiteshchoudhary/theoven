@@ -118,6 +118,24 @@ app.use(admin)   // GET /admin/users/:id, tags ['admin','users'], auth 'staff'
 
 Prefixes join, tags accumulate down the tree, and a child's own `auth` overrides its parent's.
 
+## WebSocket routes
+
+```ts
+const rooms = routerFor<typeof app>({ prefix: '/rooms', auth: true })
+
+rooms.ws('/:id', { params: z.object({ id: z.uuid() }) }, {
+  upgrade: (ctx) => ({ room: ctx.params.id, userId: ctx.user.id }),
+  open: (socket) => socket.subscribe(socket.data.data.room),
+  message: (socket, text) => app.publish(socket.data.data.room, String(text)),
+})
+
+app.use(rooms)   // GET /rooms/:id, guarded by the router's auth
+```
+
+The router's defaults apply, and here that matters more than anywhere else: **a router declaring
+`auth` guards its sockets too**. A socket endpoint that quietly opted out of its group's guard
+would be exactly the unguarded back door [`app.ws()`](/docs/reference/realtime/) exists to prevent.
+
 ## Middleware
 
 ```ts
@@ -201,8 +219,6 @@ register, and so the merge rules are testable without an app.
   lifecycle and no error handler of its own. Mounting a whole `App` inside another — with the
   questions that raises about whose middleware and whose error handler run — is not supported.
 - **A nested router's dependencies are not typed for its own handlers** — see above.
-- **No `ws()` on a router yet.** Register WebSocket routes on the app with
-  [`app.ws()`](/docs/reference/realtime/).
 - **No per-router error handling.** `onError` is app-wide.
 
 ## How it is verified

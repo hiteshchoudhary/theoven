@@ -370,3 +370,92 @@ describe('overrides', () => {
     expect(await (await send(app, '/x')).text()).toBe('real')
   })
 })
+
+/**
+ * Before this, `a -> b -> a` recursed until the stack ran out and reported "Maximum call stack
+ * size exceeded" — which names neither dependency and looks like a bug in the framework.
+ */
+describe('cycles', () => {
+  test('a direct cycle names both dependencies', async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: the cycle is the point; the types cannot close it
+    const a: any = dependency('a', async (_ctx, use) => use(b))
+    // biome-ignore lint/suspicious/noExplicitAny: see above
+    const b: any = dependency('b', async (_ctx, use) => use(a))
+
+    const app = make({ development: true }).get('/x', { deps: { a } }, () => 'ok')
+    const body = await (await send(app, '/x')).text()
+
+    expect(body).toContain('Dependency cycle: a -> b -> a')
+  })
+
+  test('an indirect cycle names the whole path', async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: see above
+    const a: any = dependency('a', async (_ctx, use) => use(b))
+    // biome-ignore lint/suspicious/noExplicitAny: see above
+    const b: any = dependency('b', async (_ctx, use) => use(c))
+    // biome-ignore lint/suspicious/noExplicitAny: see above
+    const c: any = dependency('c', async (_ctx, use) => use(a))
+
+    const app = make({ development: true }).get('/x', { deps: { a } }, () => 'ok')
+
+    expect(await (await send(app, '/x')).text()).toContain('Dependency cycle: a -> b -> c -> a')
+  })
+
+  test('a dependency using itself is caught', async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: see above
+    const self: any = dependency('self', async (_ctx, use) => use(self))
+
+    const app = make({ development: true }).get('/x', { deps: { self } }, () => 'ok')
+
+    expect(await (await send(app, '/x')).text()).toContain('Dependency cycle: self -> self')
+  })
+
+  /** A diamond is not a cycle: two dependencies sharing a third is the normal case. */
+  test('a diamond is not reported as a cycle', async () => {
+    const shared = dependency('shared', () => 'S')
+    const left = dependency('left', (_ctx, use) => use(shared))
+    const right = dependency('right', (_ctx, use) => use(shared))
+
+    const app = make().get(
+      '/x',
+      { deps: { left, right } },
+      (ctx) => `${ctx.deps.left}${ctx.deps.right}`,
+    )
+
+    expect(await (await send(app, '/x')).text()).toBe('SS')
+  })
+
+  /**
+   * The chain is popped when a dependency finishes, so a later cycle's message describes only
+   * the cycle. Without popping the check still *works* — the cache short-circuits repeat uses —
+   * but the reported path accumulates every dependency the request ever resolved, which is the
+   * difference between a message you can act on and a list.
+   */
+  test('the reported path contains only the cycle, not earlier resolutions', async () => {
+    const first = dependency('first', () => 1)
+    const second = dependency('second', async (_ctx, use) => use(first))
+    // biome-ignore lint/suspicious/noExplicitAny: the cycle is the point
+    const loopA: any = dependency('loopA', async (_ctx, use) => use(loopB))
+    // biome-ignore lint/suspicious/noExplicitAny: see above
+    const loopB: any = dependency('loopB', async (_ctx, use) => use(loopA))
+
+    const app = make({ development: true }).get('/x', { deps: { second, loopA } }, () => 'ok')
+    const body = await (await send(app, '/x')).text()
+
+    expect(body).toContain('Dependency cycle: loopA -> loopB -> loopA')
+    expect(body).not.toContain('second')
+    expect(body).not.toContain('first')
+  })
+
+  test('the same dependency used twice in sequence is not a cycle', async () => {
+    const shared = dependency('shared', () => 'S')
+    const outer = dependency(
+      'outer',
+      async (_ctx, use) => `${await use(shared)}${await use(shared)}`,
+    )
+
+    const app = make().get('/x', { deps: { outer } }, (ctx) => ctx.deps.outer)
+
+    expect(await (await send(app, '/x')).text()).toBe('SS')
+  })
+})

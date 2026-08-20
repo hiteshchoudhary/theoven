@@ -77,6 +77,16 @@ Bun's own pub/sub, so a broadcast does not walk a list of connections in JavaScr
 A browser visiting a socket route gets `426 Upgrade Required` with an `Upgrade: websocket`
 header, rather than a confusing 404.
 
+### On a router
+
+```ts
+const rooms = routerFor<typeof app>({ prefix: '/rooms', auth: true })
+rooms.ws('/:id', handlers)
+```
+
+A [router](/docs/reference/routers/) can hold socket routes, and its `prefix`, `tags` and `auth`
+apply to them — so one declaration guards every socket in the group.
+
 ## Server-sent events
 
 ```ts

@@ -390,3 +390,61 @@ describe('router dependencies', () => {
     expect(Object.keys(api.collect().routes[0]?.schema?.deps ?? {})).toEqual(['only'])
   })
 })
+
+describe('WebSocket routes on a router', () => {
+  test('the prefix applies', async () => {
+    const rooms = router({ prefix: '/rooms' })
+    rooms.ws('/:id', { open: () => {} })
+
+    const app = make().use(rooms)
+    const response = await send(app, '/rooms/7')
+
+    // A plain GET on a socket route is 426, which is how we know it registered.
+    expect(response.status).toBe(426)
+    expect(response.headers.get('upgrade')).toBe('websocket')
+  })
+
+  /**
+   * The reason this matters more than for an ordinary route: a socket endpoint that quietly
+   * opted out of its group's guard would be the unguarded back door `app.ws()` exists to stop.
+   */
+  test("a router's auth guards its sockets", async () => {
+    const rooms = router({ prefix: '/rooms', auth: true })
+    rooms.ws('/:id', { open: () => {} })
+
+    const app = make()
+      .use({ name: 'auth' as const, setup: () => ({}), request: () => undefined })
+      .use(rooms)
+
+    const [entry] = app.routeTable().filter((route) => route.pattern === '/rooms/:id')
+    expect(entry?.schema?.auth).toBe(true)
+  })
+
+  test('a schema is carried, and merged with the router’s tags', () => {
+    const rooms = router({ prefix: '/rooms', tags: ['realtime'] })
+    rooms.ws('/:id', { params: z.object({ id: z.string() }), tags: ['rooms'] }, { open: () => {} })
+
+    const [socket] = rooms.collect().sockets
+
+    expect(socket?.pattern).toBe('/rooms/:id')
+    expect(socket?.schema?.tags).toEqual(['realtime', 'rooms'])
+    expect(socket?.schema?.params).toBeDefined()
+  })
+
+  test('nested routers carry their sockets up', () => {
+    const rooms = router({ prefix: '/rooms' })
+    rooms.ws('/:id', { open: () => {} })
+
+    const collected = router({ prefix: '/v1' }).use(rooms).collect()
+
+    expect(collected.sockets.map((socket) => socket.pattern)).toEqual(['/v1/rooms/:id'])
+  })
+
+  test('sockets count towards size', () => {
+    const rooms = router()
+    rooms.ws('/a', { open: () => {} })
+    rooms.get('/b', () => 'b')
+
+    expect(rooms.size).toBe(2)
+  })
+})

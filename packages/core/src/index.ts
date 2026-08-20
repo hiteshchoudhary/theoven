@@ -35,6 +35,7 @@ export { type CookieJarInit, type CookieOptions, Cookies } from './cookies'
 // users actually build (D30); this one is the structure underneath and is rarely imported.
 export {
   type Dependency,
+  DependencyCycleError,
   DependencyScope,
   dependency,
   isDependency,
@@ -135,7 +136,9 @@ export {
 export {
   type CollectedRoute,
   type CollectedRoutes,
+  type CollectedSocket,
   isRouter,
+  type MountableRoutes,
   Router,
   type RouterOptions,
   router,

@@ -866,14 +866,17 @@ its own nested 0.7.2 and still benchmarks.
             mounts via the new `context.mount()`. `auth`, `mail` and `queue` endpoints now carry
             tags. Found while doing it: the mail inbox and queue dashboard were appearing in the
             generated OpenAPI document, so `/_oven/*` is now excluded from it.
-      - [ ] Follow-up: `router.ws()`. WebSocket routes are app-only today.
+      - [x] ~~Follow-up: `router.ws()`.~~ **Done.** Sockets carry the router's prefix, tags and
+            `auth` — the last mattering most, since a socket that skipped its group's guard is
+            the back door `app.ws()` exists to prevent.
 - [x] **D31 — dependencies.** Shipped. `dependency()`, `deps` on a route, `ctx.deps.<name>`,
       sub-dependencies, per-request caching, generator teardown, `app.override()`.
       - [x] ~~Follow-up: `router({ deps })`.~~ **Done.** Accumulates with a route's own; the
             route wins a name collision. Typed for the router's own handlers; a nested child
             cannot be typed for its parent's, which is documented rather than papered over.
-      - [ ] Follow-up: cycle detection. A dependency that uses itself recurses to a stack
-            overflow rather than naming the cycle.
+      - [x] ~~Follow-up: cycle detection.~~ **Done.** `DependencyCycleError` naming the path,
+            e.g. `a -> b -> c -> a`. A diamond is not a cycle. The chain is popped when a
+            dependency finishes so a later cycle's message describes only the cycle.
       - [ ] Follow-up: resolve independent dependencies concurrently. Sequential today.
 
 - [x] ~~**Bug:** a handler returning a `Response` 500s when its route declares a `response`

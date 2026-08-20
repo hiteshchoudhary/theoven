@@ -6,6 +6,7 @@ import type { Middleware } from './middleware'
 import { normalisePath } from './router/router'
 import type { HttpMethod } from './router/types'
 import type { ResolvedDeps, RouteSchema, ValidatedContext, ValidatedHandler } from './validation'
+import type { SocketHandlers } from './websocket'
 
 /**
  * Defaults a router applies to the routes inside it.
@@ -86,9 +87,17 @@ export interface MountableRoutes {
   readonly size: number
 }
 
+/** One WebSocket route a router is holding. */
+export interface CollectedSocket {
+  pattern: string
+  schema: RouteSchema | undefined
+  handlers: SocketHandlers<unknown>
+}
+
 /** Everything a router contributes, flattened and resolved. */
 export interface CollectedRoutes {
   routes: CollectedRoute[]
+  sockets: CollectedSocket[]
   middleware: Array<{ prefix: string | undefined; handler: Middleware }>
 }
 
@@ -144,6 +153,11 @@ export class Router<
   private readonly entries: CollectedRoute[] = []
   private readonly middlewares: Middleware[] = []
   private readonly children: MountableRoutes[] = []
+  private readonly sockets: Array<{
+    pattern: string
+    schema: RouteSchema | undefined
+    handlers: SocketHandlers<unknown>
+  }> = []
 
   constructor(options: RouterOptions = {}) {
     this.defaults = options
@@ -154,9 +168,13 @@ export class Router<
     return this.defaults.prefix ?? ''
   }
 
-  /** How many routes this router holds, including those of nested routers. */
+  /** How many routes this router holds, sockets and nested routers included. */
   get size(): number {
-    return this.entries.length + this.children.reduce((total, child) => total + child.size, 0)
+    return (
+      this.entries.length +
+      this.sockets.length +
+      this.children.reduce((total, child) => total + child.size, 0)
+    )
   }
 
   private add(
@@ -262,6 +280,28 @@ export class Router<
     return this.add('OPTIONS', a, b, c)
   }
 
+  /**
+   * A WebSocket route, with the router's prefix and defaults applied.
+   *
+   * The defaults matter more here than anywhere else: a router declaring `auth` guards its
+   * sockets too. A socket endpoint that quietly opted out of its group's guard would be exactly
+   * the unguarded back door `app.ws()` exists to prevent.
+   */
+  ws<Data, const S extends RouteSchema>(
+    pattern: string,
+    schema: S,
+    handlers: SocketHandlers<Data>,
+  ): this
+  ws<Data>(pattern: string, handlers: SocketHandlers<Data>): this
+  ws(pattern: string, b: RouteSchema | SocketHandlers<unknown>, c?: SocketHandlers<unknown>): this {
+    this.sockets.push({
+      pattern,
+      schema: c ? (b as RouteSchema) : undefined,
+      handlers: (c ?? b) as SocketHandlers<unknown>,
+    })
+    return this
+  }
+
   /** Middleware scoped to this router's prefix, or a nested router. */
   use(middleware: Middleware): this
   use(child: MountableRoutes): this
@@ -296,6 +336,12 @@ export class Router<
       handler: entry.handler,
     }))
 
+    const sockets: CollectedSocket[] = this.sockets.map((entry) => ({
+      pattern: normalisePath(join(prefix, entry.pattern)),
+      schema: merge(entry.schema, tags, auth, deps),
+      handlers: entry.handlers,
+    }))
+
     const middleware = this.middlewares.map((handler) => ({
       prefix: prefix || undefined,
       handler,
@@ -304,10 +350,11 @@ export class Router<
     for (const child of this.children) {
       const collected = child.collect(prefix, { tags, auth, ...(deps ? { deps } : {}) })
       routes.push(...collected.routes)
+      sockets.push(...collected.sockets)
       middleware.push(...collected.middleware)
     }
 
-    return { routes, middleware }
+    return { routes, sockets, middleware }
   }
 }
 

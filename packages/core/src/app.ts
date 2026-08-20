@@ -353,13 +353,17 @@ export class App<Ext = unknown> implements BrickHost {
     }
 
     if (isRouter(first)) {
-      const { routes, middleware } = first.collect()
+      const { routes, sockets, middleware } = first.collect()
       // Middleware first, so a router's own middleware wraps its routes regardless of the order
       // the two happened to be declared in inside the router.
       for (const entry of middleware) {
         this.middleware.push(entry)
       }
       if (middleware.length > 0) this.invalidateChains()
+
+      for (const socket of sockets) {
+        this.ws(socket.pattern, (socket.schema ?? {}) as RouteSchema, socket.handlers)
+      }
 
       for (const route of routes) {
         // The same erasure `register` performs internally: one route table holds handlers for
