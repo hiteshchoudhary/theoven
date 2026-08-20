@@ -113,7 +113,9 @@ export {
 } from './openapi'
 export { type ParsedQuery, parseQuery, type QueryOptions, type QueryValue } from './query'
 export { toResponse } from './response'
-export { normalisePath, RouteConflictError, Router } from './router/router'
+// The radix tree, exported under a name that says what it is. `Router` now names the thing
+// users actually build (D30); this one is the structure underneath and is rarely imported.
+export { normalisePath, RouteConflictError, Router as RadixRouter } from './router/router'
 export {
   HTTP_METHODS,
   type HttpMethod,
@@ -121,6 +123,15 @@ export {
   type RouteMatch,
   type RouteParams,
 } from './router/types'
+export {
+  type CollectedRoute,
+  type CollectedRoutes,
+  isRouter,
+  Router,
+  type RouterOptions,
+  router,
+  routerFor,
+} from './routes'
 export {
   type EventStream,
   formatEvent,

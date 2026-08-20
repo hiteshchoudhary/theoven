@@ -851,8 +851,13 @@ its own nested 0.7.2 and still benchmarks.
 - [x] **D29 — response serialisation.** Option (a): schemas serialise in every environment,
       `serializeResponses` on by default; mismatch is a 500 in development and a logged,
       unfiltered 200 in production. Shipped.
-- [ ] **D30 — routers.** Reusable, mountable route groups with prefix/tags/auth defaults; the
-      single grouping primitive, including for bricks. Sub-app mounting explicitly out of scope.
+- [x] **D30 — routers.** Shipped. `router()`, `routerFor<typeof app>()`, `app.use(router)`,
+      nesting, scoped middleware, remounting. Sub-app mounting explicitly out of scope.
+      - [ ] Follow-up: migrate first-party bricks (`auth`, `mail`, `queue`, `openapi`) from
+            per-path `context.route` calls onto routers. Deferred because it changes
+            `MountRegistrar`, which third-party auth adapters implement — that deserves its own
+            change rather than riding along with a new feature.
+      - [ ] Follow-up: `router.ws()`. WebSocket routes are app-only today.
 - [ ] **D31 — dependencies.** Per-request, per-route, composable; `ctx.deps.<name>`; generator
       teardown; `app.override()` for tests. Wants D30 first so routers can carry deps.
 

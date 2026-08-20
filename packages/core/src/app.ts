@@ -16,8 +16,9 @@ import { ConsoleLogger, type Logger, type LogLevel } from './logger'
 import { appliesTo, compose, type Middleware } from './middleware'
 import type { QueryOptions } from './query'
 import { tookControl } from './response'
-import { normalisePath, Router } from './router/router'
+import { normalisePath, Router as RadixRouter } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
+import { isRouter, type Router } from './routes'
 import type { TokenOptions } from './token'
 import { pathnameOf } from './url'
 import {
@@ -157,7 +158,7 @@ export class App<Ext = unknown> implements BrickHost {
    */
   declare readonly __ext?: Ext
 
-  private readonly router = new Router<RouteEntry>()
+  private readonly router = new RadixRouter<RouteEntry>()
   private readonly sockets = socketRouter()
   /** Socket handlers by route pattern, looked up once a route matches. */
   private readonly socketRoutes = new Map<string, SocketHandlers<unknown>>()
@@ -296,6 +297,14 @@ export class App<Ext = unknown> implements BrickHost {
   use(middleware: Middleware): this
   use(prefix: string, middleware: Middleware): this
   /**
+   * Mounts a [router](./routes.ts) — its routes, its prefix, its defaults and any middleware it
+   * carries (D30).
+   *
+   * Mounting does not tie the router to this app, so the same router can be mounted twice under
+   * different prefixes, and a package can export one.
+   */
+  use(routes: Router<Ext>): this
+  /**
    * Registering a brick widens the context type with everything it contributes.
    *
    * Inferred from the brick object rather than from declared type parameters, so a caller
@@ -323,7 +332,7 @@ export class App<Ext = unknown> implements BrickHost {
   // type is assignable to both `this` and `App<Ext & {...}>`. `any` here is confined to the
   // signature; callers only ever see the typed overloads.
   use(
-    first: Middleware | string | Brick<string, unknown, Record<string, unknown>>,
+    first: Middleware | string | Router<Ext> | Brick<string, unknown, Record<string, unknown>>,
     second?: Middleware,
     // biome-ignore lint/suspicious/noExplicitAny: overload implementation signature
   ): any {
@@ -340,17 +349,41 @@ export class App<Ext = unknown> implements BrickHost {
       return this
     }
 
+    if (isRouter(first)) {
+      const { routes, middleware } = first.collect()
+      // Middleware first, so a router's own middleware wraps its routes regardless of the order
+      // the two happened to be declared in inside the router.
+      for (const entry of middleware) {
+        this.middleware.push(entry)
+      }
+      if (middleware.length > 0) this.invalidateChains()
+
+      for (const route of routes) {
+        // The same erasure `register` performs internally: one route table holds handlers for
+        // many different schemas, and no single signature covers them all.
+        this.register(
+          route.method,
+          route.path,
+          (route.schema ?? route.handler) as RouteSchema,
+          route.handler as unknown as ValidatedHandler<RouteSchema, Ext>,
+        )
+      }
+      return this
+    }
+
+    const brick = first as Brick<string, unknown, Record<string, unknown>>
+
     if (this.readyPromise) {
       throw new Error(
-        `Brick "${first.name}" was registered after the app started. Bricks must be added ` +
+        `Brick "${brick.name}" was registered after the app started. Bricks must be added ` +
           'before the first request, because their setup runs at boot.',
       )
     }
-    if (this.bricks.some((brick) => brick.name === first.name)) {
-      throw new Error(`Brick "${first.name}" is already registered.`)
+    if (this.bricks.some((registered) => registered.name === brick.name)) {
+      throw new Error(`Brick "${brick.name}" is already registered.`)
     }
 
-    this.bricks.push(first)
+    this.bricks.push(brick)
     return this
   }
 

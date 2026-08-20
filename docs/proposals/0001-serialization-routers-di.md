@@ -1,6 +1,6 @@
 # Proposal 0001 — Response serialisation, routers, and per-request dependencies
 
-Status: **D29 decided and shipped; D30/D31 awaiting decisions**
+Status: **D29 and D30 shipped; D31 awaiting a decision**
 Context: the three places Oven is behind FastAPI that matter for large codebases.
 
 Everything here is verified against the code at `313025d`, not recalled. Where a claim was
@@ -13,7 +13,7 @@ tested, the test is named.
 | | What it closes | Size | Risk | Order |
 | --- | --- | --- | --- | --- |
 | **1. Response serialisation** | output filtering — a real data-leak vector | S | medium (behaviour change) | **done (D29, option a)** |
-| **2. Routers** | reusable, composable route groups | M | low | second |
+| **2. Routers** | reusable, composable route groups | M | low | **done (D30)** |
 | **3. Dependencies** | per-request, per-route, composable injection | L | medium (new concept) | third |
 
 They are independent. Serialisation is worth doing on its own and immediately; DI is the large

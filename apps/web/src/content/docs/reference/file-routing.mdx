@@ -190,3 +190,9 @@ these files — `app.ts` loads the routes, and the routes only reference its typ
 
 Use `defineRoute` when a route touches no bricks; `route` everywhere else. They are the same
 function, one with the context bound.
+
+## When the filesystem is not enough
+
+File routing cannot express one guard shared across a group, the same routes mounted under two
+prefixes, or routes shipped from a package. [Routers](/docs/reference/routers/) can, and the two
+compose — most apps use file routing for their own endpoints and a router for the exceptions.

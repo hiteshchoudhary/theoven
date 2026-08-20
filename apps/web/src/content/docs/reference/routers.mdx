@@ -1,0 +1,193 @@
+---
+title: Routers
+description: Group routes, mount them anywhere, and share a prefix, tags and an auth requirement across them.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+```ts title="src/routes/admin.ts"
+import { routerFor } from '@theoven/core'
+import type { app } from '../app'
+
+export const admin = routerFor<typeof app>({ prefix: '/admin', tags: ['admin'], auth: 'staff' })
+
+admin.get('/users', (ctx) => ctx.db.select().from(users))
+admin.delete('/users/:id', { params: z.object({ id: z.uuid() }) }, (ctx) => remove(ctx.params.id))
+```
+
+```ts title="src/app.ts"
+import { admin } from './routes/admin'
+
+export const app = createApp().use(db(...)).use(auth(...)).use(admin)
+```
+
+Every route in that file is mounted under `/admin`, tagged `admin` in the OpenAPI document, and
+guarded by the `staff` policy — declared once.
+
+## What a router is
+
+A container for routes, with no lifecycle of its own. It holds them until something mounts it,
+which is what makes it safe to build at module scope, mount twice, or export from a package.
+
+`app.use(router)` registers everything it holds. After that the routes are ordinary routes:
+validated, guarded, documented, and visible in `oven routes`.
+
+## Defaults
+
+| Option | Applies |
+| --- | --- |
+| `prefix` | prepended to every path, and to every nested router's prefix |
+| `tags` | added to every route's OpenAPI tags |
+| `auth` | the requirement for every route in the group |
+
+Deliberately small. A router says what its routes have in common; anything that varies per route
+belongs on the route, where the reader is already looking.
+
+### Tags accumulate, everything else is overridden
+
+```ts
+const admin = router({ prefix: '/admin', tags: ['admin'] })
+admin.get('/users', { tags: ['users'] }, handler)
+// -> tags: ['admin', 'users']
+```
+
+A route under `/admin/users` is plausibly both, and dropping either would lose a grouping someone
+asked for. `auth` is not like that — two requirements are not more true than one, so the route's
+own wins.
+
+```ts
+const admin = router({ auth: 'staff' })
+admin.get('/reports', handler)                 // auth: 'staff'
+admin.get('/audit', { auth: 'owner' }, handler) // auth: 'owner'
+```
+
+<Aside type="note" title="`auth: false` survives">
+  One public route inside an otherwise guarded group is the case worth knowing about:
+
+  ```ts
+  const admin = router({ auth: 'staff' })
+  admin.get('/health', { auth: false }, () => ({ ok: true }))   // stays public
+  ```
+
+  The merge checks whether the route *declared* `auth`, not whether the value is truthy — so an
+  explicit `false` is respected rather than swallowed. There is a test named for this, because a
+  `||` in the wrong place would guard the route and nothing would look wrong.
+</Aside>
+
+## Nesting
+
+```ts
+const users = router({ prefix: '/users', tags: ['users'] })
+users.get('/:id', handler)
+
+const admin = router({ prefix: '/admin', tags: ['admin'], auth: 'staff' }).use(users)
+
+app.use(admin)   // GET /admin/users/:id, tags ['admin','users'], auth 'staff'
+```
+
+Prefixes join, tags accumulate down the tree, and a child's own `auth` overrides its parent's.
+
+## Middleware
+
+```ts
+const admin = router({ prefix: '/admin' })
+
+admin.use(async (ctx, next) => {
+  ctx.log.info('admin request')
+  return next()
+})
+```
+
+Scoped to the router's prefix, and it wraps the router's routes **regardless of the order** it
+was declared in relative to them — so a middleware written at the bottom of the file still runs
+first.
+
+Prefixes are segment-aware: `/admin` covers `/admin/users` and never `/administrators`.
+
+## Typing
+
+`routerFor<typeof app>()` binds the app's type so `ctx.db`, `ctx.user` and the rest are typed,
+exactly as [`routesFor`](/docs/reference/file-routing/#typing-ctx-with-your-bricks) does and for
+the same reason (D28): a router in its own module cannot see which bricks the app registered, and
+TypeScript cannot relate sibling modules.
+
+The import of `app` is **type-only**, so mounting the router in `app.ts` does not create a cycle.
+
+```ts
+import { router } from '@theoven/core'
+
+const health = router({ prefix: '/_health' })
+health.get('/live', () => ({ ok: true }))
+```
+
+Use plain `router()` when the routes touch no bricks — `ctx` is then just the core context.
+
+## Mounting twice
+
+```ts
+const api = router()
+api.get('/ping', () => 'pong')
+
+app.use(router({ prefix: '/v1' }).use(api))
+app.use(router({ prefix: '/v2' }).use(api))
+```
+
+Because a router holds routes rather than binding to an app, the same one can be mounted more
+than once. This is the mechanism behind versioned APIs, and behind a package that exports routes.
+
+## Routers or file-based routing?
+
+Both, usually. They answer different questions.
+
+| | File routing | Routers |
+| --- | --- | --- |
+| Grouping | by directory | explicit, in code |
+| Prefix | the directory path | `prefix` |
+| Shared `auth` / `tags` | per file | once, for the group |
+| Mountable twice | ✗ | ✓ |
+| Shippable from a package | ✗ | ✓ |
+| Discoverable by reading `ls` | ✓ | you have to find the file |
+
+[File-based routing](/docs/reference/file-routing/) stays the default for an application's own
+endpoints — the filesystem is a route table everyone can read. Reach for a router when you need
+something the filesystem cannot express: one shared guard over a group, a set of routes mounted
+under two prefixes, or routes shipped from a package.
+
+## Inspecting one
+
+```ts
+admin.size            // routes it holds, nested ones included
+admin.prefix          // '/admin'
+admin.collect()       // { routes, middleware } — prefixes joined, defaults applied
+```
+
+`collect()` is what `app.use()` calls. It is public so a package can see what it is about to
+register, and so the merge rules are testable without an app.
+
+## Limitations
+
+- **No sub-application mounting.** A router is routes, not a second app: it has no bricks, no
+  lifecycle and no error handler of its own. Mounting a whole `App` inside another — with the
+  questions that raises about whose middleware and whose error handler run — is not supported.
+- **First-party bricks still mount their own routes directly.** `auth`, `mail` and `queue`
+  register endpoints one at a time rather than building a router. Moving them changes a contract
+  that third-party auth adapters implement, so it is a separate change.
+- **No `ws()` on a router yet.** Register WebSocket routes on the app with
+  [`app.ws()`](/docs/reference/realtime/).
+- **No per-router error handling.** `onError` is app-wide.
+
+## How it is verified
+
+The merge rules carry the risk, so they are tested without an app at all: tags accumulating,
+`auth` overriding, `auth: false` surviving a guarded router, other schema keys untouched, and
+prefixes joining through nesting.
+
+Both of the subtle ones were confirmed to fail when broken — replacing tags instead of
+accumulating, and merging `auth` with `||` so an explicit `false` is swallowed. That second one is
+the reason the check reads `'auth' in schema`.
+
+Mounting is tested through a real app: every verb, prefix boundaries, validation still applying,
+middleware scoping, the same router mounted under two prefixes, and the routes appearing in
+`routeTable()`.
