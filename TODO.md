@@ -854,16 +854,18 @@ its own nested 0.7.2 and still benchmarks.
 
 [AI, sandboxes, ingest and payments](docs/proposals/0003-ai-sandboxes-ingest-payments.md).
 
-- [ ] **D38** — AI: wrap the Vercel AI SDK rather than write a model adapter per provider. The
-      obvious version reimplements something better-maintained that tracks a landscape changing
-      weekly; the defensible version is the infrastructure *around* inference.
+- [x] **D38** — AI: wrap the Vercel AI SDK rather than write a model adapter per provider.
+      **Answered: yes.** Peer dependency; verified on Bun — a real `generateText` call reached
+      OpenAI and failed only on the invalid key, so streaming and the provider spec work.
 - [ ] **D39** — Payments: narrow contract (checkout, webhook verification, fetch, refund).
       Subscriptions stay provider-specific — Paddle is a merchant of record and Stripe is not, and
       a contract unifying them would lie to one.
 - [ ] **D40** — Sandboxes: isolation is a declared capability; timeouts and resource limits are
       required arguments, not defaults.
-- [ ] **D41** — Which "ingest"? RAG document pipeline, or Inngest-style durable workflows. They
-      share a name and nothing else.
+- [x] **D41** — Which "ingest"? **Answered: Inngest**, the durable-execution platform. Shipping as
+      `@theoven/inngest`, a **direct integration** rather than a `workflow` contract — by our own
+      D14 rule a contract with one implementation is a guess, and writing a second durable executor
+      is a project, not an adapter. Extract the contract if Temporal or our own ever lands.
 
 Also surfaced while drafting: the middleware docs and `middleware.ts` both promise "a Redis-backed
 limiter arrives with `@theoven/queue`". It never arrived. `@theoven/ratelimit` is in the proposal

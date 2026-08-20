@@ -1,6 +1,6 @@
 # Proposal 0003 — AI, sandboxes, ingest and payments
 
-Status: **draft for review — no decisions taken**
+Status: **D38 and D41 answered; D39 and D40 still open**
 Context: the next phase of bricks. This is a list to argue with, not a plan to execute.
 
 ---
@@ -28,7 +28,7 @@ Two proposals below fail test 2 as originally imagined, and say so.
 | **AI** | `@theoven/ai` | ✅ but **not as model adapters** — see below | M |
 | | `@theoven/vector` + 4 adapters | ✅ strongest candidate in the set | M |
 | **Sandboxes** | `@theoven/sandbox` + 3 adapters | ✅ clean contract, highest security risk | L |
-| **Ingest** | *ambiguous* — two different products | ⚠️ **needs your call** | ? |
+| **Ingest** | `@theoven/inngest` | ✅ direct integration, no contract yet | L |
 | **Payments** | `@theoven/payments` + 3 adapters | ✅ with a deliberately narrow contract | L |
 | | `@theoven/webhooks` | ✅ small, broadly useful, groundwork already exists | S |
 | **Debt** | `@theoven/ratelimit` | ✅ the docs already promise this | S |
@@ -49,6 +49,16 @@ would reach us late. We would spend the phase catching up and still be behind.
 
 D14 says contracts exist so implementations are swappable. It does not say we have to write the
 implementations when somebody already maintains better ones.
+
+### Answer: yes, leverage it — verified under Bun
+
+`ai@7` and `@ai-sdk/openai` install and run on Bun. A real `generateText` call reached OpenAI and
+failed only on the invalid key, so fetch, streaming and the provider spec all work — checked rather
+than assumed, because Mongoose 9 taught us that "it is JavaScript" is not the same as "it runs on
+Bun".
+
+The SDK is a **peer dependency**: you install `ai` and whichever provider you want, we never pin a
+model package, and a new provider needs nothing from us.
 
 ### What to build instead
 
@@ -127,45 +137,68 @@ two implementations get. Passes.
 
 ---
 
-## Ingest — which one do you mean?
+## Ingest — it is Inngest
 
-"Ingest" is two different products and I do not want to guess.
-
-### (a) Document ingestion for RAG
-
-Parse → chunk → embed → store. Pairs with `vector`, `storage` and `queue`.
+Durable execution: functions made of steps that are individually memoised, so a retry resumes from
+the step that failed rather than from the beginning.
 
 ```ts
-await ctx.ingest.document(file, { collection: 'handbook', chunk: { size: 800, overlap: 100 } })
+inngest.createFunction({ id: 'onboarding', triggers: { event: 'user/created' } },
+  async ({ event, step }) => {
+    await step.run('provision', () => provision(event.data.userId))
+    await step.sleep('settle', '24h')
+    const upgraded = await step.waitForEvent('upgraded', { event: 'plan/upgraded', timeout: '30d' })
+    await step.run('email', () => sendTips(event.data.userId, upgraded))
+  })
 ```
 
-Parsers for PDF, DOCX, HTML and Markdown; chunkers; and the pipeline that puts the pieces
-together as a queue job so a 200-page upload does not block a request.
+### This is not our queue with extra features
 
-**Concern:** this is less a contract than a pipeline. The parsers are libraries, not swappable
-implementations of one interface — a PDF parser and an HTML parser do not implement the same thing
-in any meaningful sense. It may be better as *documentation and a recipe* over `vector` + `queue` +
-`storage` than as a brick. Worth arguing about.
+Worth being precise, because the two look adjacent and are not:
 
-### (b) Inngest — durable workflows
+| | [`@theoven/queue`](/docs/bricks/queue/) | Inngest |
+| --- | --- | --- |
+| Unit | a job | a function of steps |
+| Retry granularity | the **whole handler** re-runs | **the failed step**; earlier ones replay from memo |
+| Waiting | `delay` / `runAt`, in ms | `step.sleep('24h')`, `step.waitForEvent(…, '30d')` |
+| Triggered by | `dispatch(job, payload)` | an **event**, with fan-out to every matching function |
+| Flow control | `concurrency` per worker | per-tenant concurrency, throttling, debounce, rate limits |
+| Runs where | your worker, your infrastructure | Inngest calls **your app** over HTTP |
+| State | a row per job | durable execution state per run |
 
-Steps that survive restarts, sleep for days, and retry individually.
+A background job and a durable workflow are different primitives. The queue brick stays exactly as
+it is; this sits beside it.
 
-```ts
-export const onboarding = workflow('onboarding', async (step) => {
-  await step.run('create-user', () => …)
-  await step.sleep('wait-a-day', '24h')
-  await step.run('send-tips', () => …)
-})
-```
+### Shape: a direct integration, not a contract — yet
 
-Contract over Inngest, Temporal, and possibly our own queue for the simple cases. This is a
-**much larger** and more interesting brick than (a), and it overlaps the queue brick in ways that
-need thinking about — a durable workflow is not a job, but it is made of them.
+The obvious version is `@theoven/workflow` plus `workflow-inngest`, `workflow-temporal` and one
+over our own queue.
 
-**Please pick.** They share a name and nothing else.
+**By our own rule that would be premature.** D14 exists because `db-drizzle` alone proved nothing —
+a contract with one implementation is a guess, shaped around the only thing it has ever met. There
+is no second implementation here today, and writing our own durable executor (deterministic replay,
+per-step memoisation, a `workflow_runs` table) is a project in itself, not an adapter.
 
----
+So: **`@theoven/inngest`, a direct integration**, exactly as
+[`auth-better`](/docs/bricks/auth-better/) wraps better-auth rather than pretending to abstract it.
+Extract a contract if and when a second executor lands.
+
+What the brick does:
+
+| | |
+| --- | --- |
+| Mounts Inngest's serve handler | the `routes` capability (D19) — Inngest calls your app, so it needs an endpoint |
+| Puts the client on the context | `ctx.inngest.send({ name, data })` to emit events from a handler |
+| Registers functions at boot | so `oven routes` shows what is mounted, and a missing one fails at startup |
+| Wires the signing key | verified against `ctx.rawBody`, the same machinery as webhooks |
+| Traces steps | child spans through the [telemetry brick](/docs/bricks/telemetry/) |
+
+**Not wrapping AgentKit.** It is Inngest's agent framework and moves fast; the same argument that
+keeps us out of the agent business generally.
+
+**Honest limitation to put on the page:** this makes your app depend on a hosted service to run
+its workflows. Inngest self-hosts, so it is not a lock-in argument — but it is a second thing to
+operate, and an app that only needs "run this later" should use the queue.
 
 ## Payments
 
@@ -256,7 +289,7 @@ Small, overdue, and it removes a documented claim that is not true.
 5. **`payments`** — largest, and best done after `webhooks` proves the signature machinery
 6. **`sandbox`** — deliberately last: highest risk, and it wants the AI brick to exist to be worth
    anything
-7. **`ingest`** — after you tell me which one it is
+7. **`inngest`** — last, and independent of the rest
 
 ---
 
@@ -264,7 +297,7 @@ Small, overdue, and it removes a documented claim that is not true.
 
 | | |
 | --- | --- |
-| **D38** | AI: wrap the AI SDK rather than write model adapters. |
+| ~~D38~~ | ~~AI: wrap the AI SDK~~ — **answered: yes.** Peer dependency, verified working on Bun. |
 | **D39** | Payments: narrow contract; subscriptions stay provider-specific behind capabilities. |
 | **D40** | Sandbox isolation is a declared capability, and limits are required arguments. |
-| **D41** | Which "ingest" — and, if RAG, whether it is a brick at all or a recipe. |
+| ~~D41~~ | ~~Which "ingest"~~ — **answered: Inngest.** Shipped as a direct integration, not a contract, until a second durable executor exists to prove one. |
