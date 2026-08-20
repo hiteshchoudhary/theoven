@@ -1,6 +1,6 @@
 {
   "name": "@theoven/webhooks",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Verified inbound webhooks for Oven \u2014 Stripe, GitHub, Slack, Svix, Razorpay and Shopify",
   "keywords": [
     "bun",

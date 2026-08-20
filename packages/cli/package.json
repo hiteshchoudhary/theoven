@@ -1,6 +1,6 @@
 {
   "name": "@theoven/cli",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "The Oven CLI \u2014 scaffold, run, build and inspect Oven apps",
   "keywords": [
     "bun",

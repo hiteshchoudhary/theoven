@@ -1,6 +1,6 @@
 {
   "name": "@theoven/storage",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "S3-compatible object storage for Oven \u2014 S3, R2, MinIO, Spaces, plus a local-disk driver for development",
   "keywords": [
     "bun",
