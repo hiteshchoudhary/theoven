@@ -1,0 +1,53 @@
+{
+  "name": "@theoven/ai",
+  "version": "0.5.2",
+  "description": "The infrastructure around AI SDK calls — SSE streaming, caching, token accounting and budgets",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "ai",
+    "llm",
+    "streaming",
+    "ai-sdk",
+    "tokens"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/ai/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/ai"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^",
+    "ai": ">=5"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:^",
+    "ai": "^7.0.70"
+  }
+}

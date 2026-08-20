@@ -1,0 +1,303 @@
+---
+title: ai
+description: Everything around an AI SDK call — SSE streaming, abort on disconnect, caching, token accounting and budgets.
+sidebar:
+  order: 20
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/ai` |
+| **Adds to context** | `ctx.ai` |
+| **Endpoints** | none |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/ai ai @ai-sdk/openai
+```
+
+`ai` is a peer dependency, and so is the provider package. You choose the model; this brick
+never picks one for you.
+
+```ts title="src/app.ts"
+import { openai } from '@ai-sdk/openai'
+import { ai } from '@theoven/ai'
+import { createApp } from '@theoven/core'
+
+export const app = createApp().use(ai({ model: openai('gpt-4o-mini') }))
+```
+
+```ts title="src/routes/chat.post.ts"
+import { z } from 'zod'
+
+export const body = z.object({ prompt: z.string().max(2000) })
+
+export default (ctx) => ctx.ai.stream({ prompt: ctx.body.prompt })
+```
+
+That route streams tokens to the browser as server-sent events, stops paying the moment the
+user closes the tab, and records what it cost.
+
+## What it does
+
+**It deliberately does not wrap the AI SDK's model layer.** Providers, prompts, tools and
+structured output are the SDK's job, it does them well, and putting our names on them would age
+badly — and would teach a coding model nothing, since it already knows `generateText` cold.
+It is the same reasoning behind [the database brick](/docs/bricks/db/): `ctx.db` *is* the
+Drizzle client rather than a wrapper over it, and `ctx.ai.generate` is `generateText` with the
+infrastructure attached.
+
+What is genuinely missing when you call the SDK straight from a route is everything around the
+call, and each piece is something people rediscover in production:
+
+| | Without the brick |
+| --- | --- |
+| Streaming to a browser | hand-rolled SSE framing, usually without heartbeats |
+| Client disconnects | the provider keeps generating, and keeps billing |
+| The same prompt twice | paid for twice |
+| The same prompt twice *at once* | paid for twice, and no cache prevents it |
+| What did that cost? | token counts scattered across call sites, or nothing |
+| A runaway agent loop | discovered on the invoice |
+
+## Configuration
+
+```ts title="src/app.ts"
+import { anthropic } from '@ai-sdk/anthropic'
+import { openai } from '@ai-sdk/openai'
+import { ai } from '@theoven/ai'
+import { cache, redisCache } from '@theoven/cache'
+
+export const app = createApp()
+  .use(cache(redisCache({ url: env.string('REDIS_URL') })))
+  .use(
+    ai({
+      model: anthropic('claude-sonnet-4-5'),
+      embeddingModel: openai.embedding('text-embedding-3-small'),
+
+      // Uses the cache brick registered above. Pass `store` for anything else with get/set.
+      cache: { ttl: 3_600_000 },
+
+      // Currency units per one million tokens. Yours, not ours — see below.
+      pricing: {
+        'claude-sonnet-4-5': { input: 3, output: 15, cachedInput: 0.3 },
+        'text-embedding-3-small': { input: 0.02, output: 0 },
+      },
+
+      budget: { tokens: 50_000 },
+
+      onUsage: (record) => {
+        metrics.increment('ai.tokens', record.usage.totalTokens ?? 0, { model: record.model })
+      },
+    }),
+  )
+```
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `model` | `LanguageModel` | — | Default chat model. Any call may override it. |
+| `embeddingModel` | `EmbeddingModel` | — | Default model for `embed()`. |
+| `cache` | `boolean \| object` | off | `true` or an object turns caching on. |
+| `cache.store` | `{ get, set }` | the `cache` brick | Where cached answers live. |
+| `cache.ttl` | `number` | none | Milliseconds. Absent means it never expires on its own. |
+| `pricing` | `Record<string, ModelPricing>` | — | Per million tokens, keyed by model id. |
+| `budget.tokens` | `number` | — | Token ceiling per request. |
+| `onUsage` | `(record) => unknown` | — | Called after every call, cache hits included. |
+
+### Why there is no built-in price table
+
+A shipped price table is wrong the week a provider changes a price, and *silently* wrong — the
+number still looks authoritative in your dashboard. Yours lives in your repo next to the rest of
+your billing assumptions, where a stale figure shows up in review.
+
+Without `pricing`, `cost` is `undefined` everywhere. Not `0`.
+
+<Aside type="caution" title="Absent is not zero">
+Every token count the AI SDK reports is typed `number | undefined`, because plenty of providers
+do not report usage at all and some report it only on non-streaming calls. This brick keeps the
+distinction all the way through. A missing count stays `undefined` and a cost that cannot be
+computed stays `undefined` — because an always-zero cost column is worse than an empty one.
+Nobody investigates a zero.
+</Aside>
+
+## Usage
+
+### Generate
+
+```ts
+const { text, usage, cost, cached, raw } = await ctx.ai.generate({
+  prompt: 'Summarise this ticket in one line.',
+})
+```
+
+`raw` is the full AI SDK result — tool calls, steps, response metadata. It is **absent on a
+cache hit**, because a cached entry holds text and token counts, not a live result object, and
+fabricating one would hand you an empty `toolCalls` array that reads as "the model called
+nothing" rather than "this was never asked". In practice a call using tools is never cached at
+all, so `raw` only ever goes missing on a plain text generation.
+
+### Stream
+
+```ts title="src/routes/chat.post.ts"
+export default (ctx) => ctx.ai.stream({ prompt: ctx.body.prompt })
+```
+
+The wire format is deliberately small, so anything can read it — `EventSource`, curl, a mobile
+client:
+
+```
+event: delta
+data: {"text":"Hel"}
+
+event: delta
+data: {"text":"lo"}
+
+event: done
+data: {"text":"Hello","usage":{"inputTokens":11,...},"cost":0.000045,"cached":false}
+```
+
+```ts title="client"
+const events = new EventSource('/chat')
+events.addEventListener('delta', (e) => (output.textContent += JSON.parse(e.data).text))
+events.addEventListener('done', (e) => events.close())
+```
+
+For a client built on the SDK's own UI hooks, use `streamRaw` and its protocol instead. That
+format carries tool calls, reasoning parts and structured output, and a reimplementation here
+would only be a worse copy that drifts:
+
+```ts
+export default (ctx) => ctx.ai.streamRaw({ prompt: ctx.body.prompt }).toUIMessageStreamResponse()
+```
+
+Accounting still happens — `streamRaw` attaches it whether or not you read `usage` yourself.
+
+### Embed
+
+```ts
+const { embedding } = await ctx.ai.embed({ value: document })
+await ctx.vector.upsert([{ id, embedding, metadata: { document } }])
+```
+
+Embeddings are the one place caching is unambiguously correct: the same text always embeds to
+the same vector, so a cache hit is not an approximation of the answer, it *is* the answer. This
+pairs directly with [the vector brick](/docs/bricks/vector/).
+
+### Knowing what a request spent
+
+```ts
+export default async (ctx) => {
+  const result = await ctx.ai.generate({ prompt: ctx.body.prompt })
+  ctx.log.info('answered', ctx.ai.usage)
+  //   { inputTokens, outputTokens, totalTokens, cost, calls, cachedCalls }
+  return { text: result.text }
+}
+```
+
+`ctx.ai` is bound to the request it is on. Its totals, budget and abort signal are that
+request's, not the process's — a second request never sees the first one's numbers.
+
+**These totals count what was actually spent.** A call served from the cache adds to `calls`
+and `cachedCalls` but contributes no tokens and no cost, because none were billed. That matters
+beyond tidiness: the budget is checked against these totals, so counting cache hits would let a
+request answered entirely from cache exhaust an allowance it never spent. On a cache hit `cost`
+is `0` — free, which is a different thing from the `undefined` that means *cannot be known*.
+
+For a call you make through the SDK directly, fold it into the same accounting:
+
+```ts
+const result = await generateText({ model: ctx.ai.model, tools, prompt })
+ctx.ai.record(result.usage, 'generate', 'gpt-4o')
+```
+
+### Outside a request
+
+Queue workers and scripts get the same service from the app, and can take their own ceiling:
+
+```ts
+const worker = app.service('ai').scope({ budget: 20_000 })
+await worker.generate({ prompt })
+```
+
+## Capabilities
+
+**What it does:**
+
+- Streams as SSE, with heartbeats, and aborts the provider call when the client disconnects.
+- Caches `generate`, `stream` and `embed`, keyed on the model id and every option that can
+  change the answer.
+- Collapses identical concurrent calls into one provider call.
+- Normalises token usage across AI SDK 5, 6 and 7, whose usage shapes differ.
+- Prices calls when you supply rates, including provider-side prompt caching at its own rate.
+- Enforces a per-request token budget, and refuses with a `429`.
+
+**What fails, and when:**
+
+| Situation | What happens |
+| --- | --- |
+| No model configured | `AiConfigurationError`, a `500` naming the missing model |
+| `cache` requested, none available | fails at **boot**, naming the fix |
+| Budget already spent | `AiBudgetExceededError`, a `429` carrying `spent` and `budget` |
+| `onUsage` throws or rejects | logged as a warning; the request succeeds |
+| Provider fails mid-stream | an `error` event on the stream — the `200` is already committed |
+
+That last row is the one to design around. `stream()` returns a `Response`, so anything
+knowable beforehand — no model, budget exhausted — is thrown before the response exists and
+becomes an ordinary problem document. Once the first token is written the status is already
+`200`, and a provider failing after that can only be reported in-band.
+
+## Limitations
+
+- **A budget bounds how many calls a request makes, not how large any one of them is.** Token
+  counts are unknown until the provider answers, so the check happens before each call, not
+  during. A single call can overshoot. `maxOutputTokens` is the per-call ceiling.
+- **Caching makes generation deterministic for the TTL.** Correct for classification,
+  extraction and embeddings; wrong for anything a user expects to vary between attempts. It is
+  off unless configured, and any call can opt out with `cache: false`.
+- **Calls carrying tools are never cached.** A tool holds an `execute` function, and two tool
+  sets differing only in what that function does would otherwise share a key — serving one
+  caller another's answer. The same applies to binary prompt content.
+- **In-flight deduplication is per process.** Ten concurrent identical prompts on one instance
+  become one provider call; ten instances make ten.
+- **Budgets are per scope, not per user.** A per-user monthly allowance needs storage and a
+  reset policy, which is an application decision. Use `onUsage` to record, and check your own
+  total before calling.
+- **No model, provider or prompt abstraction**, by design. Switching providers is an AI SDK
+  concern, and this brick stays out of it.
+
+## How it is verified
+
+43 tests, no network and no API key — the AI SDK ships mock models, so every test drives a real
+`generateText` and `streamText` through the real mapping layer rather than a stand-in for it.
+
+What they actually prove:
+
+- **Usage normalisation across SDK versions.** The v7 nested shape and the v5 flat shape both
+  produce the same counts, and a provider reporting nothing produces `undefined` rather than
+  `0` — asserted explicitly, because that single defaulting mistake is what turns a bill into a
+  row of zeroes.
+- **Pricing**, including provider-cached input billed at its own rate (the test pins the
+  difference at an order of magnitude on a cache-heavy workload) and a guard against a negative
+  charge when a provider reports more cache reads than input tokens.
+- **Cache keys** are order-independent, differ across prompt, model and operation, ignore
+  options that cannot change the answer, and *refuse* to key a call carrying a function.
+- **The stampede.** Ten concurrent identical generations against a cold cache reach the
+  provider exactly once.
+- **Request isolation.** Two requests through the same app report their own totals — the test
+  fails with `30` instead of `15` if the accumulator is ever shared.
+- **The budget is a `429` problem document, not a `200` with an error event** — which is what it
+  degrades into if the check is moved inside the stream producer, and the test catches exactly
+  that move.
+- **Cache hits are free, and the budget knows it.** A request making one live call and three
+  cached replays against a 20-token budget succeeds and reports 15 tokens — it fails if cache
+  hits are ever folded back into spend.
+- **Disconnect cancels the provider.** A real server, a real `fetch`, a real abort, asserting
+  the signal reached the model and fired — because that signal is the only thing that stops a
+  provider from billing, and a stream that merely *looks* stopped is still being paid for.
+
+Every one of these was confirmed to fail when the behaviour it covers is deliberately broken.
