@@ -175,6 +175,14 @@ import { createApp, silentLogger } from '@theoven/core'
 const app = createApp({ logger: silentLogger })
 ```
 
+`silentLogger` discards everything. Without it a test run is buried in request logs, and an
+assertion failure is somewhere in the scroll — but note it also hides the log lines a **failing**
+test might have explained itself with. When a test fails for reasons you cannot see, take it off
+and run that one file.
+
+```ts
+```
+
 Worth doing for any test that deliberately triggers an error, or your passing suite prints a wall
 of red stack traces.
 

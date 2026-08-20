@@ -211,6 +211,29 @@ app.use(transactional())
 rather than running your work unwrapped. [`db-mongoose`](/docs/bricks/db-mongoose/#transactions) is
 the case that exists.
 
+## Checking health yourself
+
+`healthPath` mounts an endpoint. `checkHealth` is the same check, for when you want it inside one
+of your own:
+
+```ts title="src/routes/health.get.ts"
+import { checkHealth } from '@theoven/db'
+
+export default async (ctx) => {
+  const database = await checkHealth(ctx.db)
+  ctx.status = database ? 200 : 503
+  return { status: database ? 'healthy' : 'degraded', database }
+}
+```
+
+It issues a **real query** — `select 1`, or a `ping` on Mongo — rather than asking whether a pool
+object exists. A health check that cannot fail is not a health check, and one that only inspects a
+client reports healthy for a connection whose server has gone away.
+
+Returns `false` rather than throwing, so a health endpoint answers `503` instead of `500`. A load
+balancer reads the status line either way, but a `500` looks like a bug in the endpoint rather than
+a statement about the database.
+
 ## Capabilities
 
 | | |

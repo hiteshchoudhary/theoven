@@ -384,6 +384,84 @@ ctx.auth.capabilities?.signOut     // false on auth-clerk
 await ctx.auth.signOut?.(ctx)
 ```
 
+## Using the pieces directly
+
+The eight endpoints are the common case. Everything behind them is exported, for the cases where
+you need your own endpoint but not your own security.
+
+### The flows
+
+```ts
+import {
+  changePassword,
+  login,
+  logout,
+  refresh,
+  requestPasswordReset,
+  resetPassword,
+  signup,
+} from '@theoven/auth'
+```
+
+Each takes `ctx.auth.flows` — the same `FlowConfig` the mounted endpoints use, so password rules,
+hashing, token lifetimes and single-use reset semantics cannot drift from them:
+
+```ts title="src/routes/register.post.ts"
+export default async ({ auth, body, db }) => {
+  const { user, tokens } = await signup(auth.flows, body)
+  await db.insert(workspaces).values({ ownerId: user.id, name: body.workspace })
+  return { user, ...tokens }
+}
+```
+
+| | Returns | Notes |
+| --- | --- | --- |
+| `signup(flows, { email, password, name })` | `{ user, tokens }` | `409` on a duplicate email |
+| `login(flows, { email, password })` | `{ user, tokens }` | identical message and timing for a wrong password and an unknown email |
+| `refresh(flows, token)` | `{ user, tokens }` | rotates — the old token stops working |
+| `logout(flows, token)` | `void` | deletes the refresh row; twice is not an error |
+| `changePassword(flows, userId, { current, next })` | `void` | ends every other session |
+| `requestPasswordReset(flows, email)` | `void` | succeeds silently for an unknown address, so it cannot be used to find accounts |
+| `resetPassword(flows, token, password)` | `void` | single use |
+
+### Linking a provider from a settings page
+
+Signing in with a provider links it as a side effect. Detaching one is a call you make:
+
+```ts title="src/routes/settings/unlink.post.ts"
+import { unlinkAccount } from '@theoven/auth'
+
+export const auth = true
+export const body = z.object({ provider: z.enum(['google', 'github']) })
+
+export default async ({ auth, body, user }) => {
+  await unlinkAccount(auth.flows.store, user.raw, body.provider)
+  return { unlinked: true }
+}
+```
+
+It refuses with a `409` when that provider is the person's **last** way of signing in — removing it
+would lock them out of their own account, and no confirmation dialog makes that recoverable.
+
+<Aside type="note" title="There is no matching link endpoint yet">
+  Attaching a provider to the account you are already signed in as is not built. Linking happens
+  through signing in, so a password user has to sign out first. Tracked, and the shape above is
+  where it will go.
+</Aside>
+
+### Hashing, for seeding and migration
+
+```ts
+import { hashPassword, verifyPassword } from '@theoven/auth'
+
+// Importing users from an old system, or seeding a development database.
+await db.insert(users).values({ ...row, passwordHash: await hashPassword(temporary) })
+```
+
+argon2id with Bun's default cost parameters — not numbers we invented. `verifyPassword` returns
+`false` for a malformed hash rather than throwing, so a corrupt row fails a login instead of taking
+down the endpoint.
+
 ## Writing a provider
 
 ```ts

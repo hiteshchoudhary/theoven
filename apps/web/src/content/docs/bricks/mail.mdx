@@ -78,6 +78,15 @@ export const welcome = defineTemplate<{ name: string; link: string }>((props) =>
 }))
 ```
 
+<Aside type="caution" title="`escapeHtml` is not decoration">
+  A template is a string, and a name is user input. `Hi ${props.name}` with a name of
+  `<img src=x onerror=…>` puts working script into an email — which renders in some clients, and
+  in a webmail preview pane renders on **your** recipient's screen.
+
+  `escapeHtml` replaces `& < > " '` with entities. Apply it to every interpolated value in an
+  `html` part. The `text` part needs no escaping, because nothing renders it.
+</Aside>
+
 ```ts
 await ctx.mail.sendTemplate({
   to: user.email,

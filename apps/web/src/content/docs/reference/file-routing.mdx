@@ -25,6 +25,29 @@ await loadRoutes(app, `${import.meta.dir}/routes`)
 await app.listen()
 ```
 
+## `loadRoutes(app, dir)`
+
+```ts title="src/index.ts"
+await loadRoutes(app, `${import.meta.dir}/routes`)
+```
+
+Scans the directory, reads every route module, and registers what it finds. Three things about it
+are worth knowing.
+
+**It is awaited, and must finish before the first request.** Routes are registered as they are
+read, so calling `listen()` without awaiting this serves 404s for however long the scan takes.
+
+**`import.meta.dir`, not a relative path.** A relative path resolves against the process's working
+directory, so the app works when started from the project root and fails from anywhere else.
+
+**In production it does not scan at all.** `oven build` writes a manifest of static imports and
+installs it; `loadRoutes` uses that instead of touching the filesystem. Your code is identical in
+both, which is the only way the two stay in agreement — see [Production builds](#production-builds).
+
+Registration order is deterministic: files are sorted before they are read, so two machines produce
+the same route table. A route conflict that reproduces only on a colleague's laptop is a miserable
+thing to chase.
+
 ## Conventions
 
 | Filename | Meaning |

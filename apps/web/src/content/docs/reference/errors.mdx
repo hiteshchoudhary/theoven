@@ -173,3 +173,26 @@ app.use(async (ctx, next) => {
 
 Refusals the framework generates itself — `404`, `405`, `501` — are returned rather than thrown,
 so middleware still sees them as responses and can add its headers.
+
+## `toOvenError(thrown)`
+
+An `onError` handler receives whatever was thrown, which is not necessarily an `OvenError` — a
+driver can throw a string, and a rejected promise can carry anything at all.
+
+```ts
+import { toOvenError } from '@theoven/core'
+
+createApp({
+  onError: (error, ctx) => {
+    const problem = toOvenError(error)
+
+    // Now `status` is a number, whatever was actually thrown.
+    if (problem.status >= 500) reportToSentry(problem, { requestId: ctx.id })
+    return undefined // fall through to the default rendering
+  },
+})
+```
+
+Anything that is already an `OvenError` is returned unchanged. Anything else becomes a `500` whose
+message is withheld in production — which is the same normalisation the default handler applies, so
+using it means your handler and the framework agree about what a thrown string means.
