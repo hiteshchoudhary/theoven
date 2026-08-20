@@ -68,9 +68,9 @@ Use the separate-export form when a route is small and you do not mind an untype
 the handler.
 
 <Aside type="caution" title="`auth` was ignored in 0.1.2">
-  In the published `0.1.2`, `export const auth` was collected into nothing and the route answered
-  **anonymously with a 200**. `defineRoute({ auth: true }, …)` was unaffected. Fixed after 0.1.2;
-  if you are pinned to it, use `defineRoute` or upgrade.
+  In `0.1.2`, `export const auth` was collected into nothing and the route answered **anonymously
+  with a 200**. `defineRoute({ auth: true }, …)` was unaffected. **Fixed in 0.1.3** — upgrade, or
+  use `defineRoute` if you are pinned.
 </Aside>
 
 ## A route file

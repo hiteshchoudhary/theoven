@@ -1,6 +1,6 @@
 {
   "name": "@theoven/storage-bunny",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Bunny.net Storage for Oven — object storage plus signed pull-zone URLs",
   "keywords": [
     "bun",

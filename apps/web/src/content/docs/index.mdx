@@ -3,6 +3,8 @@ title: Oven documentation
 description: The batteries-included Bun framework — guides, tutorial and API reference.
 ---
 
+import { Aside } from '@astrojs/starlight/components'
+
 Oven is a backend framework for Bun. It replaces Express, takes its cues from FastAPI, and is
 TypeScript-native end to end.
 
@@ -72,16 +74,22 @@ crash at 3am.
 
 ## Status
 
-**0.1.2, on npm.** Everything documented here is published and installable:
+**0.1.3, on npm.** Everything documented here is published and installable:
 
 ```bash
 bun create theoven my-app --db sqlite --auth basic
 ```
 
-Core, the CLI, and eleven bricks — database (Drizzle, Mongoose), auth (email/password on SQL or
-Mongo, Clerk, better-auth), mail, storage and queues. See the
-[brick catalogue](/docs/bricks/) for what each one does, and the
+Core, the CLI, and fifteen bricks — database (Drizzle, Mongoose), auth (email/password on SQL or
+Mongo, Clerk, better-auth), storage (S3, disk, Bunny, ImageKit), mail, queues, cache and
+OpenTelemetry. See the [brick catalogue](/docs/bricks/) for what each one does, and the
 [roadmap](https://github.com/hiteshchoudhary/theoven/blob/main/TODO.md) for what is next.
+
+<Aside type="caution" title="Upgrade from 0.1.2">
+  In 0.1.2, a route file declaring `export const auth = true` was **not guarded** — the
+  declaration was dropped on the way to the auth brick and the route answered anonymously with a
+  `200`. `defineRoute({ auth: true }, …)` was unaffected. Fixed in 0.1.3.
+</Aside>
 
 Pre-1.0, so APIs can still change between minor versions — that freedom is deliberate while the
 contracts settle. Every brick page lists what it **cannot** do under Limitations, because a page
