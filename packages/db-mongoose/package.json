@@ -1,6 +1,6 @@
 {
   "name": "@theoven/db-mongoose",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Mongoose for Oven — MongoDB through the same database contract",
   "keywords": [
     "bun",

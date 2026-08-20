@@ -65,6 +65,30 @@ for (const name of readdirSync(PACKAGES).sort()) {
     }
   }
 
+  /**
+   * A workspace range that resolved to a version other than the one being shipped.
+   *
+   * `bun pm pack` rewrites `workspace:^` using the **lockfile's** recorded version, not the
+   * manifest's. Bumping versions by editing package.json without re-running `bun install` leaves
+   * the lock stale, and every package then ships a peer range for a version it was never built
+   * against — 0.1.3 through 0.3.0 all shipped declaring `@theoven/core: ^0.1.2`, which excludes
+   * the core they were published beside.
+   *
+   * Silent, because nothing fails until a consumer installs and reads the warning.
+   */
+  for (const field of ['dependencies', 'peerDependencies']) {
+    for (const [dependency, range] of Object.entries(shipped[field] ?? {})) {
+      if (!dependency.startsWith('@theoven/') && dependency !== 'create-theoven') continue
+      const expected = `^${shipped.version}`
+      if (range !== expected) {
+        problems.push(
+          `${manifest.name}: ${field}.${dependency} shipped as "${range}", expected ` +
+            `"${expected}". The lockfile is stale — run \`bun install\` after bumping versions.`,
+        )
+      }
+    }
+  }
+
   // Tests pull devDependencies a consumer does not have, and are dead weight in every install.
   const tests = listing.filter((file) => /\.test\.[jt]sx?$/.test(file))
   if (tests.length > 0) {

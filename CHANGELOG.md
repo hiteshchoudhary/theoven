@@ -4,6 +4,26 @@ Every package is versioned together. Pre-1.0, minor versions may break.
 
 ---
 
+## 0.3.1
+
+### Fixed — every package declared a peer range for the wrong version
+
+`@theoven/mail@0.3.0` declared `peerDependencies: { "@theoven/core": "^0.1.2" }`, which **excludes
+the core it shipped beside**. Every dependent package had the same, going back to 0.1.3 — so
+installing produced a peer-dependency warning, and a strict resolver could refuse outright.
+
+`bun pm pack` rewrites `workspace:^` using the **lockfile's** recorded version rather than the
+manifest's. Versions were being bumped by editing `package.json` without re-running `bun install`,
+leaving the lock pinned at 0.1.2 and every published range with it.
+
+Nothing about 0.3.0's code changed. If you installed anything at 0.1.3–0.3.0 and saw a peer
+warning, this is it — upgrade to 0.3.1.
+
+`check-publish` now compares each shipped `@theoven/*` range against the version being published
+and refuses if they disagree, so a stale lockfile cannot ship again.
+
+---
+
 ## 0.3.0
 
 ### Router-level dependencies
