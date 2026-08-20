@@ -227,7 +227,7 @@ The key is always what **you** passed. A browser's filename is never used as one
   than storing them.
 - **`list` on the disk driver reads the whole directory tree** before paging. Fine for
   development; it is not an index.
-- **No copy or move.** Read and write, or reach through `ctx.storage.raw`.
+- **No copy or move.** Read and write, or reach through [`ctx.storage.raw`](/docs/reference/bricks/#raw--the-escape-hatch) — which ties that code to one driver.
 
 ## How it is verified
 

@@ -113,7 +113,7 @@ describe them. better-auth documents its own endpoints.
 an extracted token — so whichever scheme you configured, cookie or bearer, keeps working without
 this brick knowing about it.
 
-`ctx.user.raw` is better-auth's user object, including any fields you added with
+[`ctx.user.raw`](/docs/bricks/auth/#userraw--the-escape-hatch) is better-auth's user object, including any fields you added with
 `additionalFields`.
 
 `refresh` is **not** declared: better-auth rotates sessions on its own endpoints, and there is no

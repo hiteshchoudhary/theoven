@@ -146,7 +146,9 @@ export const auth = true
 export default async ({ user }) => ({ id: user.id, email: user.email, name: user.name })
 ```
 
-`user.raw` is the stored user document, so anything you added to the collection is reachable.
+[`user.raw`](/docs/bricks/auth/#userraw--the-escape-hatch) is the stored user document, so anything you added to the collection is reachable.
+
+It is the **whole** document, `passwordHash` included — fine for a policy, not something to return from a handler.
 
 ### Calling the flows yourself
 

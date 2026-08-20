@@ -234,7 +234,7 @@ export const auth = true
 export default async ({ user }) => ({ id: user.id, email: user.email, name: user.name })
 ```
 
-`user.raw` is the stored row, so any column you added to `auth_users` is reachable — and is what a
+[`user.raw`](/docs/bricks/auth/#userraw--the-escape-hatch) is the stored row, so any column you added to `auth_users` is reachable — and is what a
 [policy](/docs/bricks/auth/#policies) reads:
 
 ```ts title="src/app.ts"

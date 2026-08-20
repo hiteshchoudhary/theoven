@@ -136,6 +136,61 @@ setup: (context) => {
 
 This is how `/auth/*` and the docs UI will mount themselves.
 
+## `raw` — the escape hatch
+
+Every first-party service exposes the thing underneath it:
+
+```ts
+ctx.storage.raw   // the Bun.S3Client, or the directory path
+ctx.queue.raw     // the Bun.RedisClient, or the SQL client
+ctx.cache.raw     // likewise
+ctx.auth          // the provider itself
+ctx.db            // not an escape hatch — `ctx.db` *is* the Drizzle client (D16)
+```
+
+This is what makes a small contract acceptable. A contract is only worth having if it is the
+**genuine intersection** of its implementations — the moment it grows a method that one driver has
+to fake, it has started lying. So anything a single driver can do and the others cannot stays off
+the contract, and `raw` is how you reach it:
+
+```ts
+// S3 can copy an object server-side. Disk, Bunny and ImageKit cannot, so `copy` is not on the
+// contract — and reaching through `raw` is how you use it anyway.
+const s3 = ctx.storage.raw as Bun.S3Client
+await s3.file('archive/report.pdf').write(s3.file('reports/2026-q3.pdf'))
+```
+
+<Aside type="caution" title="`raw` is `unknown`, and that is the point">
+  Service-level `raw` is typed `unknown`, so the cast above is not an oversight — it is you
+  stating which driver you have assumed. The compiler cannot know, because the whole purpose of the
+  contract is that the driver is swappable.
+
+  The consequence is worth being deliberate about: **code that reaches through `raw` stops being
+  portable.** It works until someone changes the driver, and then it fails at runtime rather than
+  at build time. Keep those reaches in one file, and check `ctx.storage.driver` if you need to
+  branch:
+
+  ```ts
+  if (ctx.storage.driver !== 's3') throw new ServiceUnavailable('Copy needs S3.')
+  ```
+</Aside>
+
+`user.raw` is the same idea with one difference: it is **typed per adapter** rather than `unknown`,
+because an auth provider's shape is known at the point you register it. See
+[`user.raw`](/docs/bricks/auth/#userraw--the-escape-hatch).
+
+### Declared capabilities, when it is not a one-off
+
+`raw` is for reaching past the contract occasionally. When a capability is real but not universal,
+the answer is to **declare** it and check at boot rather than to make everyone reach:
+
+```ts
+if (!ctx.storage.canPresign) throw new ServiceUnavailable('Direct upload is not configured.')
+```
+
+That is D19, and it is why `auth-clerk` can say out loud that it cannot sign anyone out instead of
+offering a `signOut()` that quietly does nothing.
+
 ## Configuration files
 
 `defineConfig` puts the same thing in one declarative file:

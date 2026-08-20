@@ -52,6 +52,17 @@ function resolves(href) {
   return existsSync(`${target}.html`)
 }
 
+/** The HTML file a resolvable href actually reads from, so its anchors can be collected. */
+function pageFile(href) {
+  const target = join(DIST, decodeURIComponent(href))
+  if (existsSync(target) && statSync(target).isDirectory()) {
+    const index = join(target, 'index.html')
+    return existsSync(index) ? index : undefined
+  }
+  if (existsSync(target) && target.endsWith('.html')) return target
+  return existsSync(`${target}.html`) ? `${target}.html` : undefined
+}
+
 /**
  * Refuses to check output older than the sources it was built from.
  *
@@ -88,27 +99,64 @@ if (SOURCES.length > 0) {
 const pages = await htmlFiles(DIST)
 const broken = new Map()
 let checked = 0
+let anchors = 0
+
+/**
+ * Every `id` a page defines, so a link to `#some-heading` can be checked.
+ *
+ * Anchors were out of scope until the docs started linking to specific sections rather than whole
+ * pages. A heading that gets reworded silently breaks every deep link to it and the page still
+ * returns 200 — which is exactly the kind of rot nothing else here would catch.
+ */
+const idsOf = (html) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]))
+
+/** Cached, because many pages link into the same few. */
+const idCache = new Map()
+function idsForPage(href) {
+  if (idCache.has(href)) return idCache.get(href)
+  const file = pageFile(href)
+  const ids = file ? idsOf(readFileSync(file, 'utf8')) : undefined
+  idCache.set(href, ids)
+  return ids
+}
 
 for (const page of pages) {
   const html = readFileSync(page, 'utf8')
-  // Only site-absolute links. External URLs, fragments and mailto: are out of scope — a link
-  // checker that hits the network is a link checker that fails when someone else's site is down.
-  const hrefs = new Set(
+  const label = page.replace(`${DIST}/`, '')
+
+  // Only site-absolute links. External URLs and mailto: are out of scope — a link checker that
+  // hits the network is a link checker that fails when someone else's site is down.
+  const found = new Set(
     [...html.matchAll(/(?:href|src)="(\/[^"]*)"/g)]
-      .map((match) => match[1].split('#')[0].split('?')[0])
+      .map((match) => match[1].split('?')[0])
       .filter(Boolean),
   )
 
-  for (const href of hrefs) {
+  for (const raw of found) {
+    const [href, fragment] = raw.split('#')
+    if (!href) continue
+
     checked++
-    if (resolves(href)) continue
-    const label = page.replace(`${DIST}/`, '')
-    if (!broken.has(href)) broken.set(href, new Set())
-    broken.get(href).add(label)
+    if (!resolves(href)) {
+      if (!broken.has(raw)) broken.set(raw, new Set())
+      broken.get(raw).add(label)
+      continue
+    }
+
+    if (!fragment) continue
+
+    anchors++
+    const ids = idsForPage(href)
+    // A page we cannot read is not an anchor failure — `resolves` already vouched for it.
+    if (ids && !ids.has(fragment)) {
+      const key = `${href}#${fragment}`
+      if (!broken.has(key)) broken.set(key, new Set())
+      broken.get(key).add(`${label} (no such anchor)`)
+    }
   }
 }
 
-console.log(`Checked ${checked} internal links across ${pages.length} pages.`)
+console.log(`Checked ${checked} internal links (${anchors} with anchors) across ${pages.length} pages.`)
 
 if (broken.size === 0) {
   console.log('All internal links resolve.')

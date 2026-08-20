@@ -102,7 +102,57 @@ interface Identity<Raw> {
 
 Only what every provider genuinely has. Roles, organisations and metadata are **not** normalised:
 several providers have no such concept, and a field that is permanently `[]` misleads worse than
-one that is absent. Reach for `ctx.user.raw` when you want provider specifics.
+one that is absent (D17).
+
+### `user.raw` — the escape hatch
+
+Everything the provider returned, untouched. It is where anything not in the four fields above
+lives, and it is what a [policy](#policies) reads.
+
+What it contains depends entirely on which provider is registered:
+
+| Provider | `raw` is | What you would read |
+| --- | --- | --- |
+| [`auth-basic`](/docs/bricks/auth-basic/) | the `auth_users` **row** | any column you added — `role`, `plan`, `emailVerifiedAt` |
+| [`auth-mongo`](/docs/bricks/auth-mongo/) | the user **document** | any field you added to the collection |
+| [`auth-clerk`](/docs/bricks/auth-clerk/) | the **JWT claims** | `org_id`, `org_role`, `publicMetadata` — whatever your token template includes |
+| [`auth-better`](/docs/bricks/auth-better/) | better-auth's user object | anything from its `additionalFields` |
+
+It is typed per adapter, so `user.raw.role` autocompletes on `auth-basic` and is a **compile
+error** on `auth-clerk`, where the equivalent claim is `user.raw.org_role`. That is deliberate: the
+type is telling you the truth about where your data actually is.
+
+<Aside type="caution" title="`raw` is not a response body">
+  On `auth-basic` and `auth-mongo`, `raw` is the **whole stored row** — including
+  `passwordHash`. That is fine for a policy, which runs on the server and returns a boolean. It is
+  not fine to return:
+
+  ```ts
+  export default async ({ user }) => user.raw            // ✗ sends the argon2id hash
+  export default async ({ user }) => ({ id: user.id, email: user.email })   // ✓
+  ```
+
+  A [`response` schema](/docs/reference/validation/#response-validation) would strip it, since
+  0.2.0 — but only on routes that declare one, so this is a habit rather than something to rely on.
+  The built-in `/auth/me` returns `id`, `email` and `name` and nothing else, for this reason.
+</Aside>
+
+### Where should a role live?
+
+`raw` reaches whatever the provider stores. Whether the provider *should* store it is a separate
+question, and the answer splits cleanly:
+
+| | Put it in `raw` | Put it in your own table |
+| --- | --- | --- |
+| Scope | one value per user, app-wide | per resource — this board, that organisation |
+| Example | `role: 'admin'`, `plan: 'pro'` | board membership, team roles, project permissions |
+| Read cost | free — already on `ctx.user` | a query, per request that needs it |
+| Portability | tied to the provider | survives changing provider |
+
+An app-wide `role` column on `auth_users` is reasonable and cheap. A per-board role is not a
+property of the user at all, and putting it on the user is how you end up with a `roles` array
+that has to be rebuilt whenever anything changes. The
+[Trello project](/docs/projects/trello/schema/) works through the second case.
 
 ## Policies
 
@@ -120,8 +170,62 @@ app.get('/users/:userId/billing', { auth: 'owner' }, handler)
 app.delete('/posts/:id', { auth: ['admin', 'owner'] }, handler)   // all must pass
 ```
 
-A policy works on any provider, is unit-testable on its own, is greppable, and can be named in
-the generated OpenAPI document.
+A policy receives the identity and the context, and returns a boolean or a promise of one:
+
+```ts
+type Policy<Raw> = (user: Identity<Raw>, ctx: Context) => boolean | Promise<boolean>
+```
+
+It works on any provider, is greppable, is named in the generated OpenAPI document — and, because
+it is a plain function, is testable without an app:
+
+```ts title="src/policies.test.ts"
+import { expect, test } from 'bun:test'
+import { policies } from './policies'
+
+test('admin is the role, not the email domain', () => {
+  expect(policies.admin({ id: 'u1', raw: { role: 'admin' } } as never, {} as never)).toBe(true)
+  expect(policies.admin({ id: 'u2', raw: { role: 'member' } } as never, {} as never)).toBe(false)
+})
+```
+
+That is the argument for a function over a `role: 'admin'` field on the route. A field would have
+to mean the same thing on every provider, and it does not — so a portable-looking guard would fail
+silently on the one provider that has no roles.
+
+### The cost of reading `raw` in a policy
+
+A policy that reads `user.raw.role` is **tied to the provider that produced it**. Moving from
+`auth-basic` to Clerk means rewriting that policy, because the role genuinely moved from a database
+column to a JWT claim.
+
+That is honest rather than unfortunate — the alternative is a framework that pretends the two are
+the same and breaks quietly when they are not. If you expect to switch, read the provider-specific
+shape in *one* place:
+
+```ts title="src/policies.ts"
+// The only line that knows where a role is stored. Changing provider changes this, not every rule.
+const roleOf = (user) => user.raw.role ?? 'member'
+
+export const policies = {
+  admin: (user) => roleOf(user) === 'admin',
+  editor: (user) => ['admin', 'editor'].includes(roleOf(user)),
+}
+```
+
+### Several policies on one route
+
+```ts
+app.delete('/posts/:id', { auth: ['admin', 'owner'] }, handler)
+```
+
+**All** of them must pass — an array is `and`, not `or`. There is no built-in `or` because the
+combination people reach for is almost always "admin, or the owner", and writing that as one named
+policy makes the rule readable at the route:
+
+```ts
+adminOrOwner: (user, ctx) => roleOf(user) === 'admin' || user.id === ctx.params.userId,
+```
 
 <Aside type="caution" title="An unknown policy name fails closed">
   Referencing a policy that is not registered returns a `500` naming the policies that *are*
