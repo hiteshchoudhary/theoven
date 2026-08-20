@@ -850,7 +850,19 @@ its own nested 0.7.2 and still benchmarks.
 - [ ] Integration test strategy for Postgres/Redis/MinIO — testcontainers or docker-compose in CI?
 - [ ] Temp-file spill threshold for uploads — what default? (16MB?)
 
-## Next phase — proposal 0003 (draft, awaiting decisions)
+## Phase 6 — proposal 0003
+
+- [x] **D39** — Payments: **narrow contract.** Checkout, webhook verification, fetch, refund.
+      Subscriptions stay provider-specific behind capabilities.
+- [x] **`@theoven/webhooks`** — shipped. Stripe, GitHub, Slack, Svix, Razorpay, Shopify.
+- [ ] `@theoven/ratelimit` — Redis and SQL. Pays off the promise in `middleware.ts`.
+- [ ] `@theoven/vector` + sqlite / pg / qdrant / pinecone
+- [ ] `@theoven/ai` — AI SDK as a peer dependency
+- [ ] `@theoven/payments` + stripe / razorpay / paddle
+- [ ] `@theoven/sandbox` + daytona / e2b / docker
+- [ ] `@theoven/inngest`
+
+## Proposal 0003 — decisions (all answered)
 
 [AI, sandboxes, ingest and payments](docs/proposals/0003-ai-sandboxes-ingest-payments.md).
 

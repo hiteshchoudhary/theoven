@@ -1,0 +1,179 @@
+---
+title: webhooks
+description: Inbound webhooks verified before your handler runs — Stripe, GitHub, Slack, Svix, Razorpay and Shopify.
+sidebar:
+  order: 17
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/webhooks` |
+| **Adds to context** | `ctx.webhook` — on verified routes only |
+| **Endpoints** | none — you write the route |
+| **Creates files** | none |
+| **Creates tables** | none |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/webhooks
+```
+
+```ts title="src/routes/webhooks/stripe.post.ts"
+import { env } from '@theoven/core'
+import { stripe, webhook } from '@theoven/webhooks'
+
+export default webhook(stripe({ secret: env.string('STRIPE_WEBHOOK_SECRET') }), async (ctx) => {
+  const event = ctx.webhook.payload as { type: string; id: string }
+  return { received: event.id }
+})
+```
+
+## What it does
+
+Verifies an inbound webhook's signature and refuses the request when it does not check out — so
+the handler runs only for deliveries that genuinely came from the provider.
+
+It is not a brick in the `.use()` sense: there is nothing to register, and `ctx.webhook` exists on
+the routes that ask for it rather than on every request.
+
+<Aside type="caution" title="Why this is a wrapper and not a first line">
+  The obvious version verifies inside the handler:
+
+  ```ts
+  export default async (ctx) => {
+    if (!verify(ctx)) throw new Unauthorized()   // one early return away from not running
+    // …
+  }
+  ```
+
+  That is the same argument as [`auth: true`](/docs/bricks/auth/#guarding-a-route) running before
+  a handler rather than being a check you remember to write. An unverified delivery should be
+  **unreachable**, not merely inconvenient to act on.
+</Aside>
+
+## Endpoints
+
+This package adds none. You write the route; it wraps the handler.
+
+## Providers
+
+| | Header | What is signed | Encoding | Replay-protected |
+| --- | --- | --- | --- | --- |
+| `stripe` | `Stripe-Signature` | `${timestamp}.${body}` | hex | ✓ |
+| `slack` | `X-Slack-Signature` | `v0:${timestamp}:${body}` | hex | ✓ |
+| `svix` | `svix-signature` | `${id}.${timestamp}.${body}` | base64 | ✓ |
+| `github` | `X-Hub-Signature-256` | the body | hex | ✗ |
+| `razorpay` | `X-Razorpay-Signature` | the body | hex | ✗ |
+| `shopify` | `X-Shopify-Hmac-Sha256` | the body | **base64** | ✗ |
+
+`svix` covers **Clerk, Resend, Brex** and everything else built on Svix — same scheme, same
+verifier.
+
+The "what is signed" column is the reason this package exists. Every one of these is HMAC-SHA256
+and every one signs a *different string*; signing the bare body for Slack, or hex instead of base64
+for Shopify, produces a check that is wrong in a way that looks right.
+
+## Configuration
+
+```ts
+stripe({ secret: env.string('STRIPE_WEBHOOK_SECRET'), tolerance: 300 })
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `secret` | — | **required**; the endpoint's signing secret, never an API key |
+| `tolerance` | `300` | seconds a delivery may be old — the providers that support it |
+
+For Svix the secret is the `whsec_…` string as given. The prefix is stripped and the rest is
+**base64-decoded** to make the key — using it as a plain string is the single most common reason a
+hand-rolled Svix check fails, and it fails for every delivery while looking correct.
+
+## Usage
+
+### What the handler gets
+
+```ts
+ctx.webhook.payload    // parsed from the bytes the signature covered
+ctx.webhook.id         // the provider's delivery id, where it sends one
+ctx.webhook.timestamp  // seconds, on the providers that sign one
+ctx.webhook.provider   // 'stripe', 'github', …
+ctx.webhook.raw        // the exact bytes
+```
+
+### Handing off to a queue
+
+A provider retries when your endpoint is slow, so the work belongs somewhere else:
+
+```ts
+export default webhook(stripe({ secret }), async (ctx) => {
+  await ctx.queue.dispatch(handleStripe, ctx.webhook.payload, { key: ctx.webhook.id })
+  return { received: true }
+})
+```
+
+The dedup `key` is doing real work: providers deliver **at least once** by design, and a duplicate
+`charge.succeeded` must not fulfil an order twice. Keying the job on the delivery id makes the
+second one a no-op.
+
+### Noticing when it breaks
+
+```ts
+webhook(stripe({ secret }), handler, {
+  onRejected: (failure, ctx) => ctx.log.warn('webhook rejected', { ...failure }),
+})
+```
+
+A webhook that starts failing is silent: the provider retries, gives up, and nobody finds out until
+something downstream is missing. A rotated secret and a drifted clock both look like this.
+
+## What it creates
+
+Nothing. No files, no tables, no endpoints.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| Signature verification against the raw bytes | ✓ all providers |
+| Constant-time comparison | ✓ — Node's native `timingSafeEqual` |
+| Replay rejection | ✓ Stripe, Slack, Svix · ✗ GitHub, Razorpay, Shopify |
+| Multiple valid signatures during a rotation | ✓ Stripe, Svix |
+| Idempotency | ✗ — yours, via `ctx.webhook.id` |
+| A delivery log | ✗ |
+
+## Limitations
+
+- **Three providers cannot detect a replay.** GitHub, Razorpay and Shopify sign the body and
+  nothing else, so a captured delivery stays valid forever and no implementation can tell. Check
+  `verifier.replayProtected`, and deduplicate on the delivery id where it matters.
+- **No delivery log or automatic idempotency.** The queue's dedup keys are the intended answer.
+- **`payload` is JSON only.** A form-encoded webhook — some Slack endpoints — comes through as
+  `raw`.
+- **No outbound webhooks.** Sending them, with retries and signing, is a different feature.
+- **Six providers.** Anything else means writing a `WebhookVerifier`, which is one function.
+
+## How it is verified
+
+The HMAC is checked against **GitHub's own published example** — secret, payload and expected
+signature taken from their documentation rather than produced by this code. An expected value
+computed by the implementation under test proves only that it agrees with itself.
+
+Beyond that, the tests are mostly attacks: a body altered after signing, a wrong secret, a missing
+header, a signature over the bare body where the provider signs a prefixed string, hex where base64
+is expected, a swapped Svix message id, and a replayed delivery whose timestamp was moved forward
+to escape the window — which must fail, or the window is decoration.
+
+<Aside type="note" title="One property the tests do not cover, and cannot">
+  Every test still passes if the constant-time comparison is replaced with `===`, because the
+  *results* are identical and only the timing differs. Timing is statistical and machine-dependent;
+  a unit test asserting it would be a flake.
+
+  That property is carried by using Node's native `timingSafeEqual` rather than a hand-rolled loop
+  — a JavaScript loop accumulating XOR looks constant-time and is not guaranteed to be one, since
+  the JIT may reorder it. Stated here because a page claiming test coverage it does not have is
+  worse than one that names the gap.
+</Aside>
