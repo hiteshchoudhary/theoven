@@ -41,6 +41,7 @@ validated, guarded, documented, and visible in `oven routes`.
 | `prefix` | prepended to every path, and to every nested router's prefix |
 | `tags` | added to every route's OpenAPI tags |
 | `auth` | the requirement for every route in the group |
+| `deps` | [dependencies](/docs/reference/dependencies/) every route in the group resolves |
 
 Deliberately small. A router says what its routes have in common; anything that varies per route
 belongs on the route, where the reader is already looking.
@@ -74,6 +75,34 @@ admin.get('/audit', { auth: 'owner' }, handler) // auth: 'owner'
   The merge checks whether the route *declared* `auth`, not whether the value is truthy — so an
   explicit `false` is respected rather than swallowed. There is a test named for this, because a
   `||` in the wrong place would guard the route and nothing would look wrong.
+</Aside>
+
+### Dependencies accumulate too
+
+```ts
+const admin = routerFor<typeof app>({ prefix: '/admin', deps: { currentTenant } })
+
+admin.get('/usage', (ctx) => report(ctx.deps.currentTenant))
+admin.get('/billing', { deps: { invoice } }, (ctx) => ({
+  tenant: ctx.deps.currentTenant,   // from the router
+  invoice: ctx.deps.invoice,        // from the route
+}))
+```
+
+Like `tags` and unlike `auth`, these **accumulate** with a route's own — a router dependency and a
+route dependency are both wanted, and replacing one with the other would leave a handler reading
+something nothing resolved. On a name collision the route wins.
+
+This is the equivalent of FastAPI's `APIRouter(dependencies=[...])`, and it is a good way to
+apply one guard to a group: a dependency that throws refuses every route under the router.
+
+<Aside type="note" title="Nesting inherits them at runtime, not in the types">
+  A child router is built before it is nested, so its handler signatures cannot retroactively gain
+  what the parent declares. The dependency still **resolves** — inheritance is real — but
+  `ctx.deps.fromParent` is untyped in the child.
+
+  A child that wants them typed declares them itself; they de-duplicate by name, so nothing
+  resolves twice.
 </Aside>
 
 ## Nesting
@@ -171,9 +200,7 @@ register, and so the merge rules are testable without an app.
 - **No sub-application mounting.** A router is routes, not a second app: it has no bricks, no
   lifecycle and no error handler of its own. Mounting a whole `App` inside another — with the
   questions that raises about whose middleware and whose error handler run — is not supported.
-- **First-party bricks still mount their own routes directly.** `auth`, `mail` and `queue`
-  register endpoints one at a time rather than building a router. Moving them changes a contract
-  that third-party auth adapters implement, so it is a separate change.
+- **A nested router's dependencies are not typed for its own handlers** — see above.
 - **No `ws()` on a router yet.** Register WebSocket routes on the app with
   [`app.ws()`](/docs/reference/realtime/).
 - **No per-router error handling.** `onError` is app-wide.

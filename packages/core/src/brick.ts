@@ -1,6 +1,7 @@
 import type { Context } from './context'
 import type { Logger } from './logger'
 import type { HttpMethod } from './router/types'
+import type { Router } from './routes'
 import type { RouteSchema } from './validation'
 
 /**
@@ -149,11 +150,22 @@ export interface BrickHost {
 }
 
 /** What a brick is handed during `setup()`. */
+/** A router, structurally — avoids a value import of `routes.ts` from the brick contract. */
+export type RouterLike = Pick<Router<never>, 'collect'>
+
 export interface BrickSetupContext {
   /** Values from bricks this one declared a dependency on, keyed by brick name. */
   resolved: Readonly<Record<string, unknown>>
-  /** Register routes the brick owns, such as `/auth/*` or the docs UI. */
+  /** Register one route the brick owns. Prefer `mount` for a group. */
   route(method: string, path: string, handler: (ctx: Context) => unknown): void
+  /**
+   * Register a whole [router](./routes.ts) the brick built.
+   *
+   * Preferred over repeated `route()` calls, because a router carries the metadata a bare
+   * registration cannot: shared tags, so a brick's endpoints group together in the generated
+   * document and in `oven routes`, and a shared guard where the brick wants one.
+   */
+  mount(routes: RouterLike): void
   /** True outside production, so bricks can pick safe-by-default behaviour. */
   development: boolean
   /** The app, for bricks that must inspect it — the OpenAPI generator reads the route table. */

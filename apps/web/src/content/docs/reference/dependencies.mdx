@@ -116,6 +116,20 @@ A teardown that throws on a **successful** request makes that request a `500` �
 not commit means the response about to go out is a lie. On an already-failing request it is logged
 instead, because replacing the original error with a cleanup error loses the thing worth reading.
 
+## For a whole group
+
+A [router](/docs/reference/routers/) can declare dependencies for every route it holds — the
+equivalent of FastAPI's `APIRouter(dependencies=[...])`:
+
+```ts
+const admin = routerFor<typeof app>({ prefix: '/admin', deps: { currentTenant } })
+
+admin.get('/usage', (ctx) => report(ctx.deps.currentTenant))
+```
+
+They accumulate with a route's own rather than replacing them, and a router dependency that
+throws refuses every route under it — which is a compact way to guard a group.
+
 ## Testing
 
 ```ts
@@ -143,8 +157,9 @@ dependency with no sub-dependencies and no teardown.
 
 ## Limitations
 
-- **Routers cannot carry dependencies yet.** `router({ deps })` — FastAPI's
-  `APIRouter(dependencies=[...])` — is not implemented; declare them per route.
+- **A nested router's dependencies are not typed for its own handlers.** They resolve, but a
+  child built before it was nested cannot see what its parent declares. Declare them on the child
+  too if you want the types.
 - **No cycle detection.** A dependency that uses itself recurses until the stack runs out rather
   than failing with a readable message.
 - **Not in the OpenAPI document.** A dependency that acts as a guard does not appear as a security

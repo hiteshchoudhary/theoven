@@ -24,6 +24,9 @@ export interface OpenApiInfo {
   description?: string
 }
 
+/** Reserved prefix for brick-owned development tooling, kept out of the document. */
+const RESERVED = '/_oven'
+
 export interface OpenApiOptions {
   info?: OpenApiInfo
   servers?: Array<{ url: string; description?: string }>
@@ -155,6 +158,11 @@ export function generateOpenApi(
 
   for (const route of routes) {
     if (excluded.has(route.pattern)) continue
+    // `/_oven/*` is the reserved namespace for development tooling — the mail preview inbox, the
+    // queue dashboard. They were appearing in the generated document, which puts a brick's
+    // internal UI into every client generated from it. Nobody asked for a typed client for the
+    // dev inbox.
+    if (route.pattern === RESERVED || route.pattern.startsWith(`${RESERVED}/`)) continue
     // HEAD is served from GET and carries no separate contract; documenting it would double
     // every path for no reader benefit.
     if (route.method === 'HEAD') continue

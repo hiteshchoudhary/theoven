@@ -1,4 +1,4 @@
-import type { Brick, Logger } from '@theoven/core'
+import { type Brick, type Logger, router } from '@theoven/core'
 import { consoleMail } from './drivers'
 import { createInbox, type Inbox, renderInbox, renderMessage } from './preview'
 import {
@@ -160,12 +160,16 @@ export function mail(
               'message bodies, including password-reset links, to anyone who can reach it.',
           )
         }
-        context.route('GET', previewPath, () => html(renderInbox(inbox.all(), previewPath)))
-        context.route('GET', `${previewPath}/:id`, (ctx) => {
+        // A router rather than two loose registrations: the inbox and the message view are one
+        // feature, and they now say so in `oven routes` and in the generated document.
+        const preview = router({ tags: ['mail'] })
+        preview.get(previewPath, () => html(renderInbox(inbox.all(), previewPath)))
+        preview.get(`${previewPath}/:id`, (ctx) => {
           const message = inbox.find(String(ctx.params.id))
           if (!message) return new Response('Not found', { status: 404 })
           return html(renderMessage(message, previewPath))
         })
+        context.mount(preview)
       }
 
       /**

@@ -860,15 +860,18 @@ its own nested 0.7.2 and still benchmarks.
       unfiltered 200 in production. Shipped.
 - [x] **D30 — routers.** Shipped. `router()`, `routerFor<typeof app>()`, `app.use(router)`,
       nesting, scoped middleware, remounting. Sub-app mounting explicitly out of scope.
-      - [ ] Follow-up: migrate first-party bricks (`auth`, `mail`, `queue`, `openapi`) from
-            per-path `context.route` calls onto routers. Deferred because it changes
-            `MountRegistrar`, which third-party auth adapters implement — that deserves its own
-            change rather than riding along with a new feature.
+      - [x] ~~Follow-up: migrate first-party bricks onto routers.~~ **Done, and it needed no
+            contract change** — `MountRegistrar` is untouched. The adapter still registers one
+            path at a time; what changed is that those registrations land in a router the brick
+            mounts via the new `context.mount()`. `auth`, `mail` and `queue` endpoints now carry
+            tags. Found while doing it: the mail inbox and queue dashboard were appearing in the
+            generated OpenAPI document, so `/_oven/*` is now excluded from it.
       - [ ] Follow-up: `router.ws()`. WebSocket routes are app-only today.
 - [x] **D31 — dependencies.** Shipped. `dependency()`, `deps` on a route, `ctx.deps.<name>`,
       sub-dependencies, per-request caching, generator teardown, `app.override()`.
-      - [ ] Follow-up: `router({ deps })`, the equivalent of FastAPI's
-            `APIRouter(dependencies=[...])`. The reason D30 landed first, and still not done.
+      - [x] ~~Follow-up: `router({ deps })`.~~ **Done.** Accumulates with a route's own; the
+            route wins a name collision. Typed for the router's own handlers; a nested child
+            cannot be typed for its parent's, which is documented rather than papered over.
       - [ ] Follow-up: cycle detection. A dependency that uses itself recurses to a stack
             overflow rather than naming the cycle.
       - [ ] Follow-up: resolve independent dependencies concurrently. Sequential today.

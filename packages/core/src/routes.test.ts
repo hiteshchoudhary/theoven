@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { z } from 'zod'
 import { type App, type AppOptions, createApp } from './app'
+import { dependency } from './dependency'
+import { Forbidden } from './errors'
 import { silentLogger } from './logger'
 import { isRouter, router, routerFor } from './routes'
 
@@ -290,5 +292,101 @@ describe('the routes it registers are real routes', () => {
     const app = make().use(api)
 
     expect(app.routeTable().some((entry) => entry.pattern === '/api/x')).toBe(true)
+  })
+})
+
+/**
+ * Router-level dependencies — FastAPI's `APIRouter(dependencies=[...])`.
+ *
+ * Unlike every other default on a router, these **accumulate** with a route's own. A router
+ * dependency and a route dependency are both wanted, and replacing one with the other would mean
+ * a handler reading `ctx.deps.x` that nothing resolved.
+ */
+describe('router dependencies', () => {
+  test('every route in the router resolves them', async () => {
+    const tenant = dependency('tenant', () => 'acme')
+    const admin = router({ prefix: '/admin', deps: { tenant } })
+
+    admin.get('/a', (ctx) => ctx.deps.tenant)
+    admin.get('/b', (ctx) => ctx.deps.tenant)
+
+    const app = make().use(admin)
+
+    expect(await (await send(app, '/admin/a')).text()).toBe('acme')
+    expect(await (await send(app, '/admin/b')).text()).toBe('acme')
+  })
+
+  test('they accumulate with a route’s own rather than replacing them', async () => {
+    const fromRouter = dependency('fromRouter', () => 'R')
+    const fromRoute = dependency('fromRoute', () => 'r')
+
+    const api = router({ deps: { fromRouter } })
+    api.get('/x', { deps: { fromRoute } }, (ctx) => `${ctx.deps.fromRouter}${ctx.deps.fromRoute}`)
+
+    expect(await (await send(make().use(api), '/x')).text()).toBe('Rr')
+  })
+
+  test('a route wins a name collision', async () => {
+    const routerDep = dependency('shared', () => 'router')
+    const routeDep = dependency('shared', () => 'route')
+
+    const api = router({ deps: { shared: routerDep } })
+    api.get('/x', { deps: { shared: routeDep } }, (ctx) => ctx.deps.shared)
+
+    expect(await (await send(make().use(api), '/x')).text()).toBe('route')
+  })
+
+  /**
+   * Inheritance is a runtime property. It cannot be a type one: `users` is built before it is
+   * nested, so its handler signatures cannot retroactively gain what the parent declares. A child
+   * that wants its parent's dependencies typed declares them itself — they de-duplicate by name.
+   */
+  test('nested routers inherit them at runtime, and add their own', async () => {
+    const outer = dependency('outer', () => 'O')
+    const inner = dependency('inner', () => 'I')
+
+    const users = router({ prefix: '/users', deps: { inner } })
+    users.get('/x', (ctx) => {
+      const deps = ctx.deps as { outer: string; inner: string }
+      return `${deps.outer}${deps.inner}`
+    })
+
+    const app = make().use(router({ prefix: '/admin', deps: { outer } }).use(users))
+
+    expect(await (await send(app, '/admin/users/x')).text()).toBe('OI')
+  })
+
+  test('a child that declares the parent’s dependency gets it typed', async () => {
+    const shared = dependency('shared', () => 'S')
+
+    const users = router({ prefix: '/users', deps: { shared } })
+    users.get('/x', (ctx) => ctx.deps.shared)
+    //                        ^ typed, because this router declared it
+
+    const app = make().use(router({ prefix: '/admin', deps: { shared } }).use(users))
+
+    expect(await (await send(app, '/admin/users/x')).text()).toBe('S')
+  })
+
+  test('a router dependency that throws refuses every route under it', async () => {
+    const guard = dependency('guard', () => {
+      throw new Forbidden('no')
+    })
+    const admin = router({ prefix: '/admin', deps: { guard } })
+    admin.get('/a', () => 'a')
+
+    const app = make().use(admin)
+    app.get('/outside', () => 'fine')
+
+    expect((await send(app, '/admin/a')).status).toBe(403)
+    expect((await send(app, '/outside')).status).toBe(200)
+  })
+
+  test('a router without deps leaves a route’s own alone', () => {
+    const only = dependency('only', () => 1)
+    const api = router({ prefix: '/x' })
+    api.get('/y', { deps: { only } }, () => 'y')
+
+    expect(Object.keys(api.collect().routes[0]?.schema?.deps ?? {})).toEqual(['only'])
   })
 })

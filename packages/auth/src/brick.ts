@@ -1,4 +1,11 @@
-import { type Brick, type Context, Forbidden, Unauthorized } from '@theoven/core'
+import {
+  type Brick,
+  type Context,
+  Forbidden,
+  type HttpMethod,
+  router,
+  Unauthorized,
+} from '@theoven/core'
 import type { Identity } from './identity'
 import { type AuthRequirement, type Policies, policyNames, requirementOf } from './policy'
 
@@ -90,7 +97,20 @@ export function auth<Raw>(
               'mount() method.',
           )
         }
-        provider.mount(context.route, prefix)
+        /**
+         * The provider still registers one path at a time — `MountRegistrar` is a public
+         * contract that third-party adapters implement, and changing it to gain a tag would
+         * break every one of them for no benefit they asked for.
+         *
+         * What changed is where those registrations land: a router rather than the app. The
+         * endpoints come out grouped and tagged, so they read as one feature in the generated
+         * document and in `oven routes`, and the adapter is untouched.
+         */
+        const mounted = router({ tags: ['auth'] })
+        provider.mount((method, path, handler) => {
+          mounted.route(method as HttpMethod, path, handler as never)
+        }, prefix)
+        context.mount(mounted)
       }
 
       if (provider.securitySchemes) {

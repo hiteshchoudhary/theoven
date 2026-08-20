@@ -1,4 +1,4 @@
-import type { Brick, Logger } from '@theoven/core'
+import { type Brick, type Logger, router } from '@theoven/core'
 import { type CronSchedule, parseCron } from './cron'
 import { renderDashboard } from './dashboard'
 import type { JobDefinition } from './job'
@@ -177,7 +177,8 @@ export function queue(
       const dashboardPath = resolveDashboard(options.dashboard, context.development)
 
       if (dashboardPath) {
-        context.route('GET', dashboardPath, async () => {
+        const panel = router({ tags: ['queue'] })
+        panel.get(dashboardPath, async () => {
           const [stats, dead] = await Promise.all([service.stats(), service.dead(20)])
           return html(
             renderDashboard({
@@ -189,6 +190,7 @@ export function queue(
             }),
           )
         })
+        context.mount(panel)
       }
 
       // Stopping the worker is what makes shutdown drain rather than abandon.

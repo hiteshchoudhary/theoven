@@ -657,3 +657,41 @@ describe('guarded routes in the document', () => {
     expect(built.description).toContain('admin')
   })
 })
+
+/**
+ * `/_oven/*` is where bricks put their development tooling — the mail preview inbox, the queue
+ * dashboard. They were being documented, which puts a brick's internal UI into every client
+ * generated from the spec.
+ */
+describe('the reserved namespace', () => {
+  test('brick development endpoints are left out of the document', async () => {
+    const app = make()
+    app.get('/_oven/mail', () => 'inbox')
+    app.get('/_oven/mail/:id', () => 'message')
+    app.get('/_oven/queue', () => 'dashboard')
+    app.get('/users', () => [])
+    app.use(openapi({ info: { title: 't', version: '1' } }))
+
+    const document = (await (await send(app, '/openapi.json')).json()) as Loose
+
+    expect(Object.keys(document.paths ?? {})).toEqual(['/users'])
+  })
+
+  test('but they are still served', async () => {
+    const app = make()
+    app.get('/_oven/mail', () => 'inbox')
+    app.use(openapi({ info: { title: 't', version: '1' } }))
+
+    expect((await send(app, '/_oven/mail')).status).toBe(200)
+  })
+
+  test('a path merely starting with the same letters is documented', async () => {
+    const app = make()
+    app.get('/_ovenware', () => 'not reserved')
+    app.use(openapi({ info: { title: 't', version: '1' } }))
+
+    const document = (await (await send(app, '/openapi.json')).json()) as Loose
+
+    expect(Object.keys(document.paths ?? {})).toContain('/_ovenware')
+  })
+})

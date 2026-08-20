@@ -19,7 +19,7 @@ import type { QueryOptions } from './query'
 import { tookControl } from './response'
 import { normalisePath, Router as RadixRouter } from './router/router'
 import { type HttpMethod, isHttpMethod } from './router/types'
-import { isRouter, type Router } from './routes'
+import { isRouter, type MountableRoutes } from './routes'
 import type { TokenOptions } from './token'
 import { pathnameOf } from './url'
 import {
@@ -306,7 +306,7 @@ export class App<Ext = unknown> implements BrickHost {
    * Mounting does not tie the router to this app, so the same router can be mounted twice under
    * different prefixes, and a package can export one.
    */
-  use(routes: Router<Ext>): this
+  use(routes: MountableRoutes): this
   /**
    * Registering a brick widens the context type with everything it contributes.
    *
@@ -335,7 +335,7 @@ export class App<Ext = unknown> implements BrickHost {
   // type is assignable to both `this` and `App<Ext & {...}>`. `any` here is confined to the
   // signature; callers only ever see the typed overloads.
   use(
-    first: Middleware | string | Router<Ext> | Brick<string, unknown, Record<string, unknown>>,
+    first: Middleware | string | MountableRoutes | Brick<string, unknown, Record<string, unknown>>,
     second?: Middleware,
     // biome-ignore lint/suspicious/noExplicitAny: overload implementation signature
   ): any {
@@ -714,6 +714,11 @@ export class App<Ext = unknown> implements BrickHost {
             throw new Error(`Brick "${brick.name}" registered an unsupported method: ${method}`)
           }
           this.route(method, path, handler as Handler<Ext>)
+        },
+        mount: (routes) => {
+          // Routed through `use` so a brick's router gets exactly the same treatment as an
+          // application's: prefixes joined, defaults merged, middleware scoped.
+          this.use(routes as MountableRoutes)
         },
         development: this.settings.development,
         app: this,
