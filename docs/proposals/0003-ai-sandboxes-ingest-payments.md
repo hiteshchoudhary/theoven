@@ -27,7 +27,7 @@ Two proposals below fail test 2 as originally imagined, and say so.
 | --- | --- | --- | --- |
 | **AI** | `@theoven/ai` | ✅ but **not as model adapters** — see below | M |
 | | `@theoven/vector` + 4 adapters | ✅ strongest candidate in the set | M |
-| **Sandboxes** | `@theoven/sandbox` + 3 adapters | ✅ clean contract, highest security risk | L |
+| **Sandboxes** | `@theoven/sandbox` + `daytona`, `e2b`, `docker` | ✅ strong contract, highest security risk | L |
 | **Ingest** | `@theoven/inngest` | ✅ direct integration, no contract yet | L |
 | **Payments** | `@theoven/payments` + 3 adapters | ✅ with a deliberately narrow contract | L |
 | | `@theoven/webhooks` | ✅ small, broadly useful, groundwork already exists | S |
@@ -107,35 +107,73 @@ worse than all four.
 
 ## Sandboxes
 
-Running untrusted code. The natural companion to AI agents, and clean to model:
+Running untrusted code — the code an LLM just wrote, which is the whole reason this brick exists.
+The market moved here recently: Daytona repositioned from dev environments to *"secure
+infrastructure for running AI-generated code"*, and E2B and Modal are aimed at the same job.
+
+### The contract
+
+The intersection across Daytona, E2B, Modal and a local Docker socket is stronger than I expected:
 
 ```ts
-const box = await ctx.sandbox.create({ runtime: 'python', timeout: 30_000 })
-const result = await box.run('print(sum(range(100)))')
-await box.files.write('/data.csv', csv)
+const box = await ctx.sandbox.create({ image: 'python:3.12', timeout: 30_000, network: false })
+
+const result = await box.exec('pip install pandas && python analyse.py')
+//    → { exitCode, stdout, stderr }
+
+await box.files.write('/work/data.csv', csv)
+const out = await box.files.read('/work/report.json')
+
 await box.destroy()
 ```
 
-| Adapter | |
+| On the contract | Daytona | E2B | Modal | Docker (local) |
+| --- | --- | --- | --- | --- |
+| `create` / `destroy` | ✓ | ✓ | ✓ | ✓ |
+| `exec(command)` → exit code, stdout, stderr | ✓ | ✓ | ✓ | ✓ |
+| `files.read/write/list/delete` | ✓ | ✓ | ✓ | ✓ |
+| Timeout and resource limits | ✓ | ✓ | ✓ | ✓ |
+| Network on/off | ✓ | ✓ | ✓ | ✓ |
+
+| Declared capability, not contract | Daytona | E2B | Modal | Docker |
+| --- | --- | --- | --- | --- |
+| `runCode(source, language)` — native | ✓ | ✓ | ✗ (wrap `exec`) | ✗ |
+| Snapshot / resume | ✓ | beta | ✓ | ✗ |
+| Shared volumes | ✓ | ✗ | ✓ | ✓ |
+| Git operations | ✓ | ✗ | ✗ | ✗ |
+| LSP | ✓ | ✗ | ✗ | ✗ |
+
+The second table is the point. Daytona's LSP and git support are real and genuinely useful, and
+putting them on the contract would mean three adapters faking them (D19). They go behind declared
+capabilities, checked at boot, with `raw` for the rest.
+
+### Adapters
+
+| | Why |
 | --- | --- |
-| `sandbox-e2b` | the obvious hosted default |
-| `sandbox-modal` | for teams already there |
-| `sandbox-docker` | local, so it works before you have an account — and refuses to boot in production unless explicitly allowed, exactly as `memoryQueue` does |
+| `sandbox-daytona` | sub-90ms starts, snapshots, and **customer-managed compute** — your cloud, their control plane, which is a meaningfully different security posture |
+| `sandbox-e2b` | the widest-known option; a second hosted API proves the contract is not shaped around one vendor's JSON |
+| `sandbox-docker` | **the important one for D14.** A local Docker socket is structurally nothing like a hosted HTTP API — the same role `db-mongoose` played for the database contract. It also means a sandbox works before you have an account (D21) |
 
-Contract test: E2B's hosted API and a local Docker socket are about as structurally different as
-two implementations get. Passes.
+Modal later, if anyone asks. Three is enough to prove a contract; four is a maintenance surface.
 
-**This is the most dangerous brick in the set**, and the design has to lead with that:
+### The safety model — the part that matters
 
-- **Isolation is a declared capability, not an assumption.** A driver states what it actually
-  isolates — process, container, microVM — and an application can refuse to run on less.
-- **Timeouts and resource limits are required arguments**, not optional ones with generous
-  defaults. A sandbox with no limit is a fork bomb waiting for a prompt injection.
-- **Network access off by default.** An agent that can `curl` your metadata endpoint is an SSRF
-  with extra steps.
-- The local driver must be **hard** to run in production accidentally.
+This is the most dangerous brick in the set, and the design has to lead with that rather than
+mention it in Limitations.
 
----
+| | |
+| --- | --- |
+| **Isolation is declared, never assumed** | a driver states what it actually isolates — process, container, microVM — and an app can require a minimum. "Sandbox" is not a security level |
+| **Limits are required arguments** | `timeout` and memory are not optional with generous defaults. A sandbox with no limit is a fork bomb waiting for a prompt injection |
+| **Network off by default** | an agent that can reach `169.254.169.254` is an SSRF with extra steps. Opt in per sandbox, with an allowlist where the provider supports one |
+| **The local driver is hard to run in production** | refuses to boot outside development unless explicitly allowed, exactly as `memoryQueue` and the disk storage driver do — and for a worse reason, because Docker-on-the-host is a container escape away from your application |
+| **Secrets are never inherited** | the sandbox gets the environment you pass it and nothing else. Inheriting `process.env` hands your database URL to generated code |
+
+**Cost is a safety property here too.** These bill by the second, and an agent in a retry loop
+creating sandboxes is a bill, not just a bug. The brick should carry a per-request and per-user
+ceiling the way the AI brick carries token budgets — and destroy on request end by default, so a
+forgotten `destroy()` cannot leak a running machine.
 
 ## Ingest — it is Inngest
 
@@ -299,5 +337,5 @@ Small, overdue, and it removes a documented claim that is not true.
 | --- | --- |
 | ~~D38~~ | ~~AI: wrap the AI SDK~~ — **answered: yes.** Peer dependency, verified working on Bun. |
 | **D39** | Payments: narrow contract; subscriptions stay provider-specific behind capabilities. |
-| **D40** | Sandbox isolation is a declared capability, and limits are required arguments. |
+| **D40** | Sandboxes: isolation declared not assumed, limits required, network off by default, secrets never inherited, and a per-request cost ceiling with destroy-on-request-end. |
 | ~~D41~~ | ~~Which "ingest"~~ — **answered: Inngest.** Shipped as a direct integration, not a contract, until a second durable executor exists to prove one. |
