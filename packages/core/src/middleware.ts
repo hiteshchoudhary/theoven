@@ -245,7 +245,8 @@ export interface RateLimitOptions {
  *
  * In memory means per process: behind a load balancer each instance counts separately, so the
  * effective limit is `limit × instances`. That is fine for shedding obvious abuse and wrong for
- * anything you must enforce exactly — a Redis-backed limiter arrives with `@theoven/queue`.
+ * anything you must enforce exactly. `@theoven/ratelimit` counts in Redis or Postgres instead,
+ * with the same options plus a store.
  */
 export function rateLimit(options: RateLimitOptions): Middleware {
   const window = options.window ?? 60_000

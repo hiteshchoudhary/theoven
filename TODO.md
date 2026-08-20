@@ -855,7 +855,11 @@ its own nested 0.7.2 and still benchmarks.
 - [x] **D39** — Payments: **narrow contract.** Checkout, webhook verification, fetch, refund.
       Subscriptions stay provider-specific behind capabilities.
 - [x] **`@theoven/webhooks`** — shipped. Stripe, GitHub, Slack, Svix, Razorpay, Shopify.
-- [ ] `@theoven/ratelimit` — Redis and SQL. Pays off the promise in `middleware.ts`.
+- [x] **`@theoven/ratelimit`** — shipped. Redis (one Lua script) and Postgres
+      (`ON CONFLICT … RETURNING`), sliding window, fail-open by default.
+      - [ ] **Found, not fixed:** core's in-process `rateLimit` drops the `RateLimit-*` headers on
+            its own `429` — same bug, since `ctx.set` does not survive a thrown error. Left alone
+            because existing bricks are out of scope for this phase; one line when wanted.
 - [ ] `@theoven/vector` + sqlite / pg / qdrant / pinecone
 - [ ] `@theoven/ai` — AI SDK as a peer dependency
 - [ ] `@theoven/payments` + stripe / razorpay / paddle

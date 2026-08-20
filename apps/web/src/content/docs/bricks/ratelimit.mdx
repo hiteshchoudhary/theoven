@@ -1,0 +1,178 @@
+---
+title: ratelimit
+description: Rate limiting that counts across every instance, in Redis or Postgres, with a sliding window.
+sidebar:
+  order: 18
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+| | |
+| --- | --- |
+| **Package** | `@theoven/ratelimit` |
+| **Adds to context** | nothing — it is middleware |
+| **Endpoints** | none |
+| **Creates files** | none |
+| **Creates tables** | `oven_ratelimit`, with the SQL store only |
+| **Status** | shipped |
+
+## Install
+
+```bash
+bun add @theoven/ratelimit
+```
+
+```ts title="src/app.ts"
+import { env } from '@theoven/core'
+import { rateLimit, redisStore } from '@theoven/ratelimit'
+
+app.use(
+  rateLimit({
+    limit: 100,
+    window: 60_000,
+    store: redisStore({ url: env.string('REDIS_URL') }),
+    key: (ctx) => ctx.token ?? ctx.ip,
+  }),
+)
+```
+
+## What it does
+
+Counts requests in one shared place, so the limit you configured is the limit you get.
+
+[Core's `rateLimit`](/docs/reference/middleware/#rate-limiting) counts in one process. Behind a load
+balancer that means the effective limit is `limit × instances` — three instances and a limit of 100
+admits 300 requests. This is the same middleware with the counting moved somewhere every instance
+can see.
+
+The options are identical apart from `store`, so moving between them is one line.
+
+## Endpoints
+
+This package adds none.
+
+## Configuration
+
+| Option | Default | |
+| --- | --- | --- |
+| `limit` | — | **required**; requests allowed per window |
+| `window` | `60000` | window length in ms |
+| `store` | — | **required**; where counting happens |
+| `key` | client IP | `(ctx) => string \| undefined` — key on a user or API key instead |
+| `skip` | — | `(ctx) => boolean`, to exempt internal traffic |
+| `onStoreError` | `'allow'` | what to do when the store is unreachable |
+
+Keying on `ctx.token ?? ctx.ip` is usually right: signed-in users get their own budget rather than
+sharing one with everyone behind the same NAT.
+
+<Aside type="note" title="An undefined key is not limited">
+  Returning `undefined` from `key` skips the check. There is no way to attribute the request, and
+  counting everyone under one bucket would rate-limit the whole world together — worse than not
+  limiting at all.
+</Aside>
+
+## Stores
+
+| | Counting | Atomic by |
+| --- | --- | --- |
+| `redisStore` | one Lua script, one round trip | the script running as a unit |
+| `sqlStore` | Postgres | `INSERT … ON CONFLICT DO UPDATE … RETURNING` |
+| `memoryStore` | this process | nothing shared — development only |
+
+### Atomicity is the entire contract
+
+`RateLimitStore` has **one method** — `hit()`, which counts and returns the total — and that is
+deliberate. A store offering `get` and `set` separately cannot be used correctly:
+
+```ts
+const current = await store.get(key)   // both instances read 99
+await store.set(key, current + 1)      // both write 100
+```
+
+A limit of 100 has admitted 101 requests, and it only happens under the load the limit exists for.
+So the contract is "count this and tell me the total", and every store owes that atomically.
+
+There is a test for it: twenty concurrent hits must produce the counts 1 through 20, with none
+repeated. A naive read-then-write store returns `1` twenty times.
+
+## Sliding window, not fixed
+
+A fixed window lets someone spend the whole allowance in the last second of one window and again in
+the first second of the next — **2× the limit across every boundary**, which is exactly when a
+scraper is hammering you.
+
+Each check weights the previous window by how much of it still overlaps the trailing window and adds
+the current one.
+
+<Aside type="caution" title="It is an approximation, deliberately">
+  The weighting assumes the previous window's requests were spread evenly through it. They may not
+  have been, so a count can be slightly high or low near a boundary.
+
+  The exact alternative is a sorted set of every request timestamp — accurate, and it stores a
+  member per request per key, which on a busy endpoint is a great deal of memory for a limiter. The
+  approximation is within a few percent and costs two integers.
+</Aside>
+
+## What it creates
+
+**Redis:** keys under the configured `prefix` (default `oven:ratelimit`), expiring on their own.
+
+**Postgres:** one table, `oven_ratelimit`, created at boot if absent.
+
+<Aside type="caution" title="The SQL store does not clean up after itself">
+  Redis keys expire. Rows do not — they stop being *counted*, but they stay, so a busy endpoint
+  grows a row per key per window forever. `pruneRateLimits(client)` deletes the settled ones; run it
+  from a [cron job](/docs/bricks/queue/#cron).
+</Aside>
+
+## When the store is unreachable
+
+```ts
+rateLimit({ limit: 100, store, onStoreError: 'deny' })
+```
+
+**Fails open by default.** A Redis outage should not take the application down with it — the
+limiter is a protection, not a dependency.
+
+That is a real choice rather than an obvious one. On an endpoint that exists to stop abuse —
+a login, a password reset, an expensive AI call — failing open means the abuse succeeds for the
+duration of the outage. Use `'deny'` there. Either way the failure is logged, because a limiter
+that silently stopped limiting is worse than one that is down.
+
+## Capabilities
+
+| | |
+| --- | --- |
+| Shared counting across instances | ✓ Redis, SQL |
+| Atomic increment | ✓ all stores |
+| Sliding window | ✓ all stores |
+| `RateLimit-*` headers, including on a `429` | ✓ |
+| Per-route limits | ✓ via `app.use('/path', …)` |
+| Distributed token bucket / GCRA | ✗ |
+| Automatic cleanup of SQL rows | ✗ — `pruneRateLimits` from cron |
+
+## Limitations
+
+- **One window, one limit per middleware.** Tiered limits — 10/second *and* 1000/hour — mean
+  registering it twice.
+- **No token-bucket burst allowance.** A sliding window smooths bursts rather than budgeting them.
+- **The SQL store costs two queries** per request: the atomic increment, then the previous window.
+  Redis does both in one script.
+- **`memoryStore` counts per process**, which is the problem this package exists for. It is for
+  development parity only.
+- **Clock skew between instances** shifts window boundaries slightly. Harmless at a 60s window;
+  worth knowing at 1s.
+
+## How it is verified
+
+Both stores run the **same conformance suite** — the shape [`describeAuthStore`](/docs/bricks/auth/)
+established, because two implementations answering to one suite is what makes a contract a contract
+rather than a description of whichever was written first.
+
+The suite's most important test is concurrency: twenty simultaneous hits must yield twenty distinct
+counts. Redis is tested against a **real server** when `REDIS_TEST_URL` is set, and skips with a
+printed notice otherwise.
+
+One bug the tests caught while being written: the `RateLimit-*` headers were set with `ctx.set`,
+which a thrown error discards — so a `429` carried `Retry-After` and none of the others, dropping
+them at the exact moment a client needs them. They go on the error now.

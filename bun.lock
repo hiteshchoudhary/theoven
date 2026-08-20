@@ -218,6 +218,16 @@
         "@theoven/core": "workspace:^",
       },
     },
+    "packages/ratelimit": {
+      "name": "@theoven/ratelimit",
+      "version": "0.5.2",
+      "devDependencies": {
+        "@theoven/core": "workspace:^",
+      },
+      "peerDependencies": {
+        "@theoven/core": "workspace:^",
+      },
+    },
     "packages/storage": {
       "name": "@theoven/storage",
       "version": "0.5.2",
@@ -695,6 +705,8 @@
     "@theoven/mail": ["@theoven/mail@workspace:packages/mail"],
 
     "@theoven/queue": ["@theoven/queue@workspace:packages/queue"],
+
+    "@theoven/ratelimit": ["@theoven/ratelimit@workspace:packages/ratelimit"],
 
     "@theoven/storage": ["@theoven/storage@workspace:packages/storage"],
 

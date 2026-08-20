@@ -271,7 +271,8 @@ Sets `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`; a rejection
 <Aside type="caution" title="In memory means per process">
   Behind a load balancer each instance counts separately, so the effective limit is
   `limit × instances`. Fine for shedding obvious abuse, wrong for anything you must enforce
-  exactly. A Redis-backed limiter arrives with `@theoven/queue`.
+  exactly. [`@theoven/ratelimit`](/docs/bricks/ratelimit/) counts in Redis or Postgres instead —
+  the same options plus a `store`.
 </Aside>
 
 ### Request logging

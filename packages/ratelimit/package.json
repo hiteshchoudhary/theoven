@@ -1,0 +1,50 @@
+{
+  "name": "@theoven/ratelimit",
+  "version": "0.5.2",
+  "description": "Rate limiting for Oven that counts across every instance \u2014 Redis or Postgres",
+  "keywords": [
+    "bun",
+    "oven",
+    "brick",
+    "rate-limit",
+    "redis",
+    "postgres",
+    "throttle"
+  ],
+  "homepage": "https://theoven.app/docs/bricks/ratelimit/",
+  "bugs": {
+    "url": "https://github.com/hiteshchoudhary/theoven/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hiteshchoudhary/theoven.git",
+    "directory": "packages/ratelimit"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/*": "./src/*.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@theoven/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@theoven/core": "workspace:^"
+  }
+}
