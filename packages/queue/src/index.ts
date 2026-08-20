@@ -1,6 +1,6 @@
 export { type CronEntry, type QueueOptions, type QueueService, queue } from './brick'
-export { CronError, type CronSchedule, parseCron } from './cron'
-export { type DashboardData, renderDashboard } from './dashboard'
+export { CronError, type CronSchedule } from './cron'
+export type { DashboardData } from './dashboard'
 export { defineJob, type JobContext, type JobDefinition } from './job'
 export { memoryQueue } from './memory'
 export { type RedisQueueOptions, redisQueue } from './redis'

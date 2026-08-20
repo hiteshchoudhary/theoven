@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { z } from 'zod'
-import { createApp, formatEvent, silentLogger, sse, Unauthorized } from './index'
+import { createApp, silentLogger, sse, Unauthorized } from './index'
+// From its own module: `formatEvent` is the wire-format helper, not public API.
+import { formatEvent } from './sse'
 
 const opened: Array<{ close(options?: { timeout?: number }): Promise<void> }> = []
 afterEach(async () => {

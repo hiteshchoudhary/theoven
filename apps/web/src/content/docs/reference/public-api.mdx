@@ -1,0 +1,173 @@
+---
+title: The public API
+description: What each package exports, what is deliberately not exported, and why the difference matters to you.
+sidebar:
+  order: 14
+---
+
+import { Aside } from '@astrojs/starlight/components'
+
+Everything a package exports is something it promises to keep working. So the surface is kept to
+what someone outside the framework has a reason to call — and until 0.5.1, it was not.
+
+## What happened in 0.5.1
+
+Fifty-six exports were removed. Not deprecated, removed: `parseBody`, `scanRoutes`, `toResponse`,
+`parseCron`, `renderInbox`, `captureToken` and about fifty others.
+
+They were never features. They are the framework's own moving parts, exported at some point so a
+test could reach them, and left exported afterwards. The tests do not even need it — every one of
+them imports from the module directly (`from './body'`), not from the package index. The exports
+were doing nothing except sitting in the public surface.
+
+**Why that is worth a breaking change rather than leaving them alone:**
+
+| | |
+| --- | --- |
+| Everything exported is a promise | 149 exports meant 149 things that could not change without a major version — for functions nobody was supposed to call |
+| Autocomplete is documentation | Typing `import { ` and seeing `redactToken`, `middlewarePrefix` and `assertSendable` teaches nothing except that the list is untrustworthy |
+| A large surface hides the small one | The eight things you actually need were buried among sixty you did not |
+
+If you imported one of them, you were reaching into the framework's internals — which is
+occasionally the right call, and is now something you do deliberately by importing from the file
+rather than accidentally because it appeared in autocomplete.
+
+<Aside type="note" title="How this was decided, not guessed">
+  A script compared every export against three things: whether any other package imports it,
+  whether it appears in generated code, and whether any page or README mentions it. Only exports
+  failing all three were considered — and then each was kept or dropped on whether a sentence
+  could be written explaining who would call it. Four survived that on the "generated code" test
+  alone; see below.
+</Aside>
+
+## The parts you would not guess are public
+
+Everything below stayed, because each has a caller outside the framework. Most were undocumented
+before 0.5.1, which is what made the sweep necessary in the first place.
+
+### Written into your project by `oven build`
+
+```ts
+import { readRouteModule, setRouteManifest } from '@theoven/core'
+```
+
+You will never type these. `oven build` writes them into `.oven/routes.ts` and the bundled entry,
+so they are part of the contract between the CLI and core — and removing them would break every
+built application rather than only code that imported them.
+
+`generateManifest` and `generateOpenApi` are the other half: the CLI calls them to produce that
+manifest and to answer `oven openapi`.
+
+### Tokens, outside the endpoints
+
+```ts
+import { signAccessToken, verifyAccessToken } from '@theoven/auth'
+
+// A token for a test, without going through /auth/login.
+const token = signAccessToken({ sub: user.id }, secret, 900)
+
+// Verifying one somewhere the auth brick is not registered — a worker, a second service.
+const claims = verifyAccessToken(token, secret)   // null when expired, tampered, or foreign
+```
+
+`verifyAccessToken` returns `null` rather than throwing, for the same reason `verifyPassword`
+returns `false`: a bad token is a normal event on a public endpoint, not an exception.
+
+### Does this user have a password?
+
+```ts
+import { isUnusablePassword } from '@theoven/auth'
+
+// Someone who signed up with Google has no password, so a settings page should offer
+// "set a password" rather than "change password".
+const canChange = !isUnusablePassword(user.raw.passwordHash)
+```
+
+This is why [social sign-in](/docs/bricks/auth/#social-sign-in) needed no breaking migration: a
+provider-created user gets a sentinel no password can match, rather than a null column.
+
+### Building on the flows
+
+```ts
+import { passwordAuthProvider, supportsAccounts } from '@theoven/auth'
+import { drizzleStore } from '@theoven/auth-basic'
+import { authModels, mongooseStore } from '@theoven/auth-mongo'
+```
+
+`basicAuth` and `mongoAuth` are thin wrappers over `passwordAuthProvider` plus a store. Call them
+directly when you want the combination they do not offer — a Drizzle store with a different
+provider name, or a Mongo store with your own connection handling:
+
+```ts
+passwordAuthProvider({
+  name: 'staff',
+  secret,
+  store: drizzleStore(db, { accounts: true }),
+})
+```
+
+`supportsAccounts(store)` reports whether a store can hold linked accounts — the check the brick
+itself runs at boot before allowing social sign-in.
+
+`authModels(connection)` gives you the compiled Mongoose models, for querying the auth collections
+alongside your own.
+
+### Your own OAuth endpoints
+
+```ts
+import { completeOAuth, startOAuth } from '@theoven/auth'
+```
+
+The two halves of the [social sign-in flow](/docs/bricks/auth/#social-sign-in), for an application
+that wants the redirect and callback somewhere other than `/auth/oauth/:provider`. Both take the
+same config the mounted endpoints use, so the `state`, PKCE and linking rules are identical.
+
+### Writing a driver
+
+```ts
+import { providerFor, rememberProvider } from '@theoven/db'
+import { assertSafeKey } from '@theoven/storage'
+```
+
+For people writing a database provider or a storage driver rather than using one.
+`rememberProvider` is how [`transaction()`](/docs/bricks/db/#transactions) finds the right
+implementation for a client it was handed; `assertSafeKey` is the path-traversal guard every
+storage driver must apply, exported so a third-party driver applies the *same* one rather than its
+own idea of what is safe.
+
+<Aside type="caution" title="`assertSafeKey` is not optional for a driver">
+  A storage key comes from a request. `../../etc/passwd` is a key. Every first-party driver calls
+  this before touching a path, and a driver that does not is a directory traversal in something
+  someone will deploy.
+</Aside>
+
+### Detecting an upgrade
+
+```ts
+import { isUpgrade } from '@theoven/core'
+
+// A middleware that should not run for WebSocket handshakes — a body-logging one, say.
+app.use(async (ctx, next) => {
+  if (isUpgrade(ctx.req)) return next()
+  return logBody(ctx, next)
+})
+```
+
+## Reaching an internal anyway
+
+Nothing stops you. Import it from the file:
+
+```ts
+import { parseCron } from '@theoven/queue/src/cron'
+```
+
+It works, and it is honest — the import says plainly that you have reached past the contract, so
+the next person can see it and a version bump can break it without anyone claiming surprise. The
+[`raw` escape hatches](/docs/reference/bricks/#raw--the-escape-hatch) exist for the same reason and
+carry the same warning.
+
+## The rule going forward
+
+An export needs a caller outside the framework, and a sentence explaining who. If neither exists,
+it stays internal — and `bun run check:docs` now covers every README, so an export that is
+documented cannot quietly stop being true.

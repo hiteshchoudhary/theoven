@@ -1,6 +1,6 @@
 {
   "name": "@theoven/db-drizzle",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Drizzle ORM for Oven — SQLite via bun:sqlite, Postgres, MySQL",
   "keywords": [
     "bun",

@@ -1,7 +1,7 @@
 export { type StorageOptions, storage } from './brick'
 export { type DiskOptions, diskStorage } from './disk'
 export { type S3Options, s3Storage } from './s3'
-export { createService, type StorageService } from './service'
+export type { StorageService } from './service'
 export {
   assertSafeKey,
   type DirectUpload,

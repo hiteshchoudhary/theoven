@@ -4,6 +4,42 @@ Every package is versioned together. Pre-1.0, minor versions may break.
 
 ---
 
+## 0.5.1
+
+### Breaking — 56 internal exports removed
+
+`parseBody`, `scanRoutes`, `toResponse`, `parseCron`, `renderInbox`, `captureToken` and about
+fifty others are no longer exported from their package indexes.
+
+They were never features — they are the framework's own moving parts, exported at some point so a
+test could reach them and left exported afterwards. The tests did not need it either: every one
+imports from the module directly, so these were pure public surface. Everything exported is a
+promise not to change it, and 149 promises for a framework with about 90 real API entry points is
+a tax on every future release.
+
+**If you imported one**, you were reaching into internals. That still works — import from the file
+instead:
+
+```ts
+import { parseCron } from '@theoven/queue/src/cron'
+```
+
+Which is more honest: the import says plainly that you reached past the contract.
+
+Four exports that *looked* internal were kept, because `oven build` writes `readRouteModule` and
+`setRouteManifest` into your project's generated files — removing them would have broken every
+built application rather than only code that imported them.
+
+### The remaining surface is documented
+
+[The public API](https://theoven.app/docs/reference/public-api/) is a new page: what each package
+exports, what is deliberately internal, and — for the nineteen exports that had a real caller but
+no documentation — who calls them and why. `signAccessToken` for a token outside the endpoints,
+`isUnusablePassword` for a settings page that should say "set a password" rather than "change
+password", `assertSafeKey` for anyone writing a storage driver.
+
+---
+
 ## 0.5.0
 
 ### Sign in with Google and GitHub

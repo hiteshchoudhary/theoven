@@ -9,13 +9,9 @@ export {
 export {
   type AccessTokenClaims,
   AuthCryptoError,
-  fakeVerify,
   hashPassword,
-  hashToken,
   isUnusablePassword,
-  randomToken,
   signAccessToken,
-  timingSafeEqual,
   UNUSABLE_PASSWORD,
   verifyAccessToken,
   verifyPassword,
@@ -30,7 +26,6 @@ export {
   resetPassword,
   signup,
   type TokenPair,
-  toIdentity,
 } from './flows'
 export type { Identity, Session } from './identity'
 export {
@@ -54,12 +49,10 @@ export {
   type PasswordAuthService,
   passwordAuthProvider,
 } from './password-provider'
-export {
-  type AuthRequirement,
-  type Policies,
-  type Policy,
-  policyNames,
-  requirementOf,
+export type {
+  AuthRequirement,
+  Policies,
+  Policy,
 } from './policy'
 export {
   type AccountCapableStore,
